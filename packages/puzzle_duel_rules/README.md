@@ -1,10 +1,10 @@
 # puzzle_duel_rules
 
-Pure Dart game-state and input-validation package for Puzzle Duel.
+Pure Dart rules package for Puzzle Duel.
 
-Location: `packages/puzzle_duel_rules`. It is the first rules module named by [ADR-001](../../docs/adr/ADR-001-client-stack.md). It does not place a piece, match, clear, shift, score, or generate a board. It does not import Flutter, Flame, or `dart:ui`.
+Location: `packages/puzzle_duel_rules`. Named by [ADR-001](../../docs/adr/ADR-001-client-stack.md). It does not import Flutter, Flame, or `dart:ui`.
 
-Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17).
+Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18).
 
 ## Public API
 
@@ -18,8 +18,20 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17).
 | `BoardGeometry`, `parseBoard` | Phase-fixture board: ruleset, size, blocked cells, cells, and optional `wave`. A match-phase run is not rejected. |
 | `Move`, `parseMove` | `offerIndex` 0, 1, or 2, and a well-formed tap. Parsing a move does not play it. |
 | `ValidationFailure` | Deterministic structural codes. It does not carry the rejected document. |
+| `applyPlacement` | Placement phase. Returns `PlacementApplied`, `PlacementRejected`, or `PlacementUnsafe`. |
+| `PlacementApplied` | Landing, placed piece, post-placement cells, absolute turns, unchanged score, offer-consumption intent. Not a finished move. |
+| `GameplayRejection` | `blocked_tap`, `occupied_tap`, `game_ended`. |
+| `OfferWillReplace` / `OfferReplacementDeferred` | Post-resolution offer handoff. Terminal null is not written here. |
+
+Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md).
 
 `core-001.v1` and `core-001.v2` are the only rulesets. Lists returned by a state are unmodifiable copies.
+
+## Placement
+
+A legal placement lands one cell forward when that cell is in bounds, empty, and not blocked. Otherwise it lands on the tap. Exactly one turn is consumed. Score is unchanged. Status is not re-evaluated for board fill.
+
+Match, clear, shift, cascade, scoring, and final end evaluation are **NOT_RUN**.
 
 ## Validation
 
@@ -45,16 +57,7 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17).
 | Run of 3 already present on a full-move start | `unresolved_initial_match` | `parseInitialGameState` only |
 | Offer index outside 0, 1, 2 | `illegal_offer_index` | Move |
 
-`blocked_tap`, `occupied_tap`, and `game_ended` are not produced. Out-of-bounds and malformed tap precedence is not decided here. A tap such as `[99, 4]` is a valid move model.
-
-A v2 null slot is accepted only when `status` is `ended`, `turnsUsed >= moveLimit`, `futurePieces` is empty, and the tray has exactly one null. That is the visible form of the documented final-turn empty-stream slot. This package does not prove which move wrote the null.
-
-## What this package does not decide
-
-- An `in_progress` state may have an empty `futurePieces` list. The reference checkers reject that only while applying a move. Move execution is not implemented.
-- An ended board with turns still remaining, an empty future stream, and three pieces can match the status rule. That is not approval of the early board-full transition. A null synthesized for that case is rejected. The early-board fixture is parsed and left without a null slot.
-- No replacement piece is generated. No v1 state gains a null offer.
-- A green test run is not golden gameplay parity. Placement and resolution are not implemented.
+Out-of-bounds taps return `PlacementUnsafe.tapOutOfBounds` before any gameplay rejection, including when the game has already ended. That is a safety stop for an unspecified case, not a new transport-level precedence decision. In-bounds ended taps still return `game_ended`.
 
 ## Commands
 
@@ -67,23 +70,10 @@ dart analyze
 dart test
 ```
 
-The local machine's Flutter 3.47.8 / Dart 3.13.7 is not the SDK used for those commands. The verification SDK is a disposable Dart 3.14.0 install outside this repository.
-
 ## Flutter 3.50 gate
 
-Evidence is in [`docs/engine/PZD-17-STATE.md`](../../docs/engine/PZD-17-STATE.md). Short form:
-
-| Check | Command | Exit | Errors | Warnings | Infos | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| Positive `GameWidget` / `ColorEffect` | `flutter analyze lib/gate.dart` | 1 | 0 | 0 | 1 | not PASS |
-| Positive with non-fatal infos | `flutter analyze --no-fatal-infos lib/gate.dart` | 0 | 0 | 0 | 1 | PASS |
-| Negative `material_ui` vs legacy public types | `flutter analyze lib/boundary_public.dart` | 1 | 3 | 0 | 1 | expected FAIL |
-| `material_ui` `Color` into `ColorEffect` | `flutter analyze lib/boundary.dart` | 0 | 0 | 0 | 0 | PASS |
-
-`ColorScheme`, `TextTheme`, and `FloatingActionButtonLocation` across `material_ui` and legacy Material remain FAIL for any first-party signature that needs that assignment. No Flutter application or Flame dependency was added to this repository.
+Evidence remains in [`docs/engine/PZD-17-STATE.md`](../../docs/engine/PZD-17-STATE.md). This package still has no Flutter or Flame dependency.
 
 ## CI
 
-`.github/workflows/dart-rules.yml` runs the commands above on Ubuntu when this package or that workflow changes. It requests `contents: read`, uses no secrets, and does not use a macOS runner. It is path-filtered, so it must not be a required status until it runs on every pull request.
-
-The fixture workflow and the pull-request quality gate are unchanged in purpose. The quality gate's text scan includes `.dart` so this package is not skipped. The backend repository was not modified, so its copy of that scanner does not yet list `.dart`.
+`.github/workflows/dart-rules.yml` runs the package commands on Ubuntu when this package or that workflow changes. It is path-filtered and must not be a required status until it runs on every pull request.

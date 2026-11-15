@@ -2,8 +2,8 @@ part of '../puzzle_duel_rules.dart';
 
 /// Structural validation codes.
 ///
-/// These are not gameplay rejections. `blocked_tap`, `occupied_tap`, and
-/// `game_ended` are intentionally absent.
+/// These are not gameplay rejections. See [GameplayRejection] for
+/// `blocked_tap`, `occupied_tap`, and `game_ended`.
 enum ValidationCode {
   missingField('missing_field'),
   unexpectedProperty('unexpected_property'),
