@@ -27,6 +27,12 @@ class CheckerAbort(RuntimeError):
         self.board = board
 
 
+class CascadeCorrupt(RuntimeError):
+    def __init__(self, applied):
+        super().__init__("checker abort: cascade wave did not remove three pieces")
+        self.applied = applied
+
+
 def fail(message: str) -> None:
     FAILURES.append(message)
 
@@ -180,11 +186,31 @@ def reject_code(state, tap):
     return None
 
 
+def count_occupied(board):
+    return sum(cell is not None for row in board for cell in row)
+
+
+def removable(board, cleared):
+    seen = set()
+    unique = []
+    size = len(board)
+    for row, col in cleared:
+        key = (row, col)
+        if key in seen:
+            continue
+        seen.add(key)
+        if 0 <= row < size and 0 <= col < size and board[row][col] is not None:
+            unique.append(key)
+    return unique
+
+
 def collect_waves(cells, blocked, find, ceiling=CHECKER_WAVE_ABORT):
     """Apply clears until `find` is empty. Do not apply a wave past `ceiling`.
 
     A cascade that finishes on wave `ceiling` is returned. A match that would
-    start another wave raises CheckerAbort. `ceiling` is not a game rule.
+    start another wave raises CheckerAbort. `ceiling` is a review hang-guard,
+    not a gameplay wave cap. A proposed clear that does not remove at least
+    three occupied cells raises CascadeCorrupt and is not recorded.
     """
     board = cells
     waves = []
@@ -192,9 +218,15 @@ def collect_waves(cells, blocked, find, ceiling=CHECKER_WAVE_ABORT):
         cleared = find(board)
         if not cleared:
             break
-        for row, col in cleared:
+        before = count_occupied(board)
+        targets = removable(board, cleared)
+        if len(targets) < 3:
+            raise CascadeCorrupt(len(waves))
+        for row, col in targets:
             board[row][col] = None
         board, moved = shift(board, blocked)
+        if count_occupied(board) != before - len(targets):
+            raise CascadeCorrupt(len(waves))
         wave_no = len(waves) + 1
         waves.append({
             "wave": wave_no,
@@ -330,6 +362,50 @@ def contract_literals(by_id):
     if replay["steps"][1]["waves"][0]["wave"] != 1:
         fail("second move did not start again at wave 1")
 
+    reopen = by_id["cascade_reopen_end"]["scenarios"][0]["expected"]["steps"][0]
+    if reopen["scoreDelta"] != 300 or reopen["finalState"]["status"] != "in_progress":
+        fail("PD-09 reopen with turns remaining did not continue")
+    if reopen["finalState"]["turnsUsed"] >= reopen["finalState"]["moveLimit"]:
+        fail("PD-09 reopen case exhausted the move limit")
+    limited = by_id["cascade_reopen_end"]["scenarios"][1]["expected"]["steps"]
+    if limited[0]["scoreDelta"] != 300 or limited[0]["finalState"]["status"] != "ended":
+        fail("PD-09 move-limit cascade did not end after resolution")
+    if limited[0]["waves"][0]["cleared"] != [[2, 0], [2, 1], [2, 2]]:
+        fail("PD-09 move-limit cascade clear set drifted")
+    for step in limited[1:]:
+        if step["error"]["code"] != "game_ended" or step["state"] != limited[0]["finalState"]:
+            fail("PD-10 ended tap changed state or used a cell error")
+
+
+def check_initial_boards(docs):
+    for doc in docs:
+        if doc["kind"] != "fullMove":
+            continue
+        for scenario in doc["scenarios"]:
+            if matches(scenario["given"]["state"]["cells"]):
+                fail(f"{doc['id']}/{scenario['name']}: initial board already matches")
+    phase = next(doc for doc in docs if doc["id"] == "cross_union")
+    if not matches(phase["scenarios"][0]["given"]["cells"]):
+        fail("match-phase fixture lost its intentional match")
+    probe = json.loads((ROOT / "invalid" / "unresolved-initial-match.json").read_text(encoding="utf-8"))
+    cells = probe["fixture"]["scenarios"][0]["given"]["state"]["cells"]
+    if not matches(cells):
+        fail("PD-08 negative probe does not contain a starting match")
+
+
+def check_empty_stream(by_id):
+    state = clone(by_id["place_right_free"]["scenarios"][0]["given"]["state"])
+    state["futurePieces"] = []
+    original = clone(state)
+    try:
+        apply_move(state, {"offerIndex": 0, "tap": [2, 2]})
+        fail("empty futurePieces invented a replacement")
+    except RuntimeError as error:
+        if "empty piece stream" not in str(error):
+            fail(f"empty stream raised the wrong error: {error}")
+    if state != original:
+        fail("empty stream mutated the caller state")
+
 
 def blank_board():
     return [[None for _ in range(5)] for _ in range(5)]
@@ -365,20 +441,65 @@ def occupied(board):
     return found
 
 
+def piece_field(count, size=8):
+    board = [[None for _ in range(size)] for _ in range(size)]
+    placed = 0
+    for row in range(size):
+        for col in range(size):
+            if placed >= count:
+                return board
+            board[row][col] = {"shape": "circle", "direction": "up"}
+            placed += 1
+    return board
+
+
+def progress_find(limit):
+    calls = {"n": 0}
+
+    def find(board):
+        calls["n"] += 1
+        if calls["n"] > limit:
+            return []
+        found = []
+        for row, cells in enumerate(board):
+            for col, cell in enumerate(cells):
+                if cell is not None:
+                    found.append([row, col])
+                    if len(found) == 3:
+                        return found
+        return found
+
+    return find
+
+
 def check_boundaries(by_id):
-    """Hang-guard only. Does not add a product wave cap or a golden 20-wave board."""
-    waves, _board = collect_waves(blank_board(), [], scripted_find(CHECKER_WAVE_ABORT), CHECKER_WAVE_ABORT)
-    if len(waves) != CHECKER_WAVE_ABORT or waves[-1]["wave"] != CHECKER_WAVE_ABORT:
+    """Hang-guard and corrupt-cascade checks. Neither is a product wave cap."""
+    waves, board = collect_waves(piece_field(60), [], progress_find(CHECKER_WAVE_ABORT), CHECKER_WAVE_ABORT)
+    if len(waves) != CHECKER_WAVE_ABORT or waves[-1]["wave"] != CHECKER_WAVE_ABORT or count_occupied(board) != 0:
         fail("exact 20-wave cascade was rejected or truncated")
+    if len(waves) > 60 // 3:
+        fail("progressing cascade exceeded the piece-removal bound")
     try:
-        collect_waves(blank_board(), [], scripted_find(CHECKER_WAVE_ABORT + 1), CHECKER_WAVE_ABORT)
+        collect_waves(piece_field(63), [], progress_find(CHECKER_WAVE_ABORT + 1), CHECKER_WAVE_ABORT)
         fail("cascade still matching at the review boundary was accepted")
     except CheckerAbort as error:
-        if error.applied != CHECKER_WAVE_ABORT:
+        if error.applied != CHECKER_WAVE_ABORT or count_occupied(error.board) != 3:
             fail(f"continuing cascade applied {error.applied} waves")
-    waves, _board = collect_waves(blank_board(), [], scripted_find(2), CHECKER_WAVE_ABORT)
+    waves, _board = collect_waves(piece_field(6), [], progress_find(2), CHECKER_WAVE_ABORT)
     if len(waves) != 2:
         fail("normal short cascade was not accepted")
+    try:
+        collect_waves(blank_board(), [], scripted_find(5), CHECKER_WAVE_ABORT)
+        fail("non-progressing cascade was accepted")
+    except CascadeCorrupt as error:
+        if error.applied != 0:
+            fail(f"non-progressing cascade recorded {error.applied} waves")
+    try:
+        collect_waves(piece_field(3), [], scripted_find(5), CHECKER_WAVE_ABORT)
+        fail("cascade that stops removing pieces was accepted")
+    except CascadeCorrupt as error:
+        if error.applied != 1:
+            fail(f"stalled cascade recorded {error.applied} waves")
 
     state = placed_cascade(by_id["two_wave_cascade"])
     waves, board = collect_waves(state["cells"], state["blocked"], matches, 2)
@@ -399,19 +520,24 @@ def check_boundaries(by_id):
             fail(f"wave beyond the ceiling was applied or the shift differed: {occupied(error.board)}")
 
     state = placed_cascade(by_id["two_wave_cascade"])
+    bound = count_occupied(state["cells"]) // 3
     waves, board = collect_waves(state["cells"], state["blocked"], matches)
     if len(waves) != 2 or sum(wave["scoreDelta"] for wave in waves) != 900 or occupied(board):
         fail("normal two-wave cascade failed under the default review ceiling")
+    if len(waves) > bound:
+        fail("normal cascade exceeded the piece-removal bound")
 
 
 def main():
     docs = []
     for path in sorted(FIXTURES.glob("*.json")):
         docs.append(json.loads(path.read_text(encoding="utf-8")))
-    if len(docs) != 12:
+    if len(docs) != 13:
         fail(f"expected 12 fixtures, found {len(docs)}")
     by_id = {doc["id"]: doc for doc in docs}
     check_boundaries(by_id)
+    check_initial_boards(docs)
+    check_empty_stream(by_id)
     contract_literals(by_id)
     for doc in docs:
         check_fixture(doc)
@@ -421,7 +547,7 @@ def main():
             print(f"- {message}")
         return 1
     print("reference_check: PASS cascade boundary")
-    print("reference_check: PASS 12 golden fixtures")
+    print("reference_check: PASS 13 golden fixtures")
     print("reference_check: hand arithmetic 3*100*1+3*100*2=900 and 5*100*1=500")
     print("reference_check: NOT_RUN Dart engine, TypeScript product engine, client copy")
     return 0

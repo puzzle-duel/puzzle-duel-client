@@ -1,0 +1,1255 @@
+{
+  "id": "cascade_reopen_end",
+  "number": 13,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-INVALID-MOVE",
+    "PZD-11-MATCH",
+    "PZD-11-SCORE",
+    "PZD-11-END"
+  ],
+  "summary": "A last empty cell can reopen after a clear, and a last turn still ends after that clear.",
+  "scenarios": [
+    {
+      "name": "reopen_with_turns_remaining",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              3
+            ],
+            [
+              0,
+              4
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              4,
+              1
+            ],
+            [
+              4,
+              2
+            ],
+            [
+              4,
+              3
+            ],
+            [
+              4,
+              4
+            ]
+          ],
+          "cells": [
+            [
+              {
+                "shape": "diamond",
+                "direction": "up"
+              },
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              {
+                "shape": "circle",
+                "direction": "right"
+              },
+              {
+                "shape": "circle",
+                "direction": "right"
+              },
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {
+              "shape": "circle",
+              "direction": "right"
+            },
+            {
+              "shape": "diamond",
+              "direction": "down"
+            },
+            {
+              "shape": "triangle",
+              "direction": "left"
+            }
+          ],
+          "futurePieces": [
+            {
+              "shape": "circle",
+              "direction": "left"
+            },
+            {
+              "shape": "diamond",
+              "direction": "up"
+            }
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [
+              2,
+              2
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [
+              2,
+              2
+            ],
+            "turnsUsed": 1,
+            "scoreDelta": 300,
+            "waves": [
+              {
+                "wave": 1,
+                "cleared": [
+                  [
+                    2,
+                    0
+                  ],
+                  [
+                    2,
+                    1
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "scoreDelta": 300,
+                "moved": []
+              }
+            ],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ],
+                [
+                  0,
+                  3
+                ],
+                [
+                  0,
+                  4
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ],
+                [
+                  1,
+                  3
+                ],
+                [
+                  1,
+                  4
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  4
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  3,
+                  1
+                ],
+                [
+                  3,
+                  2
+                ],
+                [
+                  3,
+                  3
+                ],
+                [
+                  3,
+                  4
+                ],
+                [
+                  4,
+                  0
+                ],
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ],
+                [
+                  4,
+                  3
+                ],
+                [
+                  4,
+                  4
+                ]
+              ],
+              "cells": [
+                [
+                  {
+                    "shape": "diamond",
+                    "direction": "up"
+                  },
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {
+                  "shape": "circle",
+                  "direction": "left"
+                },
+                {
+                  "shape": "diamond",
+                  "direction": "down"
+                },
+                {
+                  "shape": "triangle",
+                  "direction": "left"
+                }
+              ],
+              "futurePieces": [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                }
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "Only [2,2] is an empty non-blocked cell. [0,0] holds diamond-up and does not form a run. Circle-right tapped at [2,2] cannot enter blocked [2,3], so it lands on [2,2]. That completes circles at [2,0], [2,1], and [2,2]. Wave 1 clears those three cells for 3*100*1=300. Diamond-up at [0,0] faces out of bounds, so moved is empty. After resolution the three cleared cells are empty and turnsUsed is 1, below moveLimit 5, so status stays in_progress. No score is awarded before this move."
+    },
+    {
+      "name": "move_limit_then_ended_taps",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 1,
+          "blocked": [
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              3
+            ],
+            [
+              0,
+              4
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              4,
+              1
+            ],
+            [
+              4,
+              2
+            ],
+            [
+              4,
+              3
+            ],
+            [
+              4,
+              4
+            ]
+          ],
+          "cells": [
+            [
+              {
+                "shape": "diamond",
+                "direction": "up"
+              },
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              {
+                "shape": "circle",
+                "direction": "right"
+              },
+              {
+                "shape": "circle",
+                "direction": "right"
+              },
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {
+              "shape": "circle",
+              "direction": "right"
+            },
+            {
+              "shape": "diamond",
+              "direction": "down"
+            },
+            {
+              "shape": "triangle",
+              "direction": "left"
+            }
+          ],
+          "futurePieces": [
+            {
+              "shape": "circle",
+              "direction": "left"
+            },
+            {
+              "shape": "diamond",
+              "direction": "up"
+            }
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [
+              2,
+              2
+            ]
+          },
+          {
+            "offerIndex": 0,
+            "tap": [
+              2,
+              0
+            ]
+          },
+          {
+            "offerIndex": 0,
+            "tap": [
+              0,
+              1
+            ]
+          },
+          {
+            "offerIndex": 0,
+            "tap": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [
+              2,
+              2
+            ],
+            "turnsUsed": 1,
+            "scoreDelta": 300,
+            "waves": [
+              {
+                "wave": 1,
+                "cleared": [
+                  [
+                    2,
+                    0
+                  ],
+                  [
+                    2,
+                    1
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "scoreDelta": 300,
+                "moved": []
+              }
+            ],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 1,
+              "blocked": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ],
+                [
+                  0,
+                  3
+                ],
+                [
+                  0,
+                  4
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ],
+                [
+                  1,
+                  3
+                ],
+                [
+                  1,
+                  4
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  4
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  3,
+                  1
+                ],
+                [
+                  3,
+                  2
+                ],
+                [
+                  3,
+                  3
+                ],
+                [
+                  3,
+                  4
+                ],
+                [
+                  4,
+                  0
+                ],
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ],
+                [
+                  4,
+                  3
+                ],
+                [
+                  4,
+                  4
+                ]
+              ],
+              "cells": [
+                [
+                  {
+                    "shape": "diamond",
+                    "direction": "up"
+                  },
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {
+                  "shape": "circle",
+                  "direction": "left"
+                },
+                {
+                  "shape": "diamond",
+                  "direction": "down"
+                },
+                {
+                  "shape": "triangle",
+                  "direction": "left"
+                }
+              ],
+              "futurePieces": [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                }
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "ended"
+            }
+          },
+          {
+            "legal": false,
+            "error": {
+              "code": "game_ended"
+            },
+            "state": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 1,
+              "blocked": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ],
+                [
+                  0,
+                  3
+                ],
+                [
+                  0,
+                  4
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ],
+                [
+                  1,
+                  3
+                ],
+                [
+                  1,
+                  4
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  4
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  3,
+                  1
+                ],
+                [
+                  3,
+                  2
+                ],
+                [
+                  3,
+                  3
+                ],
+                [
+                  3,
+                  4
+                ],
+                [
+                  4,
+                  0
+                ],
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ],
+                [
+                  4,
+                  3
+                ],
+                [
+                  4,
+                  4
+                ]
+              ],
+              "cells": [
+                [
+                  {
+                    "shape": "diamond",
+                    "direction": "up"
+                  },
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {
+                  "shape": "circle",
+                  "direction": "left"
+                },
+                {
+                  "shape": "diamond",
+                  "direction": "down"
+                },
+                {
+                  "shape": "triangle",
+                  "direction": "left"
+                }
+              ],
+              "futurePieces": [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                }
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "ended"
+            }
+          },
+          {
+            "legal": false,
+            "error": {
+              "code": "game_ended"
+            },
+            "state": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 1,
+              "blocked": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ],
+                [
+                  0,
+                  3
+                ],
+                [
+                  0,
+                  4
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ],
+                [
+                  1,
+                  3
+                ],
+                [
+                  1,
+                  4
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  4
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  3,
+                  1
+                ],
+                [
+                  3,
+                  2
+                ],
+                [
+                  3,
+                  3
+                ],
+                [
+                  3,
+                  4
+                ],
+                [
+                  4,
+                  0
+                ],
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ],
+                [
+                  4,
+                  3
+                ],
+                [
+                  4,
+                  4
+                ]
+              ],
+              "cells": [
+                [
+                  {
+                    "shape": "diamond",
+                    "direction": "up"
+                  },
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {
+                  "shape": "circle",
+                  "direction": "left"
+                },
+                {
+                  "shape": "diamond",
+                  "direction": "down"
+                },
+                {
+                  "shape": "triangle",
+                  "direction": "left"
+                }
+              ],
+              "futurePieces": [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                }
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "ended"
+            }
+          },
+          {
+            "legal": false,
+            "error": {
+              "code": "game_ended"
+            },
+            "state": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 1,
+              "blocked": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ],
+                [
+                  0,
+                  3
+                ],
+                [
+                  0,
+                  4
+                ],
+                [
+                  1,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ],
+                [
+                  1,
+                  3
+                ],
+                [
+                  1,
+                  4
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  4
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  3,
+                  1
+                ],
+                [
+                  3,
+                  2
+                ],
+                [
+                  3,
+                  3
+                ],
+                [
+                  3,
+                  4
+                ],
+                [
+                  4,
+                  0
+                ],
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ],
+                [
+                  4,
+                  3
+                ],
+                [
+                  4,
+                  4
+                ]
+              ],
+              "cells": [
+                [
+                  {
+                    "shape": "diamond",
+                    "direction": "up"
+                  },
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {
+                  "shape": "circle",
+                  "direction": "left"
+                },
+                {
+                  "shape": "diamond",
+                  "direction": "down"
+                },
+                {
+                  "shape": "triangle",
+                  "direction": "left"
+                }
+              ],
+              "futurePieces": [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                }
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "ended"
+            }
+          }
+        ]
+      },
+      "derivation": "The same placement is the only permitted turn because moveLimit is 1. Resolution still clears [2,0], [2,1], and [2,2] for 300 before end is evaluated. The cleared cells are empty again, but turnsUsed equals the move limit, so status becomes ended. The following in-bounds taps are an empty cell [2,0], a blocked cell [0,1], and the occupied cell [0,0]. Each returns game_ended and leaves the board, score, turns, and offers unchanged. Out-of-bounds precedence is not pinned."
+    }
+  ]
+}
