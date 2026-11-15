@@ -21,7 +21,7 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 | ID | Decision | Proposed default for owner consideration (not approved) | Alternatives/risks | Required downstream |
 | --- | --- | --- | --- | --- |
 | PD-01 | Ranked official attempt lifecycle | Account-bound attempt is atomically claimed on challenge start, server-issued attempt token and expiry, completed replay uses single-use idempotent finalize; guest practice never becomes official retroactively | Claim on submission can allow multiple trials before official; offline official claim needs fraud model | PZD-28/29; ADR |
-| PD-02 | Daily challenge date cutoff | Single global UTC 00:00 challenge boundary; client displays local time; both platforms share exact ID | Istanbul midnight yields different worldwide day; region-specific challenges complicate global ranking | PZD-28/31; ADR |
+| PD-02 | Daily challenge date cutoff | **APPROVED by owner: UTC 00:00 global cutoff.** One shared challenge date/ID worldwide; clients show the reset moment in the player's local timezone. Türkiye display: 03:00 (UTC+03:00). | Region-local midnight and per-user midnight NOT selected. | PZD-28/31; relevant ADR to be reconciled |
 | PD-03 | All-time leaderboard metric | Separate version-compatible points/normalized rating specification required; **defer all-time ranking unless fairness formula explicitly chosen** | Raw sum rewards number of days/attempts; lifetime raw scores across different configs unfair | PZD-30; feature F04 |
 | PD-04 | Guest → account linking conflicts | Keep local guest practice & best score; server account is source of truth for ranked attempts; never auto-merge identity by email | Retrospective ranked promotion risks double-counting and fraud; conflict ownership UX | PZD-26/27; ADR |
 | PD-05 | Ad session reset and consent | Session/counter definitions, persistence across app restarts, offline completed games, consent/child audience and cooldown explicitly specified before shipping; ads feature-flagged off until approved | Too-frequent ads; platform store/review policy | PZD-32/33; ADR |
@@ -66,3 +66,7 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 - [ ] Blueprint changes signed off and versioned in both PRs
 - [ ] Exact cross-repo blueprint parity verified after approved changes
 - [ ] Owner approval for merge and Done
+
+## Owner decision log
+
+- **2026-11-15 — PD-02 APPROVED:** The daily challenge switches at **00:00 UTC**, globally at the same instant. This approval applies to PD-02 only. A global challenge-day ID should derive from the UTC date; clients may display the reset in local time. Implementation and affected ADR/feature specs remain subject to later review. All other PD-01 and PD-03...PD-13 remain pending.
