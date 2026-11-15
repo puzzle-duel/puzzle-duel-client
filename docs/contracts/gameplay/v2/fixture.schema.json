@@ -10,7 +10,7 @@
   "$defs": {
     "rulesVersion": {
       "const": "core-001.v2",
-      "description": "core-001.v2 adds the approved terminal offer: a length-3 tray whose spent slot is null only after the resolved move has ended the game. core-001.v1 remains the historical ruleset. Status names and typed error strings are still suite vocabulary."
+      "description": "core-001.v2 adds the approved terminal offer: a length-3 tray whose spent slot is null only when the resolved move reaches the move limit and the replacement stream is empty. An early full board with an empty stream is not this case. core-001.v1 remains the historical ruleset. Status names and typed error strings are still suite vocabulary."
     },
     "ruleId": {
       "enum": [
@@ -87,17 +87,45 @@
           "minItems": 3,
           "maxItems": 3,
           "items": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/piece" }] },
-          "description": "Length 3. While status is in_progress every slot is a piece. Null is only the spent slot on an ended state when no replacement remained."
+          "description": "Length 3. While status is in_progress every slot is a piece. An ended tray has at most one null, and that null is the single spent slot. Two or three nulls are invalid."
         },
         "futurePieces": {
           "type": "array",
           "items": { "$ref": "#/$defs/piece" },
-          "description": "Ordered replacement stream. On a resolved move that ends the game, an empty stream writes null into the consumed slot and does not invent a piece. An empty stream that would leave status in_progress is rejected."
+          "description": "Ordered replacement stream. JSON null replaces the consumed offer only when the resolved move reaches moveLimit and this stream is empty. An empty stream that would leave status in_progress is rejected. An empty stream when the board fills before the move limit has no specified tray and is rejected."
         },
         "turnsUsed": { "type": "integer", "minimum": 0 },
         "score": { "type": "integer", "minimum": 0 },
         "status": { "$ref": "#/$defs/status" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "in_progress" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "offers": { "items": { "$ref": "#/$defs/piece" } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "ended" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "offers": {
+                "contains": { "type": "null" },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "move": {
       "type": "object",

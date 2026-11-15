@@ -239,8 +239,24 @@ def collect_waves(cells, blocked, find, ceiling=CHECKER_WAVE_ABORT):
 
 
 
+def offer_issues(state):
+    offers = state.get("offers")
+    if not isinstance(offers, list) or len(offers) != 3:
+        return ["malformed_offers"]
+    nulls = sum(slot is None for slot in offers)
+    issues = []
+    if state.get("status") == "in_progress" and nulls:
+        issues.append("null_offer_while_active")
+    if nulls > 1:
+        issues.append("multiple_null_offers")
+    return issues
+
+
 def apply_move(state, move):
-    if state["status"] == "in_progress" and any(slot is None for slot in state["offers"]):
+    tray = offer_issues(state)
+    if "multiple_null_offers" in tray:
+        raise RuntimeError("checker abort: multiple null offers")
+    if "null_offer_while_active" in tray:
         raise RuntimeError("checker abort: null offer in an active tray")
     code = reject_code(state, move["tap"])
     if code is not None:
@@ -253,15 +269,20 @@ def apply_move(state, move):
     score_delta = sum(wave["scoreDelta"] for wave in waves)
     nxt["turnsUsed"] += 1
     nxt["score"] += score_delta
-    ended = nxt["turnsUsed"] >= nxt["moveLimit"] or empty_legal(nxt) == 0
-    # Score and cascade are already resolved. Only an ended state may spend a slot as null.
+    # Null is approved only for the move-budget final move. An early full board
+    # with an empty stream has no chosen tray, so it is not written as null.
+    budget_exhausted = nxt["turnsUsed"] >= nxt["moveLimit"]
+    board_full = empty_legal(nxt) == 0
     if not nxt["futurePieces"]:
-        if not ended:
+        if budget_exhausted:
+            nxt["offers"][move["offerIndex"]] = None
+        elif board_full:
+            raise RuntimeError("checker abort: empty piece stream on early board end is not specified")
+        else:
             raise RuntimeError("checker abort: empty piece stream before the game has ended")
-        nxt["offers"][move["offerIndex"]] = None
     else:
         nxt["offers"][move["offerIndex"]] = nxt["futurePieces"].pop(0)
-    nxt["status"] = "ended" if ended else "in_progress"
+    nxt["status"] = "ended" if budget_exhausted or board_full else "in_progress"
     if nxt["status"] == "in_progress" and any(slot is None for slot in nxt["offers"]):
         raise RuntimeError("checker abort: null offer in an active tray")
     return {
@@ -325,7 +346,7 @@ def check_early_stream(doc):
 def check_active_null():
     probe = json.loads((ROOT / "invalid" / "null-offer-while-active.json").read_text(encoding="utf-8"))
     state = probe["fixture"]["scenarios"][0]["given"]["state"]
-    if probe["expectCode"] != "null_offer_while_active" or state["status"] != "in_progress" or None not in state["offers"]:
+    if probe["expectCode"] != "null_offer_while_active" or offer_issues(state) != ["null_offer_while_active"]:
         fail("active-null probe is not an in-progress null slot")
     original = clone(state)
     try:
@@ -338,6 +359,62 @@ def check_active_null():
         fail("active null mutated the caller state")
 
 
+def check_early_board_end():
+    probe = json.loads((ROOT / "invalid" / "early-board-end-empty-stream.json").read_text(encoding="utf-8"))
+    state = probe["state"]
+    if state["futurePieces"] or state["turnsUsed"] >= state["moveLimit"] or empty_legal(state) != 1:
+        fail("early-board probe is not one empty cell before the move limit")
+    original = clone(state)
+    try:
+        apply_move(state, probe["move"])
+        fail("early board end with an empty stream produced a tray")
+    except RuntimeError as error:
+        if "early board end is not specified" not in str(error):
+            fail(f"early board end raised the wrong error: {error}")
+    if state != original:
+        fail("early board end mutated the caller state")
+
+
+def check_offer_counts():
+    probe = json.loads((ROOT / "invalid" / "terminal-offer-counts.json").read_text(encoding="utf-8"))
+    seen = {case["name"] for case in probe["cases"]}
+    if seen != {"two_nulls", "three_nulls", "null_while_active", "one_spent_slot"}:
+        fail(f"offer-count cases drifted: {sorted(seen)}")
+    for case in probe["cases"]:
+        state = case["state"]
+        if offer_issues(state) != case["expectCodes"]:
+            fail(f"{case['name']}: offer issues {offer_issues(state)} != {case['expectCodes']}")
+        original = clone(state)
+        if case["name"] == "one_spent_slot":
+            result = apply_move(state, {"offerIndex": 1, "tap": [0, 0]})
+            if result["error"]["code"] != "game_ended" or result["state"] != original:
+                fail("one spent slot did not return game_ended unchanged")
+            continue
+        try:
+            apply_move(state, {"offerIndex": 0, "tap": [0, 0]})
+            fail(f"{case['name']} was playable")
+        except RuntimeError as error:
+            text = str(error)
+            if case["name"] == "null_while_active" and "null offer" not in text:
+                fail(f"{case['name']} raised the wrong error: {error}")
+            if case["name"] in {"two_nulls", "three_nulls"} and "multiple null offers" not in text:
+                fail(f"{case['name']} raised the wrong error: {error}")
+        if state != original:
+            fail(f"{case['name']} mutated the caller state")
+
+
+def check_schema_null_limit():
+    schema = json.loads((ROOT / "fixture.schema.json").read_text(encoding="utf-8"))
+    rules = schema["$defs"]["state"]["allOf"]
+    ended = next(rule for rule in rules if rule["if"]["properties"]["status"]["const"] == "ended")
+    offers = ended["then"]["properties"]["offers"]
+    if offers.get("minContains") != 0 or offers.get("maxContains") != 1:
+        fail("schema does not limit an ended tray to at most one null")
+    active = next(rule for rule in rules if rule["if"]["properties"]["status"]["const"] == "in_progress")
+    if active["then"]["properties"]["offers"]["items"].get("$ref") != "#/$defs/piece":
+        fail("schema still allows null in an active tray")
+
+
 def main():
     docs = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(FIXTURES.glob("*.json"))]
     if len(docs) != 1 or docs[0]["id"] != "terminal_null_slot":
@@ -347,6 +424,9 @@ def main():
         check_terminal(docs[0])
         check_early_stream(docs[0])
     check_active_null()
+    check_early_board_end()
+    check_offer_counts()
+    check_schema_null_limit()
     if FAILURES:
         print("reference_check: FAIL")
         for message in FAILURES:
@@ -354,7 +434,9 @@ def main():
         return 1
     print("reference_check: PASS core-001.v2 terminal null slot")
     print("reference_check: PASS early empty stream does not create an active null tray")
+    print("reference_check: PASS early board end with an empty stream is not a null slot")
     print("reference_check: PASS active null offer is rejected")
+    print("reference_check: PASS ended tray allows one null and rejects more")
     print("reference_check: NOT_RUN product engines")
     return 0
 

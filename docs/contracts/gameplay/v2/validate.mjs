@@ -167,13 +167,14 @@ function scanState(state, issues) {
   scanCells(state.boardSize, state.cells, issues);
   scanBlocked(state.boardSize, state.blocked, state.cells, issues);
   if (!Array.isArray(state.offers) || state.offers.length !== 3) issues.push("malformed_offers");
-  else state.offers.forEach((piece) => {
-    if (piece === null) {
-      if (state.status === "in_progress") issues.push("null_offer_while_active");
-      return;
+  else {
+    state.offers.forEach((piece) => {
+      if (piece !== null) scanPiece(piece, issues);
+    });
+    for (const issue of offerIssues(state)) {
+      if (!issues.includes(issue)) issues.push(issue);
     }
-    scanPiece(piece, issues);
-  });
+  }
   if (!Array.isArray(state.futurePieces)) issues.push("malformed_offers");
   else state.futurePieces.forEach((piece) => scanPiece(piece, issues));
   const turnsOk = Number.isInteger(state.moveLimit) && Number.isInteger(state.turnsUsed)
@@ -357,10 +358,19 @@ function collectWaves(cells, blocked, find, ceiling = CHECKER_WAVE_ABORT) {
   return { waves, cells: board };
 }
 
+function offerIssues(state) {
+  if (!Array.isArray(state.offers) || state.offers.length !== 3) return ["malformed_offers"];
+  const nulls = state.offers.filter((piece) => piece === null).length;
+  const issues = [];
+  if (state.status === "in_progress" && nulls > 0) issues.push("null_offer_while_active");
+  if (nulls > 1) issues.push("multiple_null_offers");
+  return issues;
+}
+
 function applyMove(state, move) {
-  if (state.status === "in_progress" && state.offers.some((piece) => piece === null)) {
-    throw new Error("checker abort: null offer in an active tray");
-  }
+  const tray = offerIssues(state);
+  if (tray.includes("multiple_null_offers")) throw new Error("checker abort: multiple null offers");
+  if (tray.includes("null_offer_while_active")) throw new Error("checker abort: null offer in an active tray");
   if (state.status !== "in_progress") {
     return { legal: false, error: { code: "game_ended" }, state: clone(state) };
   }
@@ -381,15 +391,17 @@ function applyMove(state, move) {
   const scoreDelta = waves.reduce((sum, wave) => sum + wave.scoreDelta, 0);
   next.turnsUsed += 1;
   next.score += scoreDelta;
-  const ended = next.turnsUsed >= next.moveLimit || emptyLegal(next) === 0;
+  const budgetExhausted = next.turnsUsed >= next.moveLimit;
+  const boardFull = emptyLegal(next) === 0;
   if (next.futurePieces.length === 0) {
-    if (!ended) throw new Error("checker abort: empty piece stream before the game has ended");
-    next.offers[move.offerIndex] = null;
+    if (budgetExhausted) next.offers[move.offerIndex] = null;
+    else if (boardFull) throw new Error("checker abort: empty piece stream on early board end is not specified");
+    else throw new Error("checker abort: empty piece stream before the game has ended");
   } else {
     const [taken] = next.futurePieces.splice(0, 1);
     next.offers[move.offerIndex] = taken;
   }
-  next.status = ended ? "ended" : "in_progress";
+  next.status = budgetExhausted || boardFull ? "ended" : "in_progress";
   if (next.status === "in_progress" && next.offers.some((piece) => piece === null)) {
     throw new Error("checker abort: null offer in an active tray");
   }
@@ -828,10 +840,53 @@ function main() {
     if (!String(error.message).includes("null offer")) fail(`active null raised the wrong error: ${error.message}`);
   }
   if (diff(probe.fixture.scenarios[0].given.state, untouched)) fail("active null mutated the caller state");
+  const earlyBoard = load(path.join(ROOT, "invalid", "early-board-end-empty-stream.json"));
+  if (earlyBoard.state.futurePieces.length !== 0 || earlyBoard.state.turnsUsed >= earlyBoard.state.moveLimit || emptyLegal(earlyBoard.state) !== 1) {
+    fail("early-board probe is not one empty cell before the move limit");
+  }
+  const earlyOriginal = clone(earlyBoard.state);
+  try {
+    applyMove(earlyBoard.state, earlyBoard.move);
+    fail("early board end with an empty stream produced a tray");
+  } catch (error) {
+    if (!String(error.message).includes("early board end is not specified")) {
+      fail(`early board end raised the wrong error: ${error.message}`);
+    }
+  }
+  if (diff(earlyBoard.state, earlyOriginal)) fail("early board end mutated the caller state");
+  const counts = load(path.join(ROOT, "invalid", "terminal-offer-counts.json"));
+  const names = counts.cases.map((item) => item.name).sort();
+  if (diff(names, ["null_while_active", "one_spent_slot", "three_nulls", "two_nulls"])) fail("offer-count cases drifted");
+  for (const item of counts.cases) {
+    if (diff(offerIssues(item.state), item.expectCodes)) fail(`${item.name}: offer issues drifted`);
+    const before = clone(item.state);
+    if (item.name === "one_spent_slot") {
+      const result = applyMove(item.state, { offerIndex: 1, tap: [0, 0] });
+      if (result.error.code !== "game_ended" || diff(result.state, before)) fail("one spent slot did not return game_ended unchanged");
+      continue;
+    }
+    try {
+      applyMove(item.state, { offerIndex: 0, tap: [0, 0] });
+      fail(`${item.name} was playable`);
+    } catch (error) {
+      const text = String(error.message);
+      if (item.name === "null_while_active" && !text.includes("null offer")) fail(`${item.name} raised the wrong error: ${text}`);
+      if ((item.name === "two_nulls" || item.name === "three_nulls") && !text.includes("multiple null offers")) {
+        fail(`${item.name} raised the wrong error: ${text}`);
+      }
+    }
+    if (diff(item.state, before)) fail(`${item.name} mutated the caller state`);
+  }
   const schema = load(path.join(ROOT, "fixture.schema.json"));
   if (schema.$defs.rulesVersion.const !== RV) fail("schema rulesVersion");
   if (schema.$defs.state.properties.offers.items.oneOf?.[0]?.type !== "null") fail("schema offers do not allow a terminal null");
   if (!schema.$defs.errorCode.description.includes("blocked")) fail("schema errorCode description is stale");
+  const endedRule = schema.$defs.state.allOf.find((rule) => rule.if.properties.status.const === "ended");
+  const activeRule = schema.$defs.state.allOf.find((rule) => rule.if.properties.status.const === "in_progress");
+  if (endedRule.then.properties.offers.minContains !== 0 || endedRule.then.properties.offers.maxContains !== 1) {
+    fail("schema does not limit an ended tray to at most one null");
+  }
+  if (activeRule.then.properties.offers.items.$ref !== "#/$defs/piece") fail("schema still allows null in an active tray");
   checkChecksums();
   if (errors.length) {
     console.log("validate: FAIL");
@@ -840,7 +895,9 @@ function main() {
   }
   console.log("validate: PASS core-001.v2 terminal null slot");
   console.log("validate: PASS early empty stream does not create an active null tray");
+  console.log("validate: PASS early board end with an empty stream is not a null slot");
   console.log("validate: PASS active null offer is rejected");
+  console.log("validate: PASS ended tray allows one null and rejects more");
   console.log("validate: PASS sha256 CHECKSUMS.txt");
   console.log("NOT_RUN product engines");
 }

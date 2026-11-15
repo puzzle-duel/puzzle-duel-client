@@ -27,12 +27,22 @@ v2 rules:
 - `offers` stays a three-element array.
 - While `status` is `in_progress`, every slot is a playable piece. A null slot in that state is rejected.
 - Placement, matching, cascade, and score are resolved before the terminal tray is written.
-- If that resolved move ends the game and `futurePieces` is empty, the consumed slot becomes JSON `null`. The other two slots stay as they were. No piece is generated or copied in.
+- JSON `null` is written only when that resolved move reaches `moveLimit` and `futurePieces` is empty. The consumed slot becomes null. The other two slots stay. No piece is generated or copied in.
+- Reaching `moveLimit` is the approved final permitted move. Ending only because no empty non-blocked cell remains is a different condition. An empty stream on that early board end does not become a null slot.
 - If the stream is empty and the resolved move would leave the game `in_progress`, the checker aborts and does not return an active null tray.
+- An ended tray has at most one null. Two or three nulls are rejected. An in-progress tray cannot contain null.
 - A later tap on an ended game returns `game_ended` and does not consume an offer or change state.
 - Out-of-bounds and malformed coordinates still have no precedence.
 
-`fixtures/01-terminal-null-slot.json` is the positive case: last permitted move, cascade score 300, slot 0 null, slots 1 and 2 unchanged, then empty, blocked, and occupied taps return `game_ended`. `invalid/null-offer-while-active.json` is the active-null rejection. Both checkers also refuse an empty stream on a move that does not end the game.
+Early board end with `futurePieces` empty is not given a tray representation. The checkers abort and leave the caller unchanged. These alternatives are recorded and not chosen:
+
+- Write the same nullable spent slot used for the move-budget final move.
+- Leave the consumed piece in its slot and end the game.
+- Invent or copy a replacement piece.
+
+PD-07 still does not decide whether an early full-board end drops unused pieces when the stream is not empty. A non-empty stream still follows the existing replenishment step. That is not a new terminal-null rule.
+
+`fixtures/01-terminal-null-slot.json` is the positive case: move limit 1, cascade score 300, slot 0 null, slots 1 and 2 unchanged, then empty, blocked, and occupied taps return `game_ended`. `invalid/null-offer-while-active.json` is the active-null rejection. `invalid/early-board-end-empty-stream.json` is the unspecified early fill. `invalid/terminal-offer-counts.json` covers two nulls, three nulls, an active null, and one valid spent slot. Both checkers also refuse an empty stream on a move that does not end the game.
 
 ## PD-08 through PD-12
 
@@ -44,4 +54,4 @@ PD-12 records a wave only when that clear removes at least three occupied cells 
 
 ## Parity
 
-`docs/contracts/gameplay/v1/` and `docs/contracts/gameplay/v2/` are each byte-identical in the client and backend reconciliation branches. Files `01` through `12` are unchanged from the historical v1 suite. v1 checksums change only where the schema description and README were corrected. v2 checksums cover the terminal fixture and the active-null probe.
+`docs/contracts/gameplay/v1/` and `docs/contracts/gameplay/v2/` are each byte-identical in the client and backend reconciliation branches. Files `01` through `12` are unchanged from the historical v1 suite. v1 checksums change only where the schema description and README were corrected. v2 checksums cover the terminal fixture, the active-null probe, the unspecified early-board probe, and the offer-count probes.

@@ -2,7 +2,7 @@
 
 `core-001.v2` adds the owner-approved nullable spent slot. `core-001.v1` stays in `../v1/` and is not rewritten.
 
-`offers` is always length 3. An in-progress tray contains three pieces. After a resolved move that ends the game, an empty `futurePieces` list writes JSON `null` into the consumed slot only. The other slots stay. No replacement is generated. A move that would stay `in_progress` with an empty stream is rejected instead of producing an active null slot.
+`offers` is always length 3. An in-progress tray contains three pieces. JSON `null` is written only into the consumed slot when the resolved move reaches `moveLimit` and `futurePieces` is empty. The other slots stay. No replacement is generated. An empty stream on a move that stays `in_progress` is rejected. An empty stream when the board fills before the move limit is not a specified tray: the checkers abort and do not invent a null slot, a leftover piece, or a generated piece. An ended tray has at most one null.
 
 Out-of-bounds and malformed coordinates have no precedence. No migration from a v1 replay onto v2 is claimed.
 
