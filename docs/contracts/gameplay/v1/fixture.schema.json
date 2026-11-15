@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "puzzle-duel-gameplay-fixture-v1.schema.json",
   "title": "Puzzle Duel canonical gameplay fixture v1",
-  "description": "Language-neutral golden fixture for CORE-001 / PZD-11. Coordinates are zero-based [row, column]. Row 0 is the top row because rows increase downward. up decreases row, down increases row, left decreases column, right increases column. cells[row][column] stores the cell. Row-major index is row*boardSize+column. This file describes fixture documents only. It is not a service endpoint and not the product engine. Cross-field rules (square cells, deeply unique row-major blocked cells, turnsUsed within moveLimit, and status consistency) are enforced by validate.mjs.",
+  "description": "Language-neutral golden fixture for CORE-001 / PZD-11. Coordinates are zero-based [row, column]. Row 0 is the top row because rows increase downward. up decreases row, down increases row, left decreases column, right increases column. cells[row][column] stores the cell. Row-major index is row*boardSize+column. This file describes fixture documents only. It is not a service endpoint and not the product engine. uniqueItems on blocked uses deep equality. validate.mjs also rejects a repeated coordinate and enforces the cross-field rules this schema does not state: square cells, empty row-major blocked cells, turnsUsed within moveLimit, and status consistency.",
   "oneOf": [
     { "$ref": "#/$defs/fullMoveFixture" },
     { "$ref": "#/$defs/phaseFixture" }
@@ -70,8 +70,9 @@
         "moveLimit": { "type": "integer", "minimum": 1 },
         "blocked": {
           "type": "array",
+          "uniqueItems": true,
           "items": { "$ref": "#/$defs/coordinate" },
-          "description": "Static obstacles. validate.mjs requires each listed cell to be empty, unique, and row-major. uniqueItems is omitted because draft 2020-12 does not deep-compare nested arrays."
+          "description": "Static obstacles. Draft 2020-12 uniqueItems compares elements with deep equality, so [[1,2],[1,2]] is invalid. validate.mjs rejects that duplicate as well, and requires each listed cell to be empty and row-major."
         },
         "cells": {
           "type": "array",
@@ -230,7 +231,11 @@
       "properties": {
         "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
         "boardSize": { "type": "integer", "minimum": 1 },
-        "blocked": { "type": "array", "items": { "$ref": "#/$defs/coordinate" } },
+        "blocked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coordinate" }
+        },
         "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } },
         "wave": { "type": "integer", "minimum": 1 }
       }
@@ -242,7 +247,11 @@
       "properties": {
         "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
         "boardSize": { "type": "integer", "minimum": 1 },
-        "blocked": { "type": "array", "items": { "$ref": "#/$defs/coordinate" } },
+        "blocked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coordinate" }
+        },
         "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
       }
     },

@@ -628,6 +628,19 @@ function sameMembers(actual, expected, label) {
   if (diff(left, right)) fail(`${label}: ${JSON.stringify(left)} !== ${JSON.stringify(right)}`);
 }
 
+function checkDuplicateCoordinate() {
+  const cells = Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => null));
+  const issues = [];
+  scanBlocked(5, [[1, 2], [1, 2]], cells, issues);
+  if (issues.length !== 1 || issues[0] !== "duplicate_blocked") {
+    fail(`[[1,2],[1,2]] issues [${issues.join(", ")}] wanted duplicate_blocked`);
+  }
+  const probe = load(path.join(ROOT, "invalid", "duplicate-blocked.json"));
+  if (diff(probe.fixture.scenarios[0].given.state.blocked, [[1, 2], [1, 2]])) {
+    fail("duplicate-blocked.json must repeat [1,2]");
+  }
+}
+
 function checkSchemaDocument() {
   const schema = load(path.join(ROOT, "fixture.schema.json"));
   const defs = schema.$defs;
@@ -637,8 +650,13 @@ function checkSchemaDocument() {
   sameMembers(defs.status.enum, ["in_progress", "ended"], "schema status");
   sameMembers(defs.errorCode.enum, ["blocked_tap", "occupied_tap", "game_ended"], "schema errors");
   if (defs.piece.additionalProperties !== false) fail("schema piece allows unknown fields");
-  if (defs.state.properties.blocked.uniqueItems === true) {
-    fail("schema uniqueItems cannot deep-compare coordinates; the checker enforces uniqueness");
+  const blockedSchemas = [
+    defs.state.properties.blocked,
+    defs.matchGiven.properties.blocked,
+    defs.shiftGiven.properties.blocked,
+  ];
+  if (blockedSchemas.some((blocked) => blocked.uniqueItems !== true)) {
+    fail("schema blocked coordinates must set uniqueItems, which deep-compares [row, column]");
   }
   if (defs.matchExpected?.additionalProperties !== false) fail("schema match expected is open");
   if (defs.shiftExpected?.additionalProperties !== false) fail("schema shift expected is open");
@@ -685,6 +703,7 @@ function main() {
   }
 
   checkCascadeBoundary(byId.two_wave_cascade);
+  checkDuplicateCoordinate();
   checkSchemaDocument();
   checkChecksums();
   if (errors.length) {
@@ -695,6 +714,7 @@ function main() {
   console.log("validate: PASS 12 golden fixtures");
   console.log("validate: PASS cascade boundary");
   console.log("validate: PASS schema agreement");
+  console.log("validate: PASS duplicate blocked [[1,2],[1,2]]");
   console.log("validate: PASS 9 structural rejection probes");
   console.log("validate: PASS sha256 CHECKSUMS.txt");
   console.log("validate: second walkthrough agrees with the golden JSON");

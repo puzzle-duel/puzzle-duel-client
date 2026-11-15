@@ -18,8 +18,8 @@
             "boardSize": 5,
             "moveLimit": 5,
             "blocked": [
-              [1, 1],
-              [1, 1]
+              [1, 2],
+              [1, 2]
             ],
             "cells": [
               [

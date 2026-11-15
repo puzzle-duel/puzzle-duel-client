@@ -29,7 +29,7 @@ Naming gaps are listed under unresolved decisions. They do not change a pinned l
 | `fixtures/11-end-conditions.json` | `end_conditions` | move limit, filled board, post-end tap |
 | `fixtures/12-replay-determinism.json` | `replay_determinism` | two-move transcript, multiplier reset |
 
-`invalid/` holds documents the structural check must reject: duplicate or out-of-range obstacles, a bad shape, a bad direction, an illegal turn count, an unknown `rulesVersion`, a piece written on a blocked cell, and an offer tray that is not length 3.
+`invalid/` holds documents the structural check must reject: duplicate or out-of-range obstacles, a bad shape, a bad direction, an illegal turn count, an unknown `rulesVersion`, a piece written on a blocked cell, an offer tray that is not length 3, and a piece with an unknown field. The duplicate obstacle probe is `blocked: [[1,2],[1,2]]`.
 
 Jira's busy-state case is `preoccupied_shift`: the destination is occupied at the start of the shift. CORE-001 does not define a separate busy flag.
 
@@ -66,7 +66,7 @@ cd docs/contracts/gameplay/v1 && shasum -a 256 -c CHECKSUMS.txt
 `reference_check.py` replays the twelve golden files and the cascade hang-guard.
 `validate.mjs` replays them in a separate program, checks structure, checks the nine rejection probes, checks that `fixture.schema.json` enums and closed phase results match the checker, checks the cascade hang-guard, and checks `CHECKSUMS.txt`.
 
-JSON Schema covers document shape, enums, and closed objects. The checker still enforces the cross-field rules the schema cannot state cleanly: `cells` length equals `boardSize`, blocked cells are deeply unique and row-major, `turnsUsed` does not exceed `moveLimit`, and `status` matches the board. No JSON Schema package is installed.
+JSON Schema covers document shape, enums, and closed objects. Draft 2020-12 `uniqueItems` compares array elements with deep equality, so `blocked: [[1,2],[1,2]]` is not unique. The schema sets that keyword on blocked coordinates. `validate.mjs` still rejects the same pair itself, because no JSON Schema package is installed. The checker also enforces the cross-field rules the schema does not state: `cells` length equals `boardSize`, blocked cells are empty and row-major, `turnsUsed` does not exceed `moveLimit`, and `status` matches the board.
 
 The two programs do not import each other. They still follow one reading of the contract, so their agreement is not a second source of rules. The `derivation` field on each fixture is the reviewable trace.
 
