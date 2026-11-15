@@ -1,0 +1,31 @@
+name: PR quality gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Quality gate tests
+        run: python3 tools/pr_quality_gate_test.py
+      - name: Quality gate
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: python3 tools/pr_quality_gate.py
