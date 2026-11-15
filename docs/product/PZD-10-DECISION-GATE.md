@@ -1,6 +1,6 @@
 # PZD-10 — Blueprint v1.0 Product Decision Gate
 
-Status: **PROPOSED — OWNER DECISIONS REQUIRED**  
+Status: **OWNER DECISIONS RECORDED — BLUEPRINT DRAFT REVIEW PENDING**  
 Task: https://puzzle-duel-app.atlassian.net/browse/PZD-10  
 Repositories: `puzzle-duel-client` and `puzzle-duel-backend`  
 Inputs: byte-identical `BLUEPRINT.md` on both main branches (Git blob `9e027cc00f4441a34bfa067b257fa2383336f55e`), `AGENTS.md`, approved CORE-001 fixture delivery PZD-11.  
@@ -16,7 +16,7 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 - Ad hypothesis: first nine completed games ad-free; first eligible interstitial after 10th; then intervals 8 and 6; no midgame ad. Consent/privacy required before enabling.
 - Score verification is server-authoritative; no client-provided score trusted.
 
-## 2. Open decisions: owner must select policy before ACCEPTED
+## 2. Owner decision matrix and remaining implementation questions
 
 | ID | Decision | Proposed default for owner consideration (not approved) | Alternatives/risks | Required downstream |
 | --- | --- | --- | --- | --- |
@@ -32,9 +32,9 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 | PD-10 | Error precedence after game end | **APPROVED by owner (option A): when game status is already ended, `game_ended` takes priority over `blocked_tap` and `occupied_tap` regardless of the tapped cell's occupancy/obstacle state.** No additional turn, score, offer consumption or board mutation. | Out-of-range or malformed coordinate precedence is NOT resolved by this approval; validation boundaries must be specified separately. Existing PZD-11 fixture only pins `game_ended` for an otherwise empty legal cell; new regression vectors needed. | PZD-17/18/20/29; versioned CORE-001 replay contract extension |
 | PD-11 | Movement event representation | **APPROVED by owner (option A): `moved` contains only pieces whose cell positions actually change during a shift, ordered by source row-major index.** Pieces remaining in place due to obstacles, board edges, preoccupied destinations or contested targets are omitted. | This describes the canonical successful movement event list only; it does not prohibit separate diagnostic traces for attempted/blocked movement if explicitly specified later. PZD-11 fixtures already use moved-only. | PZD-19/20/23/29; canonical replay contract |
 | PD-12 | Cascade safety | **APPROVED by owner (option A): game engine has no arbitrary maximum cascade wave count; continue match/clear/shift/cascade resolution until no matches remain.** Implement separate deterministic detection and safe failure for malformed/non-progressing states. | PZD-11 validator's 20-wave safety guard is checker-only and must never be applied as a gameplay truncation/score cap. Prove termination or detect repeated states/non-progress; exact fault representation and replay handling remain to be specified. | PZD-20/29/17; CORE-001 versioned replay contract |
-| PD-13 | Ruleset version vocabulary | Confirm exact `rulesVersion`, status strings and typed error codes before a production API; current `core-001.v1` belongs to fixture vocabulary | Prematurely freezing network API from test-only convention | PZD-15/17/28 |
+| PD-13 | Ruleset version vocabulary | **APPROVED by owner (option A): `core-001.v1` is the first official gameplay rules version identifier. A gameplay rule change requires a new rules version; backend validates historical ranked games with the version attached to their challenge/attempt.** | This decision approves rules version ID and versioning obligation only; specific API field names, status enums, typed error codes, migration/sunsetting policy and backwards compatibility require separate contract review. PZD-07/09/10/12 decisions may require new canonical vectors, not silent mutation of old rules/fixtures. | PZD-15/17/28/29; CORE-001 versioned contract |
 
-**The proposed defaults are recommendations, not decisions.** Owner may accept, reject, amend, or defer individually. Deferrals that affect MVP gameplay or ranking block corresponding implementation. If the user wants a leaner launch, explicitly scope out the blocked feature rather than inventing its behavior.
+**Decision status:** PD-01–PD-04 and PD-06–PD-13 are owner-approved; PD-05 has a specifically approved counter-persistence policy, while additional ad-delivery requirements remain unresolved. These owner decisions do not accept the overall Blueprint or ADRs. Resolve implementation details in relevant follow-up specs before production code and advertisement rollout.
 
 ## 3. Cross-repo blueprint acceptance criteria
 
@@ -56,13 +56,13 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 
 ## 5. Cursor instructions at this stage
 
-**DO NOT WRITE GAME CODE.** The only authorized deliverable now is a proposed decision matrix and comparison report. Do not modify `BLUEPRINT.md` or accept any proposed decision until owner has selected the final policy. Fixes within PZD-10 may be iterated and reviewed without approving a new task.
+**DO NOT WRITE GAME CODE.** All 13 numbered decision rows now have recorded owner responses. The authorized PZD-10 deliverable is a revised DRAFT `BLUEPRINT.md` on both review branches, with documented scope/contract gaps and cross-repo parity review. Do not mark Blueprint or any ADR Accepted without separate owner approval. Fixes within PZD-10 may be iterated and reviewed without approving a new task.
 
 ## 6. Audit checklist
 
 - [x] Initial `BLUEPRINT.md` bytes identical in both repositories (same Git blob)
 - [x] PZD-11 fixture suite merged to both main branches (prior task)
-- [ ] Owner decision sign-off on PD-01...PD-13 or explicit scoped deferrals
+- [x] Owner decision sign-off on PD-01...PD-13 (PD-05 counter persistence approved; other advertising policy deferred to PZD-32/33 before ads enabled)
 - [ ] Blueprint changes signed off and versioned in both PRs
 - [ ] Exact cross-repo blueprint parity verified after approved changes
 - [ ] Owner approval for merge and Done
@@ -92,3 +92,5 @@ This document **does not accept** the draft Blueprint, change an ADR, authorize 
 - **2026-11-15 — PD-11 APPROVED (option A):** Each shift wave's canonical `moved` array contains **only pieces with a successful cell change**, in increasing row-major order of the piece's source position at the start of that phase. Pieces that try to move but fail because of an edge, blocked cell, preoccupied destination or competing claimant stay absent from `moved`. Existing PZD-11 golden fixtures follow this convention and must not be expanded to include stationary pieces. This approval does not add separate attempted-movement events. PD-12 and PD-13 remain pending.
 
 - **2026-11-15 — PD-12 APPROVED (option A):** The production gameplay and ranked replay engines must not stop a valid cascade after an arbitrary number of waves. Resolve until no same-shape 3+ matches remain, including movement-triggered subsequent cascades, and award all legitimate resulting score. Handle malformed/non-terminating or non-progress states with an independent **deterministic, fail-safe** detection/error path; do not silently end early, count a partial replay as valid, or cap legitimately earned points. The PZD-11 checker-only 20-wave guard is not game logic. Exact diagnostics, error schema and termination proof/test strategy still require implementation-level specification. PD-13 remains pending.
+
+- **2026-11-15 — PD-13 APPROVED (option A):** First official gameplay ruleset identifier is **`core-001.v1`**. Every change to normative gameplay rules is made under a new explicit rules version; backend historical replay must use the saved challenge/attempt rules version, not the currently deployed version. Client and backend must agree on the version identifier. Approval does not freeze the production network `rulesVersion` field spelling, status codes/enums, typed error names, backwards support window or transport schema. Those remain contract design questions for PZD-15/17/28/29. All 13 owner decision rows now have a response, but PD-05 advertising consent, cadence and age policy are not fully signed off and remain feature-flagged off. Overall Blueprint still DRAFT pending review/merge approval.
