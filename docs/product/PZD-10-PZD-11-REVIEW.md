@@ -1,0 +1,43 @@
+# PZD-10 — Blueprint / PZD-11 technical reconciliation (DRAFT review)
+
+Status: **REVIEW FINDINGS — no merge, no ADR acceptance, no game-engine changes**  
+Decision baseline: PZD-10 PD-01 through PD-13 (2026-11-15).  
+Review sources: `BLUEPRINT.md` on PZD-10 PR #5; merged `docs/contracts/gameplay/PZD-11-CONTRACT.md`, `docs/contracts/gameplay/v1/README.md`, `fixture.schema.json`, `reference_check.py`, `validate.mjs`, and golden fixture `11-end-conditions.json`. The PZD-11 fixture directory has already been merged: **do not modify v1 golden files, checkers or checksum ledger in this documentation-only PZD-10 task.**
+
+## Verified findings and disposition
+
+| Ref | Severity | Actual source evidence | PZD-10 decision / treatment |
+| --- | --- | --- | --- |
+| R01 | **BLOCKER for executable canonical conformance** | PZD-11 contract says replace the consumed offer immediately if a future piece remains; its two independent checkers abort on any otherwise legal move if `futurePieces` is empty. Schema insists `offers` has length exactly three. The fixture `11-end-conditions.json` for `move_limit` nevertheless has spare future pieces and replaces an offer on the last move. | PD-07 approves precomputed finite stream and **no replacement required after the final allowed move**. Supply can be exhausted on the final legal turn; existing checkers cannot replay this. Define a **separately reviewed versioned amendment** to terminal `offers` representation and fixture validator first. No silent placeholder piece, duplicate, randomly generated replacement or silent v1 fixture mutation. |
+| R02 | **GAP in fixture coverage** | In `validate.mjs`, the expected-error validation for `game_ended` requires the tap to be in-bounds **and empty/unblocked**. Existing fixture only exercises that state. `reference_check.py` and `validate.mjs` first check ended status in gameplay rejection logic, so the implementation logic is compatible with PD-10, but the corpus cannot accept a new ended+blocked/occupied expected-result fixture as written. | PD-10 selects `game_ended` ahead of in-bounds `blocked_tap` and `occupied_tap`. Require ended+blocked and ended+occupied regression vectors plus validator assertion changes in a separately reviewed fixture/contract evolution. Malformed/out-of-bounds precedence stays unapproved. |
+| R03 | **GAP in fixture coverage** | PZD-11 `11-end-conditions.json` covers a full board **without** a match, not a last-cell placement causing a clear/cascade that frees space. | PD-09 explicitly checks the **post-cascade** board and remaining moves. Add a last-cell-fill+clear+reopen case, no-clear case, and last-turn+clear case; check both engine implementations and replay before production. |
+| R04 | **GAP in validation** | PZD-11 README says every full-move fixture begins without a ready three-in-a-row. It does not validate generated initial states, and the schema permits pre-existing runs. | PD-08 requires the **generator** to reject ready matches before game start. A fixture with a pre-existing run is not automatically a forbidden *phase* fixture: phase fixtures intentionally model matches. Validate only generated initial board/replay start, not all intermediate states. A malformed resume/import policy is still open. |
+| R05 | **Checkers vs production rule** | `reference_check.py` and `validate.mjs` cap review fixture replay at 20 waves, explicitly stating this is a hang guard, not gameplay behavior. | PD-12 has **no artificial gameplay wave limit**. An ordinary finite board guarantees termination for valid clear-driven cascades: every actual wave clears >=3 pieces, shifts neither create nor duplicate pieces, and no extra piece enters during cascade. Thus at most `floor(occupied_after_placement / 3)` clearing waves per move. A repeat/non-progress state indicates malformed logic/data and must deterministically fail; do not present partial score as verified. The checker guard remains untouched in PZD-11 v1. |
+| R06 | **Compatibility / no conflict** | PZD-11 `moved` includes only successful cell changes, sorted by source row-major; zero movement produces an empty list. | PD-11 matches the existing v1 fixture behavior. **No change needed.** |
+| R07 | **Terminology drift** | PZD-11 README/schema originally label `core-001.v1` and status/error names as fixture-only vocabulary, not approved API names. | PD-13 owner has since approved **`core-001.v1` as the official gameplay rules version**. That does **not** retrospectively approve `in_progress`, `ended`, typed error strings or wire format. The old README is historical context, not current product-policy authority. A future reviewed contract may add a clarification; do not change checksum-protected v1 files in this task. |
+| R08 | **Scope / safety** | Blueprint ad paragraph still lists 9/10/8/6 intervals as a hypothesis while PD-05 only approved **counter persistence across restarts**. | Treat cadence, session/counter semantics, offline/reinstall/account switch, privacy, consent and age requirements as **NOT YET APPROVED**. Do not ship/turn on ads from this draft; PZD-32/33 still own policy. |
+| R09 | **Release gating** | The PZD-11 READMEs verify independent Python/Node fixture checkers, and explicitly do **not** claim Dart/TypeScript product engine tests. | Blueprint acceptance and product engine parity are distinct. Do not report real client/backend gameplay parity until engines and evidence exist. |
+
+## Recommended non-breaking contract evolution (proposed, NOT APPROVED API)
+
+1. **R01: terminal offers:** choose an exact representation for the spent offer slot on the last permissible turn, e.g. nullable slot, shorter tray, or terminal-only stable snapshot. This review **does not select among them**. The game result must be deterministic, fully serialized and accepted by schema and both replay implementations. Fix future-piece exhaustion handling and add move-limit = 1 + empty-future-stream fixture, including a post-end rejected tap. Maintain old golden v1 as immutable; if these distinctions change the canonical `core-001.v1` game output, advance the explicit rules/fixture version as owner required under PD-13 before rollout.
+2. **R02: rejection priority:** when already ended, an in-bounds blocked or occupied tap yields `game_ended` with zero mutations; an otherwise legal empty tap does too. Separately specify input syntax/out-of-bounds precedence.
+3. **R03: end state:** run all cascade waves and scoring, then compute `ended = turnsUsed >= moveLimit || no non-blocked empty cell in final resolved board`. Do not return on transient full board before scoring.
+4. **R04: pregame validity:** detect horizontal and vertical >=3 runs in generated starting boards; deterministically reject/regenerate. Never pregame-clear or score. Keep match-phase fixture boards valid for direct match testing.
+5. **R05: cascade safety:** prove strict piece-count decrease for each successful clearing wave. Detect corrupt cyclic/no-progress replay as an error distinct from finishing valid play; no production wave-count truncation.
+6. **R07: versioning:** store `core-001.v1` or its deliberately versioned successor on ranked challenge and attempt, and dispatch replay validation by stored version. Do not declare the production transport schema frozen.
+
+## Review acceptance and test matrix
+
+- [x] PZD-10 Blueprint updated with all owner decisions, with pending details called out.
+- [x] Client and backend Blueprint contents were byte-identical before this report (Git blob `514fb02239e704f0f5a2e54bd69b179fa027a403`).
+- [x] PZD-11 corpus inspected at the source: README, schema, Python checker, JS checker, end-condition fixture and replay fixture.
+- [x] Existing PZD-11 golden/checksum files preserved **without changes**.
+- [ ] R01 terminal-tray representation explicitly specified and accepted; versioned cross-language fixtures and checkers updated in a separate reviewed scope.
+- [ ] R02/R03 new golden negatives and cascade-reopen scenario run by both checkers.
+- [ ] New generated-start no-match validation and corrupt-state rejection tests.
+- [ ] Checkers + CI run on the relevant merged contracts; real engine parity requires later client/backend implementation.
+- [ ] Privacy/advertising policy reviewed before enabling advertising.
+- [ ] Owner accepts final Blueprint and explicitly authorizes PR merge.
+
+**Release/merge verdict:** **HOLD — this is a consistent DRAFT, not proven implementation-ready or an Accepted blueprint.** The PD-07 terminal-offer contract gap and the PZD-11 conformance edge cases cannot be closed by papering over the differences in `BLUEPRINT.md`. Existing PZD-11 fixture checks remain useful for their original scope.
