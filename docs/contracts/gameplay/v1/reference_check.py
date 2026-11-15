@@ -15,7 +15,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 FIXTURES = ROOT / "fixtures"
 DIR = {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)}
+# Hang-guard for review commands only. The contract defines no wave cap.
+CHECKER_WAVE_ABORT = 20
 FAILURES: list[str] = []
+
+
+class CheckerAbort(RuntimeError):
+    def __init__(self, applied, board):
+        super().__init__("checker abort: cascade has no contracted wave cap")
+        self.applied = applied
+        self.board = board
 
 
 def fail(message: str) -> None:
@@ -171,6 +180,33 @@ def reject_code(state, tap):
     return None
 
 
+def collect_waves(cells, blocked, find, ceiling=CHECKER_WAVE_ABORT):
+    """Apply clears until `find` is empty. Do not apply a wave past `ceiling`.
+
+    A cascade that finishes on wave `ceiling` is returned. A match that would
+    start another wave raises CheckerAbort. `ceiling` is not a game rule.
+    """
+    board = cells
+    waves = []
+    while len(waves) < ceiling:
+        cleared = find(board)
+        if not cleared:
+            break
+        for row, col in cleared:
+            board[row][col] = None
+        board, moved = shift(board, blocked)
+        wave_no = len(waves) + 1
+        waves.append({
+            "wave": wave_no,
+            "cleared": cleared,
+            "scoreDelta": len(cleared) * 100 * wave_no,
+            "moved": moved,
+        })
+    if find(board):
+        raise CheckerAbort(len(waves), board)
+    return waves, board
+
+
 def apply_move(state, move):
     code = reject_code(state, move["tap"])
     if code is not None:
@@ -179,20 +215,7 @@ def apply_move(state, move):
     piece = nxt["offers"][move["offerIndex"]]
     land = landing(nxt, piece, move["tap"])
     nxt["cells"][land[0]][land[1]] = {"shape": piece["shape"], "direction": piece["direction"]}
-    waves = []
-    while True:
-        cleared = matches(nxt["cells"])
-        if not cleared:
-            break
-        for row, col in cleared:
-            nxt["cells"][row][col] = None
-        nxt["cells"], moved = shift(nxt["cells"], nxt["blocked"])
-        wave_no = len(waves) + 1
-        delta = len(cleared) * 100 * wave_no
-        waves.append({"wave": wave_no, "cleared": cleared, "scoreDelta": delta, "moved": moved})
-        # 20 is a review abort only. The contract does not define a wave cap.
-        if wave_no > 20:
-            raise RuntimeError("checker abort: cascade has no contracted wave cap")
+    waves, nxt["cells"] = collect_waves(nxt["cells"], nxt["blocked"], matches)
     score_delta = sum(wave["scoreDelta"] for wave in waves)
     # Empty futurePieces is unspecified. Abort instead of inventing a replacement.
     if not nxt["futurePieces"]:
@@ -308,6 +331,79 @@ def contract_literals(by_id):
         fail("second move did not start again at wave 1")
 
 
+def blank_board():
+    return [[None for _ in range(5)] for _ in range(5)]
+
+
+def scripted_find(limit):
+    calls = {"n": 0}
+
+    def find(_board):
+        calls["n"] += 1
+        if calls["n"] <= limit:
+            return [[0, 0], [0, 1], [0, 2]]
+        return []
+
+    return find
+
+
+def placed_cascade(doc):
+    state = clone(doc["scenarios"][0]["given"]["state"])
+    move = doc["scenarios"][0]["when"]["moves"][0]
+    piece = state["offers"][move["offerIndex"]]
+    land = landing(state, piece, move["tap"])
+    state["cells"][land[0]][land[1]] = {"shape": piece["shape"], "direction": piece["direction"]}
+    return state
+
+
+def occupied(board):
+    found = []
+    for row, cells in enumerate(board):
+        for col, cell in enumerate(cells):
+            if cell is not None:
+                found.append([row, col, cell["shape"]])
+    return found
+
+
+def check_boundaries(by_id):
+    """Hang-guard only. Does not add a product wave cap or a golden 20-wave board."""
+    waves, _board = collect_waves(blank_board(), [], scripted_find(CHECKER_WAVE_ABORT), CHECKER_WAVE_ABORT)
+    if len(waves) != CHECKER_WAVE_ABORT or waves[-1]["wave"] != CHECKER_WAVE_ABORT:
+        fail("exact 20-wave cascade was rejected or truncated")
+    try:
+        collect_waves(blank_board(), [], scripted_find(CHECKER_WAVE_ABORT + 1), CHECKER_WAVE_ABORT)
+        fail("cascade still matching at the review boundary was accepted")
+    except CheckerAbort as error:
+        if error.applied != CHECKER_WAVE_ABORT:
+            fail(f"continuing cascade applied {error.applied} waves")
+    waves, _board = collect_waves(blank_board(), [], scripted_find(2), CHECKER_WAVE_ABORT)
+    if len(waves) != 2:
+        fail("normal short cascade was not accepted")
+
+    state = placed_cascade(by_id["two_wave_cascade"])
+    waves, board = collect_waves(state["cells"], state["blocked"], matches, 2)
+    if len(waves) != 2 or sum(wave["scoreDelta"] for wave in waves) != 900:
+        fail("real cascade ending exactly on the ceiling was rejected")
+    if occupied(board):
+        fail("real cascade ending exactly on the ceiling left pieces")
+
+    state = placed_cascade(by_id["two_wave_cascade"])
+    try:
+        collect_waves(state["cells"], state["blocked"], matches, 1)
+        fail("real cascade still matching at the ceiling was accepted")
+    except CheckerAbort as error:
+        if error.applied != 1:
+            fail(f"real continuing cascade applied {error.applied} waves")
+        want = [[4, 0, "diamond"], [4, 1, "diamond"], [4, 2, "diamond"]]
+        if occupied(error.board) != want:
+            fail(f"wave beyond the ceiling was applied or the shift differed: {occupied(error.board)}")
+
+    state = placed_cascade(by_id["two_wave_cascade"])
+    waves, board = collect_waves(state["cells"], state["blocked"], matches)
+    if len(waves) != 2 or sum(wave["scoreDelta"] for wave in waves) != 900 or occupied(board):
+        fail("normal two-wave cascade failed under the default review ceiling")
+
+
 def main():
     docs = []
     for path in sorted(FIXTURES.glob("*.json")):
@@ -315,6 +411,7 @@ def main():
     if len(docs) != 12:
         fail(f"expected 12 fixtures, found {len(docs)}")
     by_id = {doc["id"]: doc for doc in docs}
+    check_boundaries(by_id)
     contract_literals(by_id)
     for doc in docs:
         check_fixture(doc)
@@ -323,6 +420,7 @@ def main():
         for message in FAILURES:
             print(f"- {message}")
         return 1
+    print("reference_check: PASS cascade boundary")
     print("reference_check: PASS 12 golden fixtures")
     print("reference_check: hand arithmetic 3*100*1+3*100*2=900 and 5*100*1=500")
     print("reference_check: NOT_RUN Dart engine, TypeScript product engine, client copy")

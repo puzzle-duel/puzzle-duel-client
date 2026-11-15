@@ -1,0 +1,21 @@
+name: PZD-11 fixtures
+
+on:
+  pull_request:
+    paths:
+      - "docs/contracts/gameplay/v1/**"
+      - ".github/workflows/pzd11-fixtures.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 docs/contracts/gameplay/v1/reference_check.py
+      - run: node docs/contracts/gameplay/v1/validate.mjs
+      - name: SHA-256 checksums
+        working-directory: docs/contracts/gameplay/v1
+        run: sha256sum -c CHECKSUMS.txt

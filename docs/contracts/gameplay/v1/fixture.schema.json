@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "puzzle-duel-gameplay-fixture-v1.schema.json",
   "title": "Puzzle Duel canonical gameplay fixture v1",
-  "description": "Language-neutral golden fixture for CORE-001 / PZD-11. Coordinates are zero-based [row, column]. Row 0 is the top row because rows increase downward. up decreases row, down increases row, left decreases column, right increases column. cells[row][column] stores the cell. Row-major index is row*boardSize+column. This file describes fixture documents only. It is not a service endpoint and not the product engine.",
+  "description": "Language-neutral golden fixture for CORE-001 / PZD-11. Coordinates are zero-based [row, column]. Row 0 is the top row because rows increase downward. up decreases row, down increases row, left decreases column, right increases column. cells[row][column] stores the cell. Row-major index is row*boardSize+column. This file describes fixture documents only. It is not a service endpoint and not the product engine. Cross-field rules (square cells, deeply unique row-major blocked cells, turnsUsed within moveLimit, and status consistency) are enforced by validate.mjs.",
   "oneOf": [
     { "$ref": "#/$defs/fullMoveFixture" },
     { "$ref": "#/$defs/phaseFixture" }
@@ -70,9 +70,8 @@
         "moveLimit": { "type": "integer", "minimum": 1 },
         "blocked": {
           "type": "array",
-          "uniqueItems": true,
           "items": { "$ref": "#/$defs/coordinate" },
-          "description": "Static obstacles, unique, row-major. Each listed cell is empty."
+          "description": "Static obstacles. validate.mjs requires each listed cell to be empty, unique, and row-major. uniqueItems is omitted because draft 2020-12 does not deep-compare nested arrays."
         },
         "cells": {
           "type": "array",
@@ -247,6 +246,25 @@
         "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
       }
     },
+    "matchExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cleared", "scoreDelta", "cells"],
+      "properties": {
+        "cleared": { "type": "array", "items": { "$ref": "#/$defs/coordinate" } },
+        "scoreDelta": { "type": "integer", "minimum": 0 },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
+      }
+    },
+    "shiftExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moved", "cells"],
+      "properties": {
+        "moved": { "type": "array", "items": { "$ref": "#/$defs/moved" } },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
+      }
+    },
     "fullMoveFixture": {
       "type": "object",
       "additionalProperties": false,
@@ -289,7 +307,12 @@
                 "required": ["phase"],
                 "properties": { "phase": { "enum": ["match", "shift"] } }
               },
-              "expected": { "type": "object" },
+              "expected": {
+                "oneOf": [
+                  { "$ref": "#/$defs/matchExpected" },
+                  { "$ref": "#/$defs/shiftExpected" }
+                ]
+              },
               "derivation": { "type": "string", "minLength": 80 }
             }
           }

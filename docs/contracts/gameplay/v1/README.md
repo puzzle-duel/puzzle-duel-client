@@ -63,8 +63,10 @@ node docs/contracts/gameplay/v1/validate.mjs
 cd docs/contracts/gameplay/v1 && shasum -a 256 -c CHECKSUMS.txt
 ```
 
-`reference_check.py` replays the twelve golden files.
-`validate.mjs` replays them in a separate program, checks structure, checks the eight rejection probes, and checks `CHECKSUMS.txt`.
+`reference_check.py` replays the twelve golden files and the cascade hang-guard.
+`validate.mjs` replays them in a separate program, checks structure, checks the nine rejection probes, checks that `fixture.schema.json` enums and closed phase results match the checker, checks the cascade hang-guard, and checks `CHECKSUMS.txt`.
+
+JSON Schema covers document shape, enums, and closed objects. The checker still enforces the cross-field rules the schema cannot state cleanly: `cells` length equals `boardSize`, blocked cells are deeply unique and row-major, `turnsUsed` does not exceed `moveLimit`, and `status` matches the board. No JSON Schema package is installed.
 
 The two programs do not import each other. They still follow one reading of the contract, so their agreement is not a second source of rules. The `derivation` field on each fixture is the reviewable trace.
 
@@ -97,6 +99,6 @@ Those blobs match client commit `335d2fc69bfd9b44613edc249504ca81876fa353` and b
 4. Whether a placement that fills the last empty cell and then clears space still ends the game for no-space is unspecified. The filled-board fixture does not match, so the cell stays occupied.
 5. When a tap after the game has ended is also blocked or occupied, the contract does not rank `game_ended` against the cell errors. The pinned post-end tap is an otherwise legal empty cell, and it is rejected with `game_ended`.
 6. `moved` omits pieces that stay. The post-shift board shows them. The contract requires source-index order and does not require stay records.
-7. The contract repeats match and shift until no match remains. It does not set a maximum wave count. If a match is still present after 20 waves, both checkers abort so a mistaken loop cannot hang the review command. A cascade that has already finished is not rejected for its length. Twenty is not a rule, and no fixture depends on it.
+7. The contract repeats match and shift until no match remains. It does not set a maximum wave count. If a match is still present when 20 waves have already been applied, both checkers abort and do not apply another wave. A cascade that finishes on wave 20 is accepted. Twenty is a review hang-guard, not a rule, and no golden fixture depends on it.
 
 Daily attempt lifecycle, RNG, seed versioning, and the all-time rank formula remain Proposed elsewhere and are not decided here.

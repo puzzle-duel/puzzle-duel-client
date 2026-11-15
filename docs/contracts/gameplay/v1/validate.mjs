@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const RV = "core-001.v1";
+// Hang-guard for review commands only. The contract defines no wave cap.
+const CHECKER_WAVE_ABORT = 20;
 const SHAPES = new Set(["circle", "diamond", "triangle"]);
 const DIRS = new Set(["up", "right", "down", "left"]);
 const DELTA = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
@@ -42,6 +44,7 @@ const INVALID = [
   ["unknown-rules-version.json", "unknown_rules_version"],
   ["blocked-cell-occupied.json", "blocked_cell_occupied"],
   ["malformed-offers.json", "malformed_offers"],
+  ["extra-piece-property.json", "unexpected_property"],
 ];
 
 const errors = [];
@@ -102,6 +105,8 @@ function scanPiece(piece, issues) {
     issues.push("malformed_piece");
     return;
   }
+  const extra = Object.keys(piece).filter((key) => key !== "shape" && key !== "direction");
+  if (extra.length) issues.push("unexpected_property");
   if (!SHAPES.has(piece.shape)) issues.push("malformed_shape");
   if (!DIRS.has(piece.direction)) issues.push("malformed_direction");
 }
@@ -287,6 +292,30 @@ function isBlocked(state, row, col) {
   return state.blocked.some(([br, bc]) => br === row && bc === col);
 }
 
+function collectWaves(cells, blocked, find, ceiling = CHECKER_WAVE_ABORT) {
+  // A cascade that finishes on wave `ceiling` is kept. A further match aborts
+  // without applying that next wave. `ceiling` is not a game rule.
+  let board = cells;
+  const waves = [];
+  while (waves.length < ceiling) {
+    const cleared = find(board);
+    if (cleared.length === 0) break;
+    for (const [row, col] of cleared) board[row][col] = null;
+    const state = { boardSize: board.length, blocked, cells: board };
+    const moved = shiftInPlace(state);
+    board = state.cells;
+    const waveNo = waves.length + 1;
+    waves.push({ wave: waveNo, cleared, scoreDelta: cleared.length * 100 * waveNo, moved });
+  }
+  if (find(board).length > 0) {
+    const error = new Error("checker abort: cascade has no contracted wave cap");
+    error.applied = waves.length;
+    error.board = board;
+    throw error;
+  }
+  return { waves, cells: board };
+}
+
 function applyMove(state, move) {
   if (state.status !== "in_progress") {
     return { legal: false, error: { code: "game_ended" }, state: clone(state) };
@@ -302,18 +331,9 @@ function applyMove(state, move) {
   const tc = col + dc;
   const land = inside(next, tr, tc) && !isBlocked(next, tr, tc) && next.cells[tr][tc] === null ? [tr, tc] : [row, col];
   next.cells[land[0]][land[1]] = { shape: piece.shape, direction: piece.direction };
-  const waves = [];
-  // 20 is a review abort only. The contract does not define a wave cap.
-  // A cascade that finishes on wave 20 is valid; abort only if another match remains.
-  while (waves.length < 20) {
-    const cleared = findMatches(next.cells);
-    if (cleared.length === 0) break;
-    for (const [cr, cc] of cleared) next.cells[cr][cc] = null;
-    const moved = shiftInPlace(next);
-    const waveNo = waves.length + 1;
-    waves.push({ wave: waveNo, cleared, scoreDelta: cleared.length * 100 * waveNo, moved });
-  }
-  if (findMatches(next.cells).length > 0) throw new Error("checker abort: cascade has no contracted wave cap");
+  const collected = collectWaves(next.cells, next.blocked, findMatches);
+  next.cells = collected.cells;
+  const { waves } = collected;
   const scoreDelta = waves.reduce((sum, wave) => sum + wave.scoreDelta, 0);
   // Empty futurePieces is unspecified. Abort instead of inventing a replacement.
   if (next.futurePieces.length === 0) throw new Error("checker abort: empty piece stream is not specified");
@@ -544,6 +564,90 @@ function checkChecksums() {
   for (const rel of listed.keys()) if (!files.includes(rel)) fail(`checksum lists missing file ${rel}`);
 }
 
+function checkCascadeBoundary(doc) {
+  const blank = () => Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => null));
+  const scripted = (limit) => {
+    let calls = 0;
+    return () => {
+      calls += 1;
+      return calls <= limit ? [[0, 0], [0, 1], [0, 2]] : [];
+    };
+  };
+  const exact = collectWaves(blank(), [], scripted(CHECKER_WAVE_ABORT), CHECKER_WAVE_ABORT);
+  if (exact.waves.length !== CHECKER_WAVE_ABORT || exact.waves.at(-1).wave !== CHECKER_WAVE_ABORT) {
+    fail("exact 20-wave cascade was rejected or truncated");
+  }
+  try {
+    collectWaves(blank(), [], scripted(CHECKER_WAVE_ABORT + 1), CHECKER_WAVE_ABORT);
+    fail("cascade still matching at the review boundary was accepted");
+  } catch (error) {
+    if (error.applied !== CHECKER_WAVE_ABORT) fail(`continuing cascade applied ${error.applied} waves`);
+  }
+  const short = collectWaves(blank(), [], scripted(2), CHECKER_WAVE_ABORT);
+  if (short.waves.length !== 2) fail("normal short cascade was not accepted");
+
+  const placed = (ceiling) => {
+    const state = clone(doc.scenarios[0].given.state);
+    const move = doc.scenarios[0].when.moves[0];
+    const piece = state.offers[move.offerIndex];
+    const [row, col] = move.tap;
+    const [dr, dc] = DELTA[piece.direction];
+    const tr = row + dr;
+    const tc = col + dc;
+    const land = inside(state, tr, tc) && !isBlocked(state, tr, tc) && state.cells[tr][tc] === null ? [tr, tc] : [row, col];
+    state.cells[land[0]][land[1]] = { shape: piece.shape, direction: piece.direction };
+    return collectWaves(state.cells, state.blocked, findMatches, ceiling);
+  };
+  const finished = placed(2);
+  const finishedScore = finished.waves.reduce((sum, wave) => sum + wave.scoreDelta, 0);
+  if (finished.waves.length !== 2 || finishedScore !== 900) fail("real cascade ending exactly on the ceiling was rejected");
+  if (finished.cells.some((row) => row.some((cell) => cell))) fail("real cascade ending exactly on the ceiling left pieces");
+  try {
+    placed(1);
+    fail("real cascade still matching at the ceiling was accepted");
+  } catch (error) {
+    if (error.applied !== 1) fail(`real continuing cascade applied ${error.applied} waves`);
+    const occupied = [];
+    error.board.forEach((row, r) => row.forEach((cell, c) => {
+      if (cell) occupied.push([r, c, cell.shape]);
+    }));
+    if (diff(occupied, [[4, 0, "diamond"], [4, 1, "diamond"], [4, 2, "diamond"]])) {
+      fail(`wave beyond the ceiling was applied or the shift differed: ${JSON.stringify(occupied)}`);
+    }
+  }
+  const normal = placed(CHECKER_WAVE_ABORT);
+  const normalScore = normal.waves.reduce((sum, wave) => sum + wave.scoreDelta, 0);
+  if (normal.waves.length !== 2 || normalScore !== 900 || normal.cells.some((row) => row.some((cell) => cell))) {
+    fail("normal two-wave cascade failed under the default review ceiling");
+  }
+}
+
+function sameMembers(actual, expected, label) {
+  const left = [...actual].sort();
+  const right = [...expected].sort();
+  if (diff(left, right)) fail(`${label}: ${JSON.stringify(left)} !== ${JSON.stringify(right)}`);
+}
+
+function checkSchemaDocument() {
+  const schema = load(path.join(ROOT, "fixture.schema.json"));
+  const defs = schema.$defs;
+  if (defs.rulesVersion.const !== RV) fail("schema rulesVersion const drifted");
+  sameMembers(defs.shape.enum, SHAPES, "schema shapes");
+  sameMembers(defs.direction.enum, DIRS, "schema directions");
+  sameMembers(defs.status.enum, ["in_progress", "ended"], "schema status");
+  sameMembers(defs.errorCode.enum, ["blocked_tap", "occupied_tap", "game_ended"], "schema errors");
+  if (defs.piece.additionalProperties !== false) fail("schema piece allows unknown fields");
+  if (defs.state.properties.blocked.uniqueItems === true) {
+    fail("schema uniqueItems cannot deep-compare coordinates; the checker enforces uniqueness");
+  }
+  if (defs.matchExpected?.additionalProperties !== false) fail("schema match expected is open");
+  if (defs.shiftExpected?.additionalProperties !== false) fail("schema shift expected is open");
+  const refs = (defs.phaseFixture.properties.scenarios.items.properties.expected.oneOf ?? []).map((item) => item.$ref);
+  if (diff(refs, ["#/$defs/matchExpected", "#/$defs/shiftExpected"])) {
+    fail("phase expected is not closed over match and shift results");
+  }
+}
+
 function main() {
   const names = readdirSync(path.join(ROOT, "fixtures")).filter((name) => name.endsWith(".json")).sort();
   if (diff(names, CATALOG.map(([name]) => name))) fail("fixture filename catalog mismatch");
@@ -580,6 +684,8 @@ function main() {
     if (issues.length !== 1 || issues[0] !== code) fail(`${file}: issues [${issues.join(", ")}] wanted ${code}`);
   }
 
+  checkCascadeBoundary(byId.two_wave_cascade);
+  checkSchemaDocument();
   checkChecksums();
   if (errors.length) {
     console.log("validate: FAIL");
@@ -587,7 +693,9 @@ function main() {
     process.exit(1);
   }
   console.log("validate: PASS 12 golden fixtures");
-  console.log("validate: PASS 8 structural rejection probes");
+  console.log("validate: PASS cascade boundary");
+  console.log("validate: PASS schema agreement");
+  console.log("validate: PASS 9 structural rejection probes");
   console.log("validate: PASS sha256 CHECKSUMS.txt");
   console.log("validate: second walkthrough agrees with the golden JSON");
   console.log("NOT_RUN backend application unit/integration tests (no app harness in this repository)");
