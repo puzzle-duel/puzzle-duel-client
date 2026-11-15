@@ -21,12 +21,13 @@ This task adds the placement phase only. Match, clear, simultaneous shift, casca
 
 ## Placement rules
 
-1. Reject when `status` is already `ended` (`game_ended`), including empty, blocked, or occupied in-bounds taps.
-2. Reject a blocked tap (`blocked_tap`) or occupied tap (`occupied_tap`) without changing state.
-3. Compute one adjacent cell from the selected piece direction.
-4. If that cell is in bounds, empty, and not blocked, land there. Otherwise land on the tap.
-5. Never search farther than one cell. Direction does not change.
-6. Increment turns by exactly one. Score is unchanged until a later scoring phase.
+1. If the tap is outside the board, stop as `PlacementUnsafe.tapOutOfBounds` and leave state unchanged. This runs whether the game is `in_progress` or `ended`. It is a safety stop for an unspecified out-of-bounds case, not an approved transport-level precedence over `game_ended`.
+2. For an in-bounds tap when `status` is already `ended`, reject with `game_ended`, including empty, blocked, or occupied cells. Board, offers, future pieces, turns, and score stay unchanged.
+3. Reject a blocked tap (`blocked_tap`) or occupied tap (`occupied_tap`) without changing state.
+4. Compute one adjacent cell from the selected piece direction.
+5. If that cell is in bounds, empty, and not blocked, land there. Otherwise land on the tap.
+6. Never search farther than one cell. Direction does not change.
+7. Increment turns by exactly one. Score is unchanged until a later scoring phase.
 
 ## Offer handoff
 
@@ -39,6 +40,6 @@ No random generation. Other offer slots are not rewritten by this phase.
 
 ## Limits
 
-- Out-of-bounds and malformed tap precedence is not approved. Those attempts return `PlacementUnsafe`, not a gameplay rejection code.
+- Out-of-bounds and malformed tap precedence is not an approved product rule. This package stops an out-of-bounds tap with `PlacementUnsafe` so it never becomes `game_ended`, `blocked_tap`, or `occupied_tap`. That does not invent a transport schema decision for those cases.
 - Golden fixture `finalState` includes post-resolution offers, waves, and status. Placement-only projection may match landing and turns while full-move parity remains **NOT_RUN**.
 - Flutter UI and backend replay are out of scope.

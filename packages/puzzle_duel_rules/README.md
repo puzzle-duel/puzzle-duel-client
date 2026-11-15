@@ -57,7 +57,7 @@ Match, clear, shift, cascade, scoring, and final end evaluation are **NOT_RUN**.
 | Run of 3 already present on a full-move start | `unresolved_initial_match` | `parseInitialGameState` only |
 | Offer index outside 0, 1, 2 | `illegal_offer_index` | Move |
 
-Out-of-bounds tap precedence is not decided as a gameplay rejection. `applyPlacement` returns `PlacementUnsafe.tapOutOfBounds` for that safety case.
+Out-of-bounds taps return `PlacementUnsafe.tapOutOfBounds` before any gameplay rejection, including when the game has already ended. That is a safety stop for an unspecified case, not a new transport-level precedence decision. In-bounds ended taps still return `game_ended`.
 
 ## Commands
 

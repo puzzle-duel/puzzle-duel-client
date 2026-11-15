@@ -168,17 +168,22 @@ List<List<Piece?>> _withPiece(
 ///
 /// Does not match, clear, shift, cascade, score, or decide terminal offers.
 /// Does not set `ended` because a later clear may reopen the board.
+///
+/// An out-of-bounds tap is stopped as [PlacementSafety.tapOutOfBounds] before
+/// any gameplay rejection, including when the game has already ended. That is
+/// an internal safety stop for an unspecified contract case, not a new
+/// transport-level error precedence.
 PlacementResult applyPlacement(GameState state, Move move) {
-  if (state.status != GameStatus.inProgress) {
-    return PlacementRejected(code: GameplayRejection.gameEnded, state: state);
-  }
-
   final tap = move.tap;
   if (!_inBounds(state.boardSize, tap.row, tap.column)) {
     return PlacementUnsafe(
       reason: PlacementSafety.tapOutOfBounds,
       state: state,
     );
+  }
+
+  if (state.status != GameStatus.inProgress) {
+    return PlacementRejected(code: GameplayRejection.gameEnded, state: state);
   }
 
   final obstacles = _blockedKeys(state.blocked);

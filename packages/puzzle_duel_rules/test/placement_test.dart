@@ -160,52 +160,88 @@ void main() {
     expect(applied.cells[2][4], isNull);
   });
 
-  test('ended board rejects empty, blocked, and occupied taps', () {
-    final ended = parseGameState(
-      _blank()
-        ..['turnsUsed'] = 5
-        ..['moveLimit'] = 5
-        ..['status'] = 'ended'
-        ..['cells'] = [
-          for (var row = 0; row < 5; row++)
-            [
-              for (var column = 0; column < 5; column++)
-                if (row == 0 && column == 0)
-                  {'shape': 'circle', 'direction': 'up'}
-                else
-                  null,
-            ],
-        ]
-        ..['blocked'] = [
-          [0, 1],
-        ],
-    );
-    for (final tap in [
-      [1, 1],
-      [0, 1],
-      [0, 0],
-    ]) {
-      final before = jsonEncode(ended.toJson());
-      final result = applyPlacement(
-        ended,
-        parseMove({'offerIndex': 0, 'tap': tap}),
-      ) as PlacementRejected;
-      expect(result.code, GameplayRejection.gameEnded);
-      expect(jsonEncode(result.state.toJson()), before);
-    }
-  });
+  test(
+    'ended in-bounds empty, blocked, and occupied taps return game_ended',
+    () {
+      final ended = parseGameState(
+        _blank()
+          ..['turnsUsed'] = 5
+          ..['moveLimit'] = 5
+          ..['status'] = 'ended'
+          ..['cells'] = [
+            for (var row = 0; row < 5; row++)
+              [
+                for (var column = 0; column < 5; column++)
+                  if (row == 0 && column == 0)
+                    {'shape': 'circle', 'direction': 'up'}
+                  else
+                    null,
+              ],
+          ]
+          ..['blocked'] = [
+            [0, 1],
+          ],
+      );
+      for (final tap in [
+        [1, 1],
+        [0, 1],
+        [0, 0],
+      ]) {
+        final before = jsonEncode(ended.toJson());
+        final result = applyPlacement(
+          ended,
+          parseMove({'offerIndex': 0, 'tap': tap}),
+        ) as PlacementRejected;
+        expect(result.code, GameplayRejection.gameEnded);
+        expect(jsonEncode(result.state.toJson()), before);
+        expect(result.state.cells, ended.cells);
+        expect(result.state.offers, ended.offers);
+        expect(result.state.futurePieces, ended.futurePieces);
+        expect(result.state.turnsUsed, ended.turnsUsed);
+        expect(result.state.score, ended.score);
+      }
+    },
+  );
 
-  test('out of bounds is a safety stop, not a gameplay rejection', () {
-    final state = parseGameState(_blank());
-    final result = applyPlacement(
-      state,
+  test('out of bounds is a safety stop while in progress and when ended', () {
+    final active = parseGameState(_blank());
+    final activeBefore = jsonEncode(active.toJson());
+    final activeResult = applyPlacement(
+      active,
       parseMove({
         'offerIndex': 0,
         'tap': [9, 9],
       }),
     ) as PlacementUnsafe;
-    expect(result.reason, PlacementSafety.tapOutOfBounds);
-    expect(result.state, state);
+    expect(activeResult.reason, PlacementSafety.tapOutOfBounds);
+    expect(jsonEncode(activeResult.state.toJson()), activeBefore);
+    expect(activeResult.state.offers, active.offers);
+    expect(activeResult.state.futurePieces, active.futurePieces);
+    expect(activeResult.state.turnsUsed, active.turnsUsed);
+    expect(activeResult.state.score, active.score);
+
+    final ended = parseGameState(
+      _blank()
+        ..['turnsUsed'] = 5
+        ..['moveLimit'] = 5
+        ..['status'] = 'ended',
+    );
+    final endedBefore = jsonEncode(ended.toJson());
+    final endedResult = applyPlacement(
+      ended,
+      parseMove({
+        'offerIndex': 0,
+        'tap': [9, 9],
+      }),
+    ) as PlacementUnsafe;
+    expect(endedResult.reason, PlacementSafety.tapOutOfBounds);
+    expect(endedResult, isNot(isA<PlacementRejected>()));
+    expect(jsonEncode(endedResult.state.toJson()), endedBefore);
+    expect(endedResult.state.cells, ended.cells);
+    expect(endedResult.state.offers, ended.offers);
+    expect(endedResult.state.futurePieces, ended.futurePieces);
+    expect(endedResult.state.turnsUsed, ended.turnsUsed);
+    expect(endedResult.state.score, ended.score);
   });
 
   test('empty future stream defers offer replacement', () {
