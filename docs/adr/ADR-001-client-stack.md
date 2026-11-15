@@ -1,6 +1,6 @@
 # ADR-001 — Client stack
 
-Status: **Proposed**. Owner approval is required before this status becomes Accepted. This record does not accept the Blueprint and does not add application code.
+Status: **Accepted** — owner-approved 2026-11-15 in PZD-14, **conditional on mandatory pre-scaffold executable compatibility gates**. Accepted architecture: Flutter 3.50.0 / Dart 3.14.0 presentation, Flame 1.38.2 rendering/input, independent pure Dart rules engine. This is an architectural decision only; it does not declare Flutter 3.50 + Flame tested, authorize app scaffolding before gate PASS, or add application code.
 
 Jira: [PZD-14](https://puzzle-duel-app.atlassian.net/browse/PZD-14). Evidence: [PZD-14-EVIDENCE.md](../architecture/PZD-14-EVIDENCE.md). Parity: [PZD-14-GAMEPLAY-PARITY.md](../architecture/PZD-14-GAMEPLAY-PARITY.md).
 
@@ -124,6 +124,6 @@ Reject a native-only client for MVP. Keep custom rendering without Flame as a do
 
 ## 14. Owner-approval requirements
 
-The owner decides whether this Proposed record becomes Accepted. Acceptance is required before `flutter create`, Flame dependency commits, or UI implementation. Acceptance still requires the Flutter 3.50 gate to pass before those commands run. This PR does not perform that acceptance and does not mark the gate passed.
+**Owner decision: Accepted (2026-11-15)** with an explicit execution prerequisite. Before any `flutter create`, Flame dependency commit, or UI implementation, the Flutter 3.50.0 / Dart 3.14.0 + Flame 1.38.2 gate in [PZD-14-EVIDENCE.md](../architecture/PZD-14-EVIDENCE.md) **MUST PASS** (`flutter --version`, `flutter pub get`, `flutter analyze` for `GameWidget` and `ColorEffect`, and no incompatible first-party/legacy public-type boundary). Its current result is **NOT_RUN**. A failed gate blocks scaffolding and requires owner-reviewed remediation; Accepted is **not** a claim of successful execution.
 
 PZD-12 does not block this client recommendation. It blocks backend host claims only.
