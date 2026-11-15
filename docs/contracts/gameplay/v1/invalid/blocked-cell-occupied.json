@@ -1,0 +1,89 @@
+{
+  "expectCode": "blocked_cell_occupied",
+  "fixture": {
+    "id": "invalid_probe",
+    "number": 1,
+    "kind": "fullMove",
+    "rulesVersion": "core-001.v1",
+    "ruleIds": [
+      "CORE-001"
+    ],
+    "summary": "Structural rejection probe. Not a golden gameplay result.",
+    "scenarios": [
+      {
+        "name": "probe",
+        "given": {
+          "state": {
+            "rulesVersion": "core-001.v1",
+            "boardSize": 5,
+            "moveLimit": 5,
+            "blocked": [
+              [0, 0]
+            ],
+            "cells": [
+              [
+                {"shape": "circle", "direction": "up"},
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            ],
+            "offers": [
+              {"shape": "circle", "direction": "right"},
+              {"shape": "diamond", "direction": "down"},
+              {"shape": "triangle", "direction": "left"}
+            ],
+            "futurePieces": [
+              {"shape": "circle", "direction": "left"},
+              {"shape": "diamond", "direction": "up"}
+            ],
+            "turnsUsed": 0,
+            "score": 0,
+            "status": "in_progress"
+          }
+        },
+        "when": {
+          "moves": [
+            {
+              "offerIndex": 0,
+              "tap": [0, 0]
+            }
+          ]
+        },
+        "expected": {
+          "steps": []
+        },
+        "derivation": "This document is intentionally invalid. It is not an expected gameplay outcome and must be rejected by structural validation."
+      }
+    ]
+  }
+}

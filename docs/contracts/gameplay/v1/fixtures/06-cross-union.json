@@ -1,0 +1,112 @@
+{
+  "id": "cross_union",
+  "number": 6,
+  "kind": "phase",
+  "phase": "match",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-MATCH",
+    "PZD-11-SCORE"
+  ],
+  "summary": "One horizontal run and one vertical run share a center cell, so five cells score 500.",
+  "scenarios": [
+    {
+      "name": "overlapping_runs",
+      "given": {
+        "rulesVersion": "core-001.v1",
+        "boardSize": 5,
+        "blocked": [],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            {"shape": "circle", "direction": "up"},
+            null,
+            null
+          ],
+          [
+            null,
+            {"shape": "circle", "direction": "up"},
+            {"shape": "circle", "direction": "up"},
+            {"shape": "circle", "direction": "up"},
+            null
+          ],
+          [
+            null,
+            null,
+            {"shape": "circle", "direction": "up"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ],
+        "wave": 1
+      },
+      "when": {
+        "phase": "match"
+      },
+      "expected": {
+        "cleared": [
+          [1, 2],
+          [2, 1],
+          [2, 2],
+          [2, 3],
+          [3, 2]
+        ],
+        "scoreDelta": 500,
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "derivation": "Direct match phase, not a player move and not a shift. Circles at [2,1], [2,2], and [2,3] are a horizontal run of 3. Circles at [1,2], [2,2], and [3,2] are a vertical run of 3. The shared center [2,2] is deleted once. Unique cells in row-major order are [1,2], [2,1], [2,2], [2,3], [3,2]. Count is 5. At wave 1 the score is 5*100*1=500. Scoring the two runs as six clears would be 600, which the unique-cell rule rejects. Arrows do not affect the match. Diagonal cells are not scanned. This phase fixture stops at the clear; it does not run the following shift."
+    }
+  ]
+}

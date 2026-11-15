@@ -1,0 +1,111 @@
+{
+  "id": "preoccupied_shift",
+  "number": 8,
+  "kind": "phase",
+  "phase": "shift",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-SHIFT"
+  ],
+  "summary": "A piece cannot enter a cell that was occupied at shift start, even if that occupant leaves.",
+  "scenarios": [
+    {
+      "name": "occupied_at_phase_start",
+      "given": {
+        "rulesVersion": "core-001.v1",
+        "boardSize": 5,
+        "blocked": [],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            {"shape": "circle", "direction": "right"},
+            {"shape": "diamond", "direction": "right"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "when": {
+        "phase": "shift"
+      },
+      "expected": {
+        "moved": [
+          {
+            "sourceIndex": 12,
+            "from": [2, 2],
+            "to": [2, 3],
+            "shape": "diamond",
+            "direction": "right"
+          }
+        ],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            {"shape": "circle", "direction": "right"},
+            null,
+            {"shape": "diamond", "direction": "right"},
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "derivation": "Direct shift phase. At phase start [2,2] holds diamond-right, which proposes [2,3]. [2,3] is empty, in bounds, not blocked, and only one piece claims it, so diamond-right moves. Its source index is 2*5+2=12. Circle-right at [2,1] proposes [2,2]. That cell was occupied when the phase began, so it is unavailable even though the occupant is leaving. Circle-right stays at [2,1]. After the shift, [2,2] is empty and diamond-right is at [2,3]."
+    }
+  ]
+}

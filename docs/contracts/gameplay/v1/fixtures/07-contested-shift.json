@@ -1,0 +1,103 @@
+{
+  "id": "contested_shift",
+  "number": 7,
+  "kind": "phase",
+  "phase": "shift",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-SHIFT"
+  ],
+  "summary": "Two pieces claim the same empty cell in one shift, so neither moves.",
+  "scenarios": [
+    {
+      "name": "both_claim_center",
+      "given": {
+        "rulesVersion": "core-001.v1",
+        "boardSize": 5,
+        "blocked": [],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            {"shape": "circle", "direction": "right"},
+            null,
+            {"shape": "diamond", "direction": "left"},
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "when": {
+        "phase": "shift"
+      },
+      "expected": {
+        "moved": [],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            {"shape": "circle", "direction": "right"},
+            null,
+            {"shape": "diamond", "direction": "left"},
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "derivation": "Direct shift phase on a 5x5 board. Circle-right at [2,1] and diamond-left at [2,3] both propose empty [2,2]. The destination is free at phase start, but more than one source claims it, so every claimant fails and both pieces remain in place. moved is empty. Shapes do not affect the shift. No match phase is run."
+    }
+  ]
+}

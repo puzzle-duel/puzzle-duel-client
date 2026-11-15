@@ -1,0 +1,286 @@
+{
+  "id": "illegal_tap",
+  "number": 4,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-INVALID-MOVE",
+    "PZD-11-OFFER-STREAM"
+  ],
+  "summary": "A blocked tap and an occupied tap are rejected without changing the state.",
+  "scenarios": [
+    {
+      "name": "blocked_tap",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [
+            [2, 2]
+          ],
+          "cells": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "right"},
+            {"shape": "diamond", "direction": "down"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "up"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [2, 2]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": false,
+            "error": {
+              "code": "blocked_tap"
+            },
+            "state": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [
+                [2, 2]
+              ],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "right"},
+                {"shape": "diamond", "direction": "down"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "up"}
+              ],
+              "turnsUsed": 0,
+              "score": 0,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "Cell [2,2] is a static blocked cell, so it is not a legal tap. The attempt is rejected with code blocked_tap. turnsUsed stays 0, score stays 0, both offer slots and futurePieces stay unchanged, and the board is not modified. No piece is consumed from the stream."
+    },
+    {
+      "name": "occupied_tap",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              {"shape": "diamond", "direction": "down"},
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "right"},
+            {"shape": "diamond", "direction": "down"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "up"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [1, 1]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": false,
+            "error": {
+              "code": "occupied_tap"
+            },
+            "state": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  {"shape": "diamond", "direction": "down"},
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "right"},
+                {"shape": "diamond", "direction": "down"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "up"}
+              ],
+              "turnsUsed": 0,
+              "score": 0,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "Cell [1,1] already holds diamond-down, so the tap is not an empty cell. The attempt is rejected with code occupied_tap. The existing piece, the offer tray, the future stream, the turn count, and the score are unchanged."
+    }
+  ]
+}
