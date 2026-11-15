@@ -24,7 +24,8 @@ The same bytes of this file and of [PZD-14-GAMEPLAY-PARITY.md](PZD-14-GAMEPLAY-P
 | Local Flutter | 3.47.8 stable, revision 737ba8f885, 2026-10-22. Dart 3.13.7. | `flutter --version` and `dart --version` on this machine | Command ran. |
 | Node.js Active LTS | 26.x Lithium. 26.13.1 dated 2026-11-10. Active LTS began 2026-10-28. | [Release schedule](https://github.com/nodejs/release), [26.13.1 release](https://nodejs.org/en/blog/release/v26.13.1) | Pages read. `nodejs.org/dist/index.json` first `v26` LTS row was `v26.13.1`. |
 | Node.js also still in LTS | 24 Maintenance, 22 Maintenance. | Node.js release schedule | Page read. |
-| Local Node | v20.20.2 | `node --version` | Command ran. |
+| Flutter 3.50 design libraries | `package:material_ui` and `package:cupertino_ui` are standalone. In-framework Material and Cupertino are formally deprecated in Flutter 3.50. Opt-in existed since 3.47. Stable landing is 3.50. | [Breaking change](https://docs.flutter.dev/release/breaking-changes/material-ui-and-cupertino-ui) | Page read. No application was created. |
+| Local Node | v20.20.2. Node 20 Iron is EOL. Last listed update 2026-03-24. Not a production or CI target. | `node --version` and [Node.js releases](https://nodejs.org/en/about/previous-releases) | Command ran. Page read. |
 | NestJS | 12.5.0, released 2026-11-12. npm `engines.node` is `>=20`. Docs: run on Node 20.19+, or 22.12+ on the 22 line. CLI generators need 22.22.3+, 24.15+, or 26+. | [npm registry](https://registry.npmjs.org/@nestjs/core/latest), [version FAQ](https://docs.nestjs.com/faq/versions), [migration guide](https://docs.nestjs.com/migration-guide), [GitHub release v12.5.0](https://github.com/nestjs/nest/releases) | Registry JSON and docs read. CLI was not run. |
 | TypeScript | Nest 12 migration says `nest upgrade` moves TypeScript to v6. | [Nest 12 migration guide](https://docs.nestjs.com/migration-guide) | Page read. No project was generated, so no resolved patch is claimed. |
 | PostgreSQL supported majors on the versioning page | 18.7, 17.12, 16.16, 15.20, and 14.25 marked Yes. 18 final support date listed as 2030-11-14. 14 final release listed as 2026-11-12. 19 was announced as RC 2, not a supported final major. | [Versioning policy](https://www.postgresql.org/support/versioning/) | Page fetched 2026-11-15. |
@@ -52,13 +53,43 @@ flutter pub get
 rm -rf /tmp/pzd14-flame-spike
 ```
 
-Result: `flutter pub get` on the installed Flutter 3.47.8 resolved `flame 1.38.2` from pub.dev. Lock checksum `sha256:b4d7e59b81f35a426f8b39dcec10175180b9c2984b2b2e619021660d8951307c`. The directory was removed. No Flutter or Nest project was added to either repository.
+Result: `flutter pub get` on the installed Flutter 3.47.8 resolved `flame 1.38.2` from pub.dev. Lock checksum `sha256:b4d7e59b81f35a426f8b39dcec10175180b9c2984b2b2e619021660d8951307c`. The directory was removed. No Flutter or Nest project was added to either repository. This result is not a Flutter 3.50 execution.
+
+Published Flame 1.38.2 was unpacked from `https://pub.dev/api/archives/flame-1.38.2.tar.gz` and scanned. Thirteen files under `lib/` import `package:flutter/material.dart`. The scan found no `package:flutter/cupertino.dart` import and no `package:material_ui` import. Examples in those libraries: `ColorEffect.color` is a `Color` imported through `package:flutter/material.dart`; `ComponentsNotifier` and `CollisionDetectionCompletionNotifier` extend `ChangeNotifier` through the same import; `BaseFutureBuilder` extends `StatelessWidget` through that import. `IconComponent` imports `IconData` from `package:flutter/widgets.dart`. The scan did not compile the package, so it does not decide which of those names are deprecated-library types and which are re-exports of `dart:ui` or `package:flutter/widgets.dart`.
+
+The Flutter 3.50.0 macOS arm64 archive responded `200` with `content-length: 2145325654`. It was not downloaded.
+
+## Flutter 3.50 gate for Flame 1.38.2
+
+Scaffolding does not start until a disposable directory, outside both repositories, records every row. The directory is deleted and is not committed.
+
+| Check | PASS | FAIL |
+| --- | --- | --- |
+| SDK | `flutter --version` prints Flutter 3.50.0 and Dart 3.14.0. | Any other SDK, or the system Flutter 3.47.8, is used as the proof. |
+| Resolve | `flutter pub get` with `flame: 1.38.2` exits 0. | Resolution fails, or a different Flame version is selected. |
+| Analyze | `flutter analyze` exits 0 for a file that imports `package:flame/game.dart` and names `ColorEffect` and `GameWidget`. | An error is reported. A deprecation info is recorded and does not by itself fail the gate. |
+| Public types | First-party code can call the Flame APIs it needs without passing a `package:material_ui` value into a parameter whose type is declared by `package:flutter/material.dart` or `package:flutter/cupertino.dart`. | A required call crosses that type boundary. `MaterialUiCompatibilityBridge` does not count as a fix for this row. |
+
+Current result of this gate: **NOT_RUN**. The 3.47.8 resolve and the source scan are inputs, not a pass.
+
+## NestJS 12 smoke test
+
+Node 26 remains the proposed runtime. Nest's version FAQ still lists a runtime floor of Node 20.19+, or 22.12+ on the 22 line. That floor does not make EOL Node 20 a target. Exact `@nestjs/core`, `typescript`, and `rxjs` versions stay unlocked until scaffolding is authorized.
+
+The smoke test is disposable, outside either repository, and is not committed:
+
+1. `node --version` prints a Node 26 release.
+2. Dependency installation exits 0 and the lockfile records the resolved Nest 12, TypeScript, and RxJS versions.
+3. TypeScript compilation exits 0.
+4. The process starts and then shuts down without a crash.
+
+Current result: **NOT_RUN**. Local Node v20.20.2 was not used for this test.
 
 ## NOT_RUN
 
-- Upgrade to Flutter 3.50.0 / Dart 3.14.0, and any Flame run on that SDK. Flame's published floor is Flutter 3.41.0, so 3.50 is above the declared floor. That is a constraint reading, not an execution result.
+- The Flutter 3.50 Flame gate above. Flame's published floor is Flutter 3.41.0. That constraint is not an execution result on 3.50.0.
 - Frame time, memory, battery, cold start, and CI minute measurements. No numbers of that kind are claimed.
-- `nest new`, Nest CLI, and a TypeScript compile. Local Node v20.20.2 can run a Nest 12 application under the documented runtime floor, and it is below the documented CLI generator floor.
+- The NestJS 12 smoke test above. `nest new` was not run. No production scaffold was created.
 - iOS and Android device or simulator launches.
 - Database creation, migrations, host inventory, and deployment.
 

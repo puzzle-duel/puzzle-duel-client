@@ -30,7 +30,9 @@ Versions, pages, and commands are in [PZD-14-EVIDENCE.md](../architecture/PZD-14
 - Current stable Flutter is 3.50.0 with Dart 3.14.0, published 2026-11-11.
 - Flutter 3.50 supports Android API 24–37 and iOS 15–27.
 - Flame 1.38.2, published 2026-08-27, declares Dart `>=3.11.0 <4.0.0` and Flutter `>=3.41.0`, and depends on Flutter.
-- This machine has Flutter 3.47.8 and Dart 3.13.7. A disposable `flutter pub get` resolved Flame 1.38.2 and was deleted. Flame was not executed on Flutter 3.50.0.
+- This machine has Flutter 3.47.8 and Dart 3.13.7. A disposable `flutter pub get` resolved Flame 1.38.2 and was deleted. That run is not a Flutter 3.50 result.
+- Flutter 3.50 deprecates the in-framework Material and Cupertino libraries and publishes `package:material_ui` and `package:cupertino_ui`. Source: [the breaking-change note](https://docs.flutter.dev/release/breaking-changes/material-ui-and-cupertino-ui).
+- Flame 1.38.2 has not been resolved or analyzed on Flutter 3.50.0. The 3.50 SDK archive was not downloaded. The gate in the evidence log is **NOT_RUN**.
 - No frame-time number was measured.
 
 Minimum platform assumption, taken from the Flutter 3.50 support page and not from a device run: Android API 24 and iOS 15. Store-policy targets above that floor are an owner choice.
@@ -42,6 +44,10 @@ Minimum platform assumption, taken from the Flutter 3.50 support page and not fr
 - An empty replacement stream before the move limit, including an early full board, is not a specified v2 tray. The engine must fail closed.
 - Local score is not a ranked score. [ADR-002](ADR-002-local-game-state.md) keeps that boundary.
 - No production Flutter app is created by this ADR.
+- A new Flutter 3.50 application imports `package:material_ui/material_ui.dart` and does not import `package:flutter/material.dart` or `package:flutter/cupertino.dart`. `cupertino_ui` is added only if a Cupertino widget is used. Dependencies are added with `flutter pub add` when scaffolding is authorized, and the resolved versions are locked then.
+- `MaterialUiCompatibilityBridge`, placed through `MaterialApp.builder`, supplies theme and localization data to unmigrated children that read `Theme.of(context)` or `MaterialLocalizations.of(context)`. It does not make a legacy public type assignable to a `material_ui` type. `FloatingActionButtonLocation`, `ColorScheme`, and `TextTheme` are the examples named by the breaking-change note.
+- A third-party package is accepted only after its legacy imports are listed. Context-only theme reads may use the bridge. A public signature that requires a legacy Material or Cupertino type fails the package until upstream migrates, or until Puzzle Duel avoids that signature.
+- Flame 1.38.2 is under that third-party rule. Published `lib/` sources import `package:flutter/material.dart`. Scaffolding waits for the Flutter 3.50 gate in the evidence log.
 
 Proposed shape:
 
@@ -62,7 +68,7 @@ flowchart TD
 
 Flame gives a game loop, components, and gesture helpers that a 5×5 to 7×7 animated board would otherwise rebuild. Flutter gives one layout system for phones and tablets, semantics, text scale, and lifecycle signals.
 
-The disadvantage is a rendering library tied to Flutter. Flame 1.38.2 was published before Flutter 3.50 and only declares a minimum of Flutter 3.41.0. That is compatibility by constraint, not a 3.50 execution test. Flame 2 prereleases are not a candidate.
+The disadvantage is a rendering library tied to Flutter. Flame 1.38.2 was published before Flutter 3.50, declares only Flutter `>=3.41.0`, and its libraries import the design library that Flutter 3.50 deprecates. Compatibility on 3.50 is untested. Flame 2 prereleases are not a candidate.
 
 Custom painting without Flame removes that package and leaves gesture arenas, sprite timing, and the game loop to this project. That is a reasonable fallback if Flame's input or lifecycle behavior blocks the puzzle. It is not the starting recommendation.
 
@@ -77,6 +83,8 @@ A compromised animation clock must not change the committed board. State changes
 ## 8. Testing and CI implications
 
 Pure Dart tests can run on Ubuntu and must consume [the fixture suites](../contracts/gameplay/v1/README.md) as specified in the parity document. Flame widget tests are a later presentation suite. They do not replace fixture replay.
+
+Before scaffolding, the Flutter 3.50 gate in the evidence log must pass: version banner, `flutter pub get` for Flame 1.38.2, `flutter analyze` of a Flame import, and no required call that crosses a legacy public type. A deprecation info is recorded. An analyzer error fails the gate. The current gate result is **NOT_RUN**.
 
 This repository's current workflow checks the Python and Node reference checkers when fixture files change. It does not compile Flutter. Adding macOS runners for iOS builds is a later cost and is not part of this change. No dollar figure is claimed.
 
@@ -102,7 +110,7 @@ If Flame is later rejected, the rules package stays. Only the rendering module i
 
 ## 12. Outstanding unknowns
 
-- Flame on Flutter 3.50.0 was not executed.
+- Flame on Flutter 3.50.0 was not executed. The source scan of the published tarball is not that execution.
 - Store minimums above API 24 and iOS 15 are not chosen.
 - Reduced-motion behavior is a requirement, not a specified animation list.
 - Early full-board end with an empty piece stream still has no approved tray.
@@ -110,12 +118,12 @@ If Flame is later rejected, the rules package stays. Only the rendering module i
 
 ## 13. Recommendation
 
-Adopt Flutter for presentation, Flame for board rendering and input gestures, and a pure Dart rules engine for `core-001.v1` and `core-001.v2`. Target Flutter 3.50.0 and Dart 3.14.0 when the application is scaffolded. Flame 1.38.2 is the current stable package and resolves on Flutter 3.47.8; re-resolve it on 3.50.0 at scaffold time. Do not start from Flame 2 prereleases.
+Adopt Flutter for presentation, Flame for board rendering and input gestures, and a pure Dart rules engine for `core-001.v1` and `core-001.v2`. Target Flutter 3.50.0 and Dart 3.14.0, with first-party design imports from `package:material_ui`. Flame 1.38.2 remains the candidate package. Do not start from Flame 2 prereleases. Do not scaffold until the Flutter 3.50 gate passes.
 
 Reject a native-only client for MVP. Keep custom rendering without Flame as a documented fallback, not the selection.
 
 ## 14. Owner-approval requirements
 
-The owner decides whether this Proposed record becomes Accepted. Acceptance is required before `flutter create`, Flame dependency commits, or UI implementation. This PR does not perform that acceptance.
+The owner decides whether this Proposed record becomes Accepted. Acceptance is required before `flutter create`, Flame dependency commits, or UI implementation. Acceptance still requires the Flutter 3.50 gate to pass before those commands run. This PR does not perform that acceptance and does not mark the gate passed.
 
 PZD-12 does not block this client recommendation. It blocks backend host claims only.
