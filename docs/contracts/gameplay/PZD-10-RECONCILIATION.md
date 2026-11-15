@@ -1,6 +1,6 @@
 # PZD-10 — Contract reconciliation
 
-Status: implementation record for review. This document does not accept the Blueprint, accept an ADR, or choose the terminal offer representation.
+Status: implementation record for review. This document does not accept the Blueprint or an ADR. The owner has approved terminal representation A.
 
 Jira: https://puzzle-duel-app.atlassian.net/browse/PZD-10
 
@@ -8,7 +8,7 @@ Jira: https://puzzle-duel-app.atlassian.net/browse/PZD-10
 
 | Finding | Class | Historical `01`–`12` outputs |
 | --- | --- | --- |
-| PD-07 terminal tray | Blocked representation choice | Unchanged. Checkers still abort when `futurePieces` is empty. They do not invent a piece. |
+| PD-07 terminal tray | Normative replay addition, new ruleset `core-001.v2` | Unchanged. v1 checkers still abort when `futurePieces` is empty. They do not invent a piece. |
 | PD-08 initial board | Non-breaking additional validation | Unchanged. Full-move starts already had no run of 3. Phase fixtures still may. |
 | PD-09 end after cascade | Non-breaking additional regression | Unchanged. New fixture `13-cascade-reopen-end.json` pins the approved cases. `end_conditions` still pins the no-clear fill. |
 | PD-10 in-bounds precedence | Non-breaking additional regression | Unchanged. The empty-cell ended tap in `end_conditions` still expects `game_ended`. New taps cover blocked and occupied cells. |
@@ -16,24 +16,23 @@ Jira: https://puzzle-duel-app.atlassian.net/browse/PZD-10
 | PD-12 cascade termination | Checker safety, not a score cap | Unchanged. Valid cascades still score every wave. The 20-wave stop remains a hang-guard. A non-progressing clear is a separate abort. |
 | PD-13 `core-001.v1` | Documentation clarification | Unchanged. The identifier was already the fixture const. |
 
-## PD-07 — terminal offer representation (not implemented)
+## PD-07 — terminal offer representation
 
-Approved behavior: the ordered supply is fixed before the game, it is sufficient for the move budget, nothing is generated on demand, and the final permitted move does not need a replacement. Official participants share that versioned sequence.
+The owner approved representation A, the nullable spent slot.
 
-Current v1 serialization cannot express the final move. `offers` has length exactly 3. Both checkers replace the used slot from `futurePieces` and abort when that list is empty. Fixture `11-end-conditions.json` still has a spare future piece on its last legal move, so its bytes stay valid.
+Classification: this is not serialization alone. A final legal move that previously had no defined replay result now ends with a concrete tray. PD-13 requires a new rules version when normative replay results change. The new contract is `core-001.v2` under `docs/contracts/gameplay/v2/`. `core-001.v1` golden fixtures `01`–`12` stay byte-identical, and the v1 checkers still abort on an empty stream. No migration of a v1 replay onto v2 is claimed.
 
-No approved document chooses among these incompatible terminal representations:
+v2 rules:
 
-1. **Nullable spent slot.** `offers` stays length 3. After the final permitted move, the used slot becomes `null` when no future piece remains. Earlier in-progress states still hold three pieces.
-2. **Shorter tray.** The used slot is removed, so `offers` length becomes 2. This breaks the length-3 invariant on the terminal state.
-3. **Keep the used piece.** The slot still shows the piece just played. A reader cannot tell a spent slot from a piece that is still offered.
-4. **Drop `offers` on the terminal state.** The required state field disappears.
+- `offers` stays a three-element array.
+- While `status` is `in_progress`, every slot is a playable piece. A null slot in that state is rejected.
+- Placement, matching, cascade, and score are resolved before the terminal tray is written.
+- If that resolved move ends the game and `futurePieces` is empty, the consumed slot becomes JSON `null`. The other two slots stay as they were. No piece is generated or copied in.
+- If the stream is empty and the resolved move would leave the game `in_progress`, the checker aborts and does not return an active null tray.
+- A later tap on an ended game returns `game_ended` and does not consume an offer or change state.
+- Out-of-bounds and malformed coordinates still have no precedence.
 
-Recommendation: **nullable spent slot**, only for the legal move that exhausts the stream. It keeps three positions for active play, does not invent a piece, and is visibly different from an offered piece. Historical fixtures never take this path, so their outputs can stay byte-identical under `core-001.v1`.
-
-This recommendation is not implemented. Implementing any of the four would change replay output for that move and needs an owner decision before a versioned fixture is added.
-
-Positive coverage of a completed final move with an empty stream is therefore absent. Negative coverage is present: an otherwise legal move with `futurePieces: []` aborts, and the caller state is not rewritten with a filler piece.
+`fixtures/01-terminal-null-slot.json` is the positive case: last permitted move, cascade score 300, slot 0 null, slots 1 and 2 unchanged, then empty, blocked, and occupied taps return `game_ended`. `invalid/null-offer-while-active.json` is the active-null rejection. Both checkers also refuse an empty stream on a move that does not end the game.
 
 ## PD-08 through PD-12
 
@@ -45,4 +44,4 @@ PD-12 records a wave only when that clear removes at least three occupied cells 
 
 ## Parity
 
-`docs/contracts/gameplay/v1/` is byte-identical in the client and backend reconciliation branches. Files `01` through `12` are unchanged from main. Checksums cover the added fixture and probe.
+`docs/contracts/gameplay/v1/` and `docs/contracts/gameplay/v2/` are each byte-identical in the client and backend reconciliation branches. Files `01` through `12` are unchanged from the historical v1 suite. v1 checksums change only where the schema description and README were corrected. v2 checksums cover the terminal fixture and the active-null probe.

@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "puzzle-duel-gameplay-fixture-v2.schema.json",
+  "title": "Puzzle Duel canonical gameplay fixture v2",
+  "description": "Language-neutral golden fixture for CORE-001 / PZD-11. Coordinates are zero-based [row, column]. Row 0 is the top row because rows increase downward. up decreases row, down increases row, left decreases column, right increases column. cells[row][column] stores the cell. Row-major index is row*boardSize+column. This file describes fixture documents only. It is not a service endpoint and not the product engine. uniqueItems on blocked uses deep equality. validate.mjs also rejects a repeated coordinate and enforces the cross-field rules this schema does not state: square cells, empty row-major blocked cells, turnsUsed within moveLimit, and status consistency.",
+  "oneOf": [
+    { "$ref": "#/$defs/fullMoveFixture" },
+    { "$ref": "#/$defs/phaseFixture" }
+  ],
+  "$defs": {
+    "rulesVersion": {
+      "const": "core-001.v2",
+      "description": "core-001.v2 adds the approved terminal offer: a length-3 tray whose spent slot is null only after the resolved move has ended the game. core-001.v1 remains the historical ruleset. Status names and typed error strings are still suite vocabulary."
+    },
+    "ruleId": {
+      "enum": [
+        "CORE-001",
+        "PZD-11-PLACEMENT",
+        "PZD-11-INVALID-MOVE",
+        "PZD-11-MATCH",
+        "PZD-11-SHIFT",
+        "PZD-11-SCORE",
+        "PZD-11-END",
+        "PZD-11-OFFER-STREAM",
+        "PZD-11-REPLAY"
+      ]
+    },
+    "shape": { "enum": ["circle", "diamond", "triangle"] },
+    "direction": { "enum": ["up", "right", "down", "left"] },
+    "coordinate": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 0 }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "piece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "direction"],
+      "properties": {
+        "shape": { "$ref": "#/$defs/shape" },
+        "direction": { "$ref": "#/$defs/direction" }
+      }
+    },
+    "cell": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/piece" }
+      ]
+    },
+    "status": {
+      "enum": ["in_progress", "ended"],
+      "description": "Fixture vocabulary for the contract status field. in_progress: turnsUsed < moveLimit and at least one empty non-blocked cell. ended: turnsUsed >= moveLimit or no empty non-blocked cell. The words are the suite's names for those two contract states."
+    },
+    "errorCode": {
+      "enum": ["blocked_tap", "occupied_tap", "game_ended"],
+      "description": "Typed rejection names for the cases the contract requires. When status is already ended, an in-bounds tap returns game_ended whether the cell is empty, blocked, or occupied. Out-of-bounds and malformed coordinates have no precedence here."
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rulesVersion", "boardSize", "moveLimit", "blocked", "cells", "offers", "futurePieces", "turnsUsed", "score", "status"],
+      "properties": {
+        "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
+        "boardSize": { "type": "integer", "minimum": 1 },
+        "moveLimit": { "type": "integer", "minimum": 1 },
+        "blocked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coordinate" },
+          "description": "Static obstacles. Draft 2020-12 uniqueItems compares elements with deep equality, so [[1,2],[1,2]] is invalid. validate.mjs rejects that duplicate as well, and requires each listed cell to be empty and row-major."
+        },
+        "cells": {
+          "type": "array",
+          "description": "cells[row][column]. Length of cells and of each row is boardSize.",
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/cell" }
+          }
+        },
+        "offers": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/piece" }] },
+          "description": "Length 3. While status is in_progress every slot is a piece. Null is only the spent slot on an ended state when no replacement remained."
+        },
+        "futurePieces": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/piece" },
+          "description": "Ordered replacement stream. On a resolved move that ends the game, an empty stream writes null into the consumed slot and does not invent a piece. An empty stream that would leave status in_progress is rejected."
+        },
+        "turnsUsed": { "type": "integer", "minimum": 0 },
+        "score": { "type": "integer", "minimum": 0 },
+        "status": { "$ref": "#/$defs/status" }
+      }
+    },
+    "move": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offerIndex", "tap"],
+      "properties": {
+        "offerIndex": { "enum": [0, 1, 2] },
+        "tap": { "$ref": "#/$defs/coordinate" }
+      }
+    },
+    "moved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceIndex", "from", "to", "shape", "direction"],
+      "properties": {
+        "sourceIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Row-major index of from at the start of the shift."
+        },
+        "from": { "$ref": "#/$defs/coordinate" },
+        "to": { "$ref": "#/$defs/coordinate" },
+        "shape": { "$ref": "#/$defs/shape" },
+        "direction": { "$ref": "#/$defs/direction" }
+      },
+      "description": "A piece that changed cells. Pieces that stay are omitted and remain visible on the board."
+    },
+    "wave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wave", "cleared", "scoreDelta", "moved"],
+      "properties": {
+        "wave": { "type": "integer", "minimum": 1 },
+        "cleared": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/coordinate" },
+          "description": "Unique cleared cells, row-major. Each clear is one wave."
+        },
+        "scoreDelta": { "type": "integer", "minimum": 0 },
+        "moved": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/moved" },
+          "description": "Shift caused by this clear, sourceIndex ascending. The next wave, if any, is the match found after this shift."
+        }
+      }
+    },
+    "legalStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legal", "landing", "turnsUsed", "scoreDelta", "waves", "finalState"],
+      "properties": {
+        "legal": { "const": true },
+        "landing": { "$ref": "#/$defs/coordinate" },
+        "turnsUsed": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Absolute turnsUsed after the step, identical to finalState.turnsUsed. A legal step increases the previous total by exactly 1."
+        },
+        "scoreDelta": { "type": "integer", "minimum": 0 },
+        "waves": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/wave" },
+          "description": "Empty when the placement causes no clear. No clear means no shift."
+        },
+        "finalState": { "$ref": "#/$defs/state" }
+      }
+    },
+    "illegalStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legal", "error", "state"],
+      "properties": {
+        "legal": { "const": false },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code"],
+          "properties": { "code": { "$ref": "#/$defs/errorCode" } }
+        },
+        "state": { "$ref": "#/$defs/state" }
+      }
+    },
+    "fullScenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "given", "when", "expected", "derivation"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "given": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "$ref": "#/$defs/state" } }
+        },
+        "when": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["moves"],
+          "properties": {
+            "moves": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/move" } }
+          }
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["steps"],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "oneOf": [{ "$ref": "#/$defs/legalStep" }, { "$ref": "#/$defs/illegalStep" }] }
+            },
+            "repeat": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["runs", "sameInitialState", "deepEqual"],
+              "properties": {
+                "runs": { "type": "integer", "minimum": 2 },
+                "sameInitialState": { "const": true },
+                "deepEqual": { "const": true }
+              }
+            }
+          }
+        },
+        "derivation": { "type": "string", "minLength": 80 }
+      }
+    },
+    "matchGiven": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rulesVersion", "boardSize", "blocked", "cells", "wave"],
+      "properties": {
+        "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
+        "boardSize": { "type": "integer", "minimum": 1 },
+        "blocked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coordinate" }
+        },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } },
+        "wave": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "shiftGiven": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rulesVersion", "boardSize", "blocked", "cells"],
+      "properties": {
+        "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
+        "boardSize": { "type": "integer", "minimum": 1 },
+        "blocked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coordinate" }
+        },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
+      }
+    },
+    "matchExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cleared", "scoreDelta", "cells"],
+      "properties": {
+        "cleared": { "type": "array", "items": { "$ref": "#/$defs/coordinate" } },
+        "scoreDelta": { "type": "integer", "minimum": 0 },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
+      }
+    },
+    "shiftExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moved", "cells"],
+      "properties": {
+        "moved": { "type": "array", "items": { "$ref": "#/$defs/moved" } },
+        "cells": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/cell" } } }
+      }
+    },
+    "fullMoveFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "number", "kind", "rulesVersion", "ruleIds", "summary", "scenarios"],
+      "properties": {
+        "id": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1, "maximum": 13 },
+        "kind": { "const": "fullMove" },
+        "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
+        "ruleIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/ruleId" } },
+        "summary": { "type": "string", "minLength": 20 },
+        "scenarios": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/fullScenario" } }
+      }
+    },
+    "phaseFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "number", "kind", "phase", "rulesVersion", "ruleIds", "summary", "scenarios"],
+      "properties": {
+        "id": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1, "maximum": 13 },
+        "kind": { "const": "phase" },
+        "phase": { "enum": ["match", "shift"] },
+        "rulesVersion": { "$ref": "#/$defs/rulesVersion" },
+        "ruleIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/ruleId" } },
+        "summary": { "type": "string", "minLength": 20 },
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "given", "when", "expected", "derivation"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "given": { "oneOf": [{ "$ref": "#/$defs/matchGiven" }, { "$ref": "#/$defs/shiftGiven" }] },
+              "when": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["phase"],
+                "properties": { "phase": { "enum": ["match", "shift"] } }
+              },
+              "expected": {
+                "oneOf": [
+                  { "$ref": "#/$defs/matchExpected" },
+                  { "$ref": "#/$defs/shiftExpected" }
+                ]
+              },
+              "derivation": { "type": "string", "minLength": 80 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

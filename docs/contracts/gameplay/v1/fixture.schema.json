@@ -58,7 +58,7 @@
     },
     "errorCode": {
       "enum": ["blocked_tap", "occupied_tap", "game_ended"],
-      "description": "Typed rejection names for the cases the contract requires. game_ended is pinned only when the tap would otherwise be a legal empty cell. Precedence against blocked_tap or occupied_tap is not defined."
+      "description": "Typed rejection names for the cases the contract requires. When status is already ended, an in-bounds tap returns game_ended whether the cell is empty, blocked, or occupied. Out-of-bounds and malformed coordinates have no precedence here."
     },
     "state": {
       "type": "object",
@@ -91,7 +91,7 @@
         "futurePieces": {
           "type": "array",
           "items": { "$ref": "#/$defs/piece" },
-          "description": "Ordered replacement stream. Consuming an offer when this array is empty is not specified and is not pinned."
+          "description": "Ordered replacement stream. core-001.v1 does not define an empty stream: its checkers abort and do not invent a piece. The terminal null slot is core-001.v2."
         },
         "turnsUsed": { "type": "integer", "minimum": 0 },
         "score": { "type": "integer", "minimum": 0 },

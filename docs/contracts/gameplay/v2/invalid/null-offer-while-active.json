@@ -1,0 +1,187 @@
+{
+  "expectCode": "null_offer_while_active",
+  "fixture": {
+    "id": "invalid_probe",
+    "number": 1,
+    "kind": "fullMove",
+    "rulesVersion": "core-001.v2",
+    "ruleIds": [
+      "CORE-001"
+    ],
+    "summary": "Structural rejection probe. Not a golden gameplay result.",
+    "scenarios": [
+      {
+        "name": "probe",
+        "given": {
+          "state": {
+            "rulesVersion": "core-001.v2",
+            "boardSize": 5,
+            "moveLimit": 5,
+            "blocked": [
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                2
+              ],
+              [
+                0,
+                3
+              ],
+              [
+                0,
+                4
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                1,
+                2
+              ],
+              [
+                1,
+                3
+              ],
+              [
+                1,
+                4
+              ],
+              [
+                2,
+                3
+              ],
+              [
+                2,
+                4
+              ],
+              [
+                3,
+                0
+              ],
+              [
+                3,
+                1
+              ],
+              [
+                3,
+                2
+              ],
+              [
+                3,
+                3
+              ],
+              [
+                3,
+                4
+              ],
+              [
+                4,
+                0
+              ],
+              [
+                4,
+                1
+              ],
+              [
+                4,
+                2
+              ],
+              [
+                4,
+                3
+              ],
+              [
+                4,
+                4
+              ]
+            ],
+            "cells": [
+              [
+                {
+                  "shape": "diamond",
+                  "direction": "up"
+                },
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                {
+                  "shape": "circle",
+                  "direction": "right"
+                },
+                {
+                  "shape": "circle",
+                  "direction": "right"
+                },
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              [
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            ],
+            "offers": [
+              null,
+              {
+                "shape": "diamond",
+                "direction": "down"
+              },
+              {
+                "shape": "triangle",
+                "direction": "left"
+              }
+            ],
+            "futurePieces": [],
+            "turnsUsed": 0,
+            "score": 0,
+            "status": "in_progress"
+          }
+        },
+        "when": {
+          "moves": [
+            {
+              "offerIndex": 0,
+              "tap": [
+                2,
+                2
+              ]
+            }
+          ]
+        },
+        "expected": {
+          "steps": []
+        },
+        "derivation": "This document is intentionally invalid. An in-progress tray must not contain null."
+      }
+    ]
+  }
+}
