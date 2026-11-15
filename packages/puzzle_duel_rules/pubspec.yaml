@@ -1,0 +1,10 @@
+name: puzzle_duel_rules
+description: Immutable Puzzle Duel game state and input validation. No placement or resolution.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dev_dependencies:
+  test: ^1.26.0
