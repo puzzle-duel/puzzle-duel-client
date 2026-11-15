@@ -43,8 +43,8 @@ SECRET_PATTERNS = (
 PLACEHOLDER_MARKERS = ("example", "dummy", "redacted", "placeholder", "not_a_secret", "xxxx")
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
-TEXT_SUFFIXES = {".md", ".yml", ".yaml", ".json", ".py", ".mjs", ".txt", ".js", ".ts", ".sh"}
-SKIP_DIRS = {".git", "__pycache__", "node_modules"}
+TEXT_SUFFIXES = {".md", ".yml", ".yaml", ".json", ".py", ".mjs", ".txt", ".js", ".ts", ".sh", ".dart"}
+SKIP_DIRS = {".git", "__pycache__", "node_modules", ".dart_tool"}
 
 
 def repo_root(start: Path | None = None) -> Path:

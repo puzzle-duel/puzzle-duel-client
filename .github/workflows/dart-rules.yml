@@ -1,0 +1,32 @@
+name: Dart rules tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/puzzle_duel_rules/**"
+      - ".github/workflows/dart-rules.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dart-test:
+    name: dart-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+        with:
+          sdk: 3.14.0
+      - name: Dart version
+        run: dart --version
+      - name: Format, analyze, and test
+        working-directory: packages/puzzle_duel_rules
+        run: |
+          dart pub get
+          dart format --output=none --set-exit-if-changed .
+          dart analyze
+          dart test

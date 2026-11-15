@@ -103,6 +103,14 @@ def test_secrets() -> None:
         expect_error(errors, "secret-like content", "comment bypass report")
         if live in "\n".join(errors):
             fail("secret report included the token value")
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        dart_token = "ghp_" + ("c" * 36)
+        write(root / "lib" / "token.dart", "const value = '" + dart_token + "';\n")
+        errors = gate.check_secrets(root)
+        expect_error(errors, "token.dart", "dart source scan")
+        if dart_token in "\n".join(errors):
+            fail("dart secret report included the token value")
 
 
 def test_pull_request_metadata() -> None:
@@ -149,6 +157,7 @@ def main() -> int:
     print("pr_quality_gate_test: PASS broken link is rejected")
     print("pr_quality_gate_test: PASS malformed ADR status is rejected")
     print("pr_quality_gate_test: PASS live tokens are rejected and placeholder token values are kept")
+    print("pr_quality_gate_test: PASS Dart sources are scanned without printing the token")
     print("pr_quality_gate_test: PASS incomplete PR metadata is rejected")
     print("pr_quality_gate_test: PASS historical fixtures 13 and v2 are not treated as 01-12")
     return 0
