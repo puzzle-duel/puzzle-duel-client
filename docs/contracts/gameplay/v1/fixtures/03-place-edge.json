@@ -1,0 +1,148 @@
+{
+  "id": "place_edge",
+  "number": 3,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-PLACEMENT",
+    "PZD-11-OFFER-STREAM"
+  ],
+  "summary": "Circle-up tapped on the top row lands on the tapped cell because forward is out of bounds.",
+  "scenarios": [
+    {
+      "name": "up_from_top_row",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "up"},
+            {"shape": "diamond", "direction": "down"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "up"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [0, 2]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [0, 2],
+            "turnsUsed": 1,
+            "scoreDelta": 0,
+            "waves": [],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [],
+              "cells": [
+                [
+                  null,
+                  null,
+                  {"shape": "circle", "direction": "up"},
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "down"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "diamond", "direction": "up"}
+              ],
+              "turnsUsed": 1,
+              "score": 0,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "Rows increase downward, so up decreases the row. Tap [0,2] with circle-up. The forward cell would be [-1,2], which is outside the board, so the piece lands on the tapped cell [0,2]. This is the contract result for place_edge. Nothing matches, score delta is 0, and the move costs one turn. Offer slot 0 becomes circle-left."
+    }
+  ]
+}

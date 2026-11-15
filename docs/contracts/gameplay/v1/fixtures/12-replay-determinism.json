@@ -1,0 +1,261 @@
+{
+  "id": "replay_determinism",
+  "number": 12,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-PLACEMENT",
+    "PZD-11-MATCH",
+    "PZD-11-SHIFT",
+    "PZD-11-SCORE",
+    "PZD-11-OFFER-STREAM",
+    "PZD-11-REPLAY"
+  ],
+  "summary": "The same versioned state and two-move transcript produce the same result when repeated, and the wave multiplier resets on the second move.",
+  "scenarios": [
+    {
+      "name": "two_move_transcript",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              {"shape": "circle", "direction": "left"},
+              {"shape": "circle", "direction": "left"},
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              {"shape": "diamond", "direction": "down"},
+              {"shape": "diamond", "direction": "down"},
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "up"},
+            {"shape": "diamond", "direction": "up"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "left"},
+            {"shape": "triangle", "direction": "right"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [0, 2]
+          },
+          {
+            "offerIndex": 1,
+            "tap": [4, 2]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [0, 2],
+            "turnsUsed": 1,
+            "scoreDelta": 300,
+            "waves": [
+              {
+                "wave": 1,
+                "cleared": [
+                  [0, 0],
+                  [0, 1],
+                  [0, 2]
+                ],
+                "scoreDelta": 300,
+                "moved": [
+                  {
+                    "sourceIndex": 10,
+                    "from": [2, 0],
+                    "to": [3, 0],
+                    "shape": "diamond",
+                    "direction": "down"
+                  },
+                  {
+                    "sourceIndex": 11,
+                    "from": [2, 1],
+                    "to": [3, 1],
+                    "shape": "diamond",
+                    "direction": "down"
+                  }
+                ]
+              }
+            ],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  {"shape": "diamond", "direction": "down"},
+                  {"shape": "diamond", "direction": "down"},
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "up"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "diamond", "direction": "left"},
+                {"shape": "triangle", "direction": "right"}
+              ],
+              "turnsUsed": 1,
+              "score": 300,
+              "status": "in_progress"
+            }
+          },
+          {
+            "legal": true,
+            "landing": [3, 2],
+            "turnsUsed": 2,
+            "scoreDelta": 300,
+            "waves": [
+              {
+                "wave": 1,
+                "cleared": [
+                  [3, 0],
+                  [3, 1],
+                  [3, 2]
+                ],
+                "scoreDelta": 300,
+                "moved": []
+              }
+            ],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "left"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "triangle", "direction": "right"}
+              ],
+              "turnsUsed": 2,
+              "score": 600,
+              "status": "in_progress"
+            }
+          }
+        ],
+        "repeat": {
+          "runs": 2,
+          "sameInitialState": true,
+          "deepEqual": true
+        }
+      },
+      "derivation": "Initial state has no run of 3. Move 1 uses offer 0, circle-up, tapped at [0,2]. Up is out of bounds, so it lands on [0,2] and completes circles [0,0], [0,1], [0,2]. Wave 1 of this move scores 3*100*1=300. The diamonds at [2,0] and [2,1] then step down into empty [3,0] and [3,1]. Source indexes are 10 and 11. They are still only a pair, so the move ends after one wave. Offer slot 0 becomes circle-left. Offer 1 is still diamond-up. Move 2 taps [4,2]. Forward [3,2] is empty and in bounds, so diamond-up lands on [3,2] and completes [3,0], [3,1], [3,2]. That clear is wave 1 of move 2, score 300, not a continuation of move 1's wave counter. If the multiplier carried across moves this clear would be 600 and the total 900. The contract resets the multiplier, so the total is 600. turnsUsed on the second step is the absolute total 2. The same initial state plus the same two moves must deep-equal this transcript on a second run. Client and backend runtimes are required to match it once those engines exist; this fixture does not execute them. One future piece, triangle-right, remains, so the transcript never consumes an offer from an empty stream."
+    }
+  ]
+}

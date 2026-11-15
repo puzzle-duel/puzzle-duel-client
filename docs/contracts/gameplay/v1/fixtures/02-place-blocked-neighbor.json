@@ -1,0 +1,152 @@
+{
+  "id": "place_blocked_neighbor",
+  "number": 2,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-PLACEMENT",
+    "PZD-11-OFFER-STREAM"
+  ],
+  "summary": "Circle-right tapped at [2,2] stays there because [2,3] is blocked.",
+  "scenarios": [
+    {
+      "name": "blocked_forward",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [
+            [2, 3]
+          ],
+          "cells": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "right"},
+            {"shape": "diamond", "direction": "down"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "up"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [2, 2]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [2, 2],
+            "turnsUsed": 1,
+            "scoreDelta": 0,
+            "waves": [],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [
+                [2, 3]
+              ],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  {"shape": "circle", "direction": "right"},
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "down"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "diamond", "direction": "up"}
+              ],
+              "turnsUsed": 1,
+              "score": 0,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "Blocked coordinate is [2,3]. Tap [2,2] with circle-right. The forward cell [2,3] is in bounds but blocked, so the piece does not step forward and lands on the tapped cell [2,2]. One circle is not a match. There is no clear and therefore no shift. Score delta is 0 and turnsUsed becomes 1. The used offer slot is replaced by circle-left. Status stays in_progress."
+    }
+  ]
+}

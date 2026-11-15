@@ -1,0 +1,180 @@
+{
+  "id": "two_wave_cascade",
+  "number": 10,
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-PLACEMENT",
+    "PZD-11-MATCH",
+    "PZD-11-SHIFT",
+    "PZD-11-SCORE",
+    "PZD-11-OFFER-STREAM"
+  ],
+  "summary": "One placement clears a row, shifts one diamond into a new row of three, then clears that row.",
+  "scenarios": [
+    {
+      "name": "two_clears_one_move",
+      "given": {
+        "state": {
+          "rulesVersion": "core-001.v1",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              {"shape": "circle", "direction": "left"},
+              {"shape": "circle", "direction": "left"},
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              {"shape": "diamond", "direction": "down"},
+              {"shape": "diamond", "direction": "down"},
+              null,
+              {"shape": "diamond", "direction": "left"},
+              null
+            ]
+          ],
+          "offers": [
+            {"shape": "circle", "direction": "up"},
+            {"shape": "diamond", "direction": "down"},
+            {"shape": "triangle", "direction": "left"}
+          ],
+          "futurePieces": [
+            {"shape": "circle", "direction": "left"},
+            {"shape": "diamond", "direction": "up"}
+          ],
+          "turnsUsed": 0,
+          "score": 0,
+          "status": "in_progress"
+        }
+      },
+      "when": {
+        "moves": [
+          {
+            "offerIndex": 0,
+            "tap": [0, 2]
+          }
+        ]
+      },
+      "expected": {
+        "steps": [
+          {
+            "legal": true,
+            "landing": [0, 2],
+            "turnsUsed": 1,
+            "scoreDelta": 900,
+            "waves": [
+              {
+                "wave": 1,
+                "cleared": [
+                  [0, 0],
+                  [0, 1],
+                  [0, 2]
+                ],
+                "scoreDelta": 300,
+                "moved": [
+                  {
+                    "sourceIndex": 23,
+                    "from": [4, 3],
+                    "to": [4, 2],
+                    "shape": "diamond",
+                    "direction": "left"
+                  }
+                ]
+              },
+              {
+                "wave": 2,
+                "cleared": [
+                  [4, 0],
+                  [4, 1],
+                  [4, 2]
+                ],
+                "scoreDelta": 600,
+                "moved": []
+              }
+            ],
+            "finalState": {
+              "rulesVersion": "core-001.v1",
+              "boardSize": 5,
+              "moveLimit": 5,
+              "blocked": [],
+              "cells": [
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ],
+                [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              ],
+              "offers": [
+                {"shape": "circle", "direction": "left"},
+                {"shape": "diamond", "direction": "down"},
+                {"shape": "triangle", "direction": "left"}
+              ],
+              "futurePieces": [
+                {"shape": "diamond", "direction": "up"}
+              ],
+              "turnsUsed": 1,
+              "score": 900,
+              "status": "in_progress"
+            }
+          }
+        ]
+      },
+      "derivation": "The initial board has no run of 3: two circles on row 0, and diamonds at [4,0], [4,1], and [4,3] with a gap at [4,2]. Tap [0,2] with circle-up. Up from row 0 is out of bounds, so the piece lands on [0,2]. Wave 1 clears the unique cells [0,0], [0,1], and [0,2]. Score is 3*100*1=300. The shift uses occupancy after that clear. Diamonds at [4,0] and [4,1] face down; row 5 does not exist, so they stay. Diamond-left at [4,3] proposes [4,2], which is empty, in bounds, not blocked, and claimed once, so it moves. Source index is 4*5+3=23. The move is recorded on wave 1 because that clear caused it. The board then has diamonds at [4,0], [4,1], and [4,2]. Their directions differ and are ignored. Wave 2 clears those three cells for 3*100*2=600. No piece remains, so the following shift moves nothing and wave 3 does not start. Total score delta is 300+600=900. turnsUsed becomes 1. moveLimit is 5 and the board is empty, so status stays in_progress. Offer slot 0 becomes circle-left."
+    }
+  ]
+}

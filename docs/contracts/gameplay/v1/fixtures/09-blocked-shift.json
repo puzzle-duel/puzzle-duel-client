@@ -1,0 +1,194 @@
+{
+  "id": "blocked_shift",
+  "number": 9,
+  "kind": "phase",
+  "phase": "shift",
+  "rulesVersion": "core-001.v1",
+  "ruleIds": [
+    "CORE-001",
+    "PZD-11-SHIFT"
+  ],
+  "summary": "A piece aimed at the board edge or at a static blocked cell stays where it is.",
+  "scenarios": [
+    {
+      "name": "out_of_bounds",
+      "given": {
+        "rulesVersion": "core-001.v1",
+        "boardSize": 5,
+        "blocked": [],
+        "cells": [
+          [
+            null,
+            null,
+            {"shape": "circle", "direction": "up"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "when": {
+        "phase": "shift"
+      },
+      "expected": {
+        "moved": [],
+        "cells": [
+          [
+            null,
+            null,
+            {"shape": "circle", "direction": "up"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "derivation": "Circle-up at [0,2] proposes [-1,2]. That destination is outside the board, so the step fails and the piece stays at [0,2]. There is no gravity and no second-choice target. moved is empty."
+    },
+    {
+      "name": "static_blocked",
+      "given": {
+        "rulesVersion": "core-001.v1",
+        "boardSize": 5,
+        "blocked": [
+          [2, 3]
+        ],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            {"shape": "diamond", "direction": "right"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "when": {
+        "phase": "shift"
+      },
+      "expected": {
+        "moved": [],
+        "cells": [
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            {"shape": "diamond", "direction": "right"},
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        ]
+      },
+      "derivation": "Diamond-right at [2,2] proposes [2,3]. That cell is a static blocked cell, so the step fails and the piece stays at [2,2]. moved is empty. The blocked cell remains empty."
+    }
+  ]
+}
