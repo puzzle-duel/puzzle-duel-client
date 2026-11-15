@@ -54,7 +54,7 @@ This document records the owner's policy decisions and merged contract evidence.
 5. Review CI / documentation and rules-change regression if relevant.
 6. Request owner merge/close approval; then mark PZD-10 Done. Obtain fresh owner approval before starting PZD-13 or any other task.
 
-## 5. Cursor instructions at this stage
+## 5. Current Blueprint approval gate
 
 **PRODUCT ACCEPTANCE GATE:** All 13 numbered decision rows have owner responses (PD-05 only partial), and owner subsequently selected PD-07 terminal representation A. PZD-10 PR #5/#6 were merged, with v1/v2 contract evidence; this document and Blueprint still remain **DRAFT until explicit final owner acceptance**. New game-engine implementation and ADR acceptance are not implied. The remaining technical policies belong to later scoped specifications.
 
@@ -63,9 +63,9 @@ This document records the owner's policy decisions and merged contract evidence.
 - [x] Initial `BLUEPRINT.md` bytes identical in both repositories (same Git blob)
 - [x] PZD-11 fixture suite merged to both main branches (prior task)
 - [x] Owner decision sign-off on PD-01...PD-13 (PD-05 counter persistence approved; other advertising policy deferred to PZD-32/33 before ads enabled)
-- [ ] Blueprint changes signed off and versioned in both PRs
-- [ ] Exact cross-repo blueprint parity verified after approved changes
-- [ ] Owner approval for merge and Done
+- [ ] Final synchronized Blueprint v1.0 **explicitly accepted by owner**, with final accepted revision/hash/date recorded in both repos
+- [x] Exact cross-repo Blueprint parity verified in PR #7 branches (matching Git blob `31f4c8f3ba5cbbe6ea1c8789c04bc5ff7d9f93b8`); repeat after merging
+- [ ] Owner approval for PR #7 merge and PZD-10 Done
 
 ## Owner decision log
 
