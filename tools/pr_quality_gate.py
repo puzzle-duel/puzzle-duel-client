@@ -3,7 +3,7 @@
 
 The historical gameplay fixtures 01-12 are immutable.
 Proposed and Accepted ADR statuses are both legal.
-Example tokens that say so are not secrets.
+A matched token is ignored only when its own value is an obvious placeholder.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ SECRET_PATTERNS = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"\bsk_live_[A-Za-z0-9]{8,}\b"),
 )
-SECRET_ALLOW = ("example", "dummy", "redacted", "placeholder", "not_a_secret", "xxxx")
+PLACEHOLDER_MARKERS = ("example", "dummy", "redacted", "placeholder", "not_a_secret", "xxxx")
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 TEXT_SUFFIXES = {".md", ".yml", ".yaml", ".json", ".py", ".mjs", ".txt", ".js", ".ts", ".sh"}
@@ -92,20 +92,19 @@ def check_markdown_links(root: Path) -> list[str]:
     return errors
 
 
-def line_allows_secret(line: str) -> bool:
-    lowered = line.lower()
-    return any(word in lowered for word in SECRET_ALLOW)
+def token_is_placeholder(token: str) -> bool:
+    lowered = token.lower()
+    return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
 
 
 def secret_hits(text: str) -> list[str]:
+    """Return pattern sources for live matches. Never return matched token text."""
     hits = []
     for line in text.splitlines():
-        if line_allows_secret(line):
-            continue
         for pattern in SECRET_PATTERNS:
-            if pattern.search(line):
+            matches = list(pattern.finditer(line))
+            if matches and any(not token_is_placeholder(match.group(0)) for match in matches):
                 hits.append(pattern.pattern)
-                break
     return hits
 
 

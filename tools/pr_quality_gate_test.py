@@ -72,15 +72,37 @@ def test_adr_status() -> None:
 def test_secrets() -> None:
     live = "ghp_" + ("a" * 36)
     private = "-----BEGIN " + "RSA PRIVATE KEY-----"
-    allowed = "documented example token ghp_example_not_a_secret"
+    placeholder = "ghp_" + ("example" + ("a" * 20))
+    labeled = "documented example token " + placeholder
+    commented = live + " # example"
+    mixed = placeholder + " " + live
     if not gate.secret_hits(live):
         fail("secret-like token was accepted")
     if not gate.secret_hits(private):
         fail("private key header was accepted")
-    if gate.secret_hits(allowed):
-        fail("labeled example token was rejected")
+    if not gate.secret_hits(commented):
+        fail("real token with an example comment was accepted")
+    if not gate.secret_hits(private + " # example"):
+        fail("private key header with an example comment was accepted")
+    if not gate.secret_hits(mixed):
+        fail("real token beside a placeholder token was accepted")
+    if gate.secret_hits(placeholder):
+        fail("placeholder token value was rejected")
+    if gate.secret_hits(labeled):
+        fail("labeled placeholder token was rejected")
+    if gate.secret_hits("AKIAIOSFODNN7" + "EXAMPLE"):
+        fail("documented sample access key was rejected")
     if gate.secret_hits("The word password appears in a sentence."):
         fail("the word password was treated as a secret")
+    if gate.secret_hits("see the dummy placeholder example"):
+        fail("placeholder words without a token were rejected")
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        write(root / "notes.md", commented + "\n")
+        errors = gate.check_secrets(root)
+        expect_error(errors, "secret-like content", "comment bypass report")
+        if live in "\n".join(errors):
+            fail("secret report included the token value")
 
 
 def test_pull_request_metadata() -> None:
@@ -126,7 +148,7 @@ def main() -> int:
     print("pr_quality_gate_test: PASS current repository")
     print("pr_quality_gate_test: PASS broken link is rejected")
     print("pr_quality_gate_test: PASS malformed ADR status is rejected")
-    print("pr_quality_gate_test: PASS secret-like text is rejected and labeled examples are kept")
+    print("pr_quality_gate_test: PASS live tokens are rejected and placeholder token values are kept")
     print("pr_quality_gate_test: PASS incomplete PR metadata is rejected")
     print("pr_quality_gate_test: PASS historical fixtures 13 and v2 are not treated as 01-12")
     return 0
