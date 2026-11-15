@@ -6,11 +6,63 @@ The first rules module is the pure Dart package [`packages/puzzle_duel_rules`](.
 
 ## Flutter 3.50 compatibility gate
 
-The gate ran from a disposable Flutter 3.50.0 SDK outside both repositories. Dart in that SDK is 3.14.0. `flutter pub get` resolved Flame 1.38.2. Analysis of a file that constructs `GameWidget` and `ColorEffect` produced one deprecation info for `package:flutter/material.dart` and no analyzer error. The process exit code was 1 because that info is counted.
+Ran outside both repositories. Not committed. Flutter 3.50.0, framework `ab2912035e`, Dart 3.14.0. `flutter pub get` locked Flame 1.38.2 and `material_ui` 1.11.0.
 
-`ColorScheme`, `TextTheme`, and `FloatingActionButtonLocation` from `material_ui` 1.11.0 are not assignable to the legacy Material types of the same names. The analyzer reported `return_of_invalid_type` for each. A `material_ui` `Color` was accepted by `ColorEffect`.
+### Positive control: `GameWidget` and `ColorEffect`
 
-No Flutter application was created. The pure Dart package was tested with the disposable Dart 3.14.0 SDK.
+Command without flags:
+
+```text
+flutter analyze lib/gate.dart
+exit 1
+errors 0
+warnings 0
+infos 1
+```
+
+The single info is `deprecated_member_use` on `package:flutter/material.dart`. That command is **not** PASS. Exit code 1 is the recorded result.
+
+Command with infos non-fatal (supported on this SDK):
+
+```text
+flutter analyze --no-fatal-infos lib/gate.dart
+exit 0
+errors 0
+warnings 0
+infos 1
+```
+
+That command is **PASS** for the positive `GameWidget` / `ColorEffect` check. The deprecation info remains recorded. It is not treated as an analyzer error.
+
+### Negative control: `material_ui` versus legacy Material public types
+
+Separate file. Intentionally assigns `material_ui` `ColorScheme`, `TextTheme`, and `FloatingActionButtonLocation` where the legacy Material library expects its own types.
+
+```text
+flutter analyze lib/boundary_public.dart
+exit 1
+errors 3
+warnings 0
+infos 1
+```
+
+The three errors are `return_of_invalid_type`. Those public types are not interchangeable. This negative control is expected to fail and is not the positive gate.
+
+A separate check passes a `material_ui` `Color` into Flame `ColorEffect`:
+
+```text
+flutter analyze lib/boundary.dart
+exit 0
+errors 0
+warnings 0
+infos 0
+```
+
+### First-party scaffold implication
+
+Any first-party signature that must assign `material_ui` `ColorScheme`, `TextTheme`, or `FloatingActionButtonLocation` to the legacy Material types of the same names remains **FAIL**. Avoid those crossings or wait for remediation before application scaffolding. `Color` into `ColorEffect` is not that failure. No Flutter application was created by this task.
+
+The pure Dart package was tested with the disposable Dart 3.14.0 SDK.
 
 ## Limits that stay open
 

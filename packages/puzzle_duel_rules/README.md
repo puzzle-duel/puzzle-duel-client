@@ -71,13 +71,16 @@ The local machine's Flutter 3.47.8 / Dart 3.13.7 is not the SDK used for those c
 
 ## Flutter 3.50 gate
 
-Ran outside this repository and not committed. `flutter --version` reported Flutter 3.50.0, framework `ab2912035e`, Dart 3.14.0. `flutter pub get` locked `flame` 1.38.2 and `material_ui` 1.11.0.
+Evidence is in [`docs/engine/PZD-17-STATE.md`](../../docs/engine/PZD-17-STATE.md). Short form:
 
-`flutter analyze lib/gate.dart` named `GameWidget` and `ColorEffect`. It reported one info, `deprecated_member_use`, on `package:flutter/material.dart`, and no error. The process exit code was 1 because the analyzer counts that info. [ADR-001](../../docs/adr/ADR-001-client-stack.md) records a deprecation info and fails the gate on an analyzer error. No error was reported for those two APIs.
+| Check | Command | Exit | Errors | Warnings | Infos | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Positive `GameWidget` / `ColorEffect` | `flutter analyze lib/gate.dart` | 1 | 0 | 0 | 1 | not PASS |
+| Positive with non-fatal infos | `flutter analyze --no-fatal-infos lib/gate.dart` | 0 | 0 | 0 | 1 | PASS |
+| Negative `material_ui` vs legacy public types | `flutter analyze lib/boundary_public.dart` | 1 | 3 | 0 | 1 | expected FAIL |
+| `material_ui` `Color` into `ColorEffect` | `flutter analyze lib/boundary.dart` | 0 | 0 | 0 | 0 | PASS |
 
-A separate file returned `material_ui` `ColorScheme`, `TextTheme`, and `FloatingActionButtonLocation` where the legacy Material library expected its own types. `flutter analyze` reported three `return_of_invalid_type` errors. Those public types are not interchangeable. `Color` passed into `ColorEffect` from `material_ui` produced no diagnostic.
-
-No Flutter application or Flame dependency was added to this repository.
+`ColorScheme`, `TextTheme`, and `FloatingActionButtonLocation` across `material_ui` and legacy Material remain FAIL for any first-party signature that needs that assignment. No Flutter application or Flame dependency was added to this repository.
 
 ## CI
 
