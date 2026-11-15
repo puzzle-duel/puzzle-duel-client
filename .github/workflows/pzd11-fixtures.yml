@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "docs/contracts/gameplay/v1/**"
+      - "docs/contracts/gameplay/v2/**"
       - ".github/workflows/pzd11-fixtures.yml"
 
 permissions:
@@ -16,6 +17,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 docs/contracts/gameplay/v1/reference_check.py
       - run: node docs/contracts/gameplay/v1/validate.mjs
-      - name: SHA-256 checksums
+      - name: SHA-256 checksums v1
         working-directory: docs/contracts/gameplay/v1
+        run: sha256sum -c CHECKSUMS.txt
+      - run: python3 docs/contracts/gameplay/v2/reference_check.py
+      - run: node docs/contracts/gameplay/v2/validate.mjs
+      - name: SHA-256 checksums v2
+        working-directory: docs/contracts/gameplay/v2
         run: sha256sum -c CHECKSUMS.txt

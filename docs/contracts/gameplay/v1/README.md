@@ -28,8 +28,9 @@ Naming gaps are listed under unresolved decisions. They do not change a pinned l
 | `fixtures/10-two-wave-cascade.json` | `two_wave_cascade` | full move, two waves |
 | `fixtures/11-end-conditions.json` | `end_conditions` | move limit, filled board, post-end tap |
 | `fixtures/12-replay-determinism.json` | `replay_determinism` | two-move transcript, multiplier reset |
+| `fixtures/13-cascade-reopen-end.json` | `cascade_reopen_end` | last cell reopens; last turn still ends; ended taps |
 
-`invalid/` holds documents the structural check must reject: duplicate or out-of-range obstacles, a bad shape, a bad direction, an illegal turn count, an unknown `rulesVersion`, a piece written on a blocked cell, an offer tray that is not length 3, and a piece with an unknown field. The duplicate obstacle probe is `blocked: [[1,2],[1,2]]`.
+`invalid/` holds documents the structural check must reject: duplicate or out-of-range obstacles, a bad shape, a bad direction, an illegal turn count, an unknown `rulesVersion`, a piece written on a blocked cell, an offer tray that is not length 3, a piece with an unknown field, and a full-move start that already contains a run of 3. The duplicate obstacle probe is `blocked: [[1,2],[1,2]]`. Match-phase fixtures may contain an intentional run. They are not generated game starts.
 
 Jira's busy-state case is `preoccupied_shift`: the destination is occupied at the start of the shift. CORE-001 does not define a separate busy flag.
 
@@ -63,8 +64,8 @@ node docs/contracts/gameplay/v1/validate.mjs
 cd docs/contracts/gameplay/v1 && shasum -a 256 -c CHECKSUMS.txt
 ```
 
-`reference_check.py` replays the twelve golden files and the cascade hang-guard.
-`validate.mjs` replays them in a separate program, checks structure, checks the nine rejection probes, checks that `fixture.schema.json` enums and closed phase results match the checker, checks the cascade hang-guard, and checks `CHECKSUMS.txt`.
+`reference_check.py` replays the thirteen golden files, the cascade hang-guard, the corrupt-cascade check, and the empty-stream refusal.
+`validate.mjs` replays them in a separate program, checks structure, checks the ten rejection probes, checks that `fixture.schema.json` enums and closed phase results match the checker, checks the cascade hang-guard, and checks `CHECKSUMS.txt`.
 
 JSON Schema covers document shape, enums, and closed objects. Draft 2020-12 `uniqueItems` compares array elements with deep equality, so `blocked: [[1,2],[1,2]]` is not unique. The schema sets that keyword on blocked coordinates. `validate.mjs` still rejects the same pair itself, because no JSON Schema package is installed. The checker also enforces the cross-field rules the schema does not state: `cells` length equals `boardSize`, blocked cells are empty and row-major, `turnsUsed` does not exceed `moveLimit`, and `status` matches the board.
 
@@ -91,14 +92,16 @@ The specification markdown was compared, not rewritten:
 
 Those blobs match client commit `335d2fc69bfd9b44613edc249504ca81876fa353` and backend commit `4c81c6388f591f35f9f6942c62d0cdaa368d9f8b`. `cmp` on the raw files reported identical bytes. Client specification PR: https://github.com/puzzle-duel/puzzle-duel-client/pull/2. Backend specification PR: https://github.com/puzzle-duel/puzzle-duel-backend/pull/2.
 
-## Unresolved decisions (not pinned)
+PZD-10 appends an amendment to the contract. The current contract blob is `6f6cfbcbcfb37daccf465df3c8a6f3dcaac92221`. Its SHA-256 is `2de40548357eddd94c3142f6c57df7b09d406bd4a3634e8d050d32641a83585c`. The table above is the pre-amendment specification.
 
-1. `in_progress` / `ended`, error codes `blocked_tap` / `occupied_tap` / `game_ended`, and `rulesVersion` `core-001.v1` are the names this suite uses for states and rejections the contract requires but does not literally name. Landings, clears, and scores do not depend on renaming them.
-2. What happens when a legal move is played and `futurePieces` is already empty is left to the generator spec. No fixture does that. If a fixture did, both checkers abort. That abort is not a defined game result.
-3. Whether a board that already contains a run of 3 resolves before the next tap is unspecified. Every full-move fixture starts with no run of 3.
-4. Whether a placement that fills the last empty cell and then clears space still ends the game for no-space is unspecified. The filled-board fixture does not match, so the cell stays occupied.
-5. When a tap after the game has ended is also blocked or occupied, the contract does not rank `game_ended` against the cell errors. The pinned post-end tap is an otherwise legal empty cell, and it is rejected with `game_ended`.
+## Owner amendments and remaining gaps
+
+1. `in_progress` / `ended` and error codes `blocked_tap` / `occupied_tap` / `game_ended` are the names this suite uses. PZD-10 PD-13 approves `rulesVersion` `core-001.v1` as the first official gameplay ruleset identifier. That approval does not freeze these status or error strings as the transport schema. Landings, clears, and scores do not depend on renaming them.
+2. The owner approved a nullable spent slot for the final move. That result is normative replay output, so it is `core-001.v2` in `docs/contracts/gameplay/v2/`, not a silent change to this suite. A `core-001.v1` fixture with an empty `futurePieces` still makes these checkers abort. They do not invent a piece. No migration from v1 replays onto v2 is claimed.
+3. A generated full-move start must not already contain a horizontal or vertical run of 3. The checkers reject that start and do not clear it or award points before the first move. A match-phase fixture may contain an intentional run. Resume of a corrupt saved board is not specified.
+4. End is evaluated after matching, clearing, shifting, cascade, and scoring. `cascade_reopen_end` pins a last empty cell that a clear reopens while turns remain, and the same clear on the final permitted turn, which ends because the move limit is exhausted. `end_conditions` still pins a fill that does not clear. The game ends when the resolved board has no empty non-blocked cell or `turnsUsed` has reached `moveLimit`.
+5. When the game has already ended, an in-bounds tap on an empty, blocked, or occupied cell returns `game_ended` and does not change the board, score, turns, or offers. Out-of-bounds and malformed coordinates stay unresolved.
 6. `moved` omits pieces that stay. The post-shift board shows them. The contract requires source-index order and does not require stay records.
-7. The contract repeats match and shift until no match remains. It does not set a maximum wave count. If a match is still present when 20 waves have already been applied, both checkers abort and do not apply another wave. A cascade that finishes on wave 20 is accepted. Twenty is a review hang-guard, not a rule, and no golden fixture depends on it.
+7. The production rules have no maximum wave count. Each recorded clear removes at least three occupied cells, and a shift does not create pieces, so a valid cascade is at most `floor(occupied / 3)` waves. A proposed clear that does not remove three pieces is a corrupt state: both checkers abort and do not record that wave or present a partial score as verified. If a match is still present when 20 progressing waves have already been applied, both checkers abort and do not apply another wave. That 20 is a review hang-guard, not a rule, and no golden fixture depends on it.
 
 Daily attempt lifecycle, RNG, seed versioning, and the all-time rank formula remain Proposed elsewhere and are not decided here.

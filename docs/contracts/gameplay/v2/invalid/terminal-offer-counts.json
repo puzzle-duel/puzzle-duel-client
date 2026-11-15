@@ -1,0 +1,121 @@
+{
+  "cases": [
+    {
+      "name": "two_nulls",
+      "expectCodes": [
+        "multiple_null_offers"
+      ],
+      "state": {
+        "rulesVersion": "core-001.v2",
+        "boardSize": 1,
+        "moveLimit": 1,
+        "blocked": [],
+        "cells": [
+          [
+            null
+          ]
+        ],
+        "offers": [
+          null,
+          null,
+          {
+            "shape": "triangle",
+            "direction": "left"
+          }
+        ],
+        "futurePieces": [],
+        "turnsUsed": 1,
+        "score": 0,
+        "status": "ended"
+      }
+    },
+    {
+      "name": "three_nulls",
+      "expectCodes": [
+        "multiple_null_offers"
+      ],
+      "state": {
+        "rulesVersion": "core-001.v2",
+        "boardSize": 1,
+        "moveLimit": 1,
+        "blocked": [],
+        "cells": [
+          [
+            null
+          ]
+        ],
+        "offers": [
+          null,
+          null,
+          null
+        ],
+        "futurePieces": [],
+        "turnsUsed": 1,
+        "score": 0,
+        "status": "ended"
+      }
+    },
+    {
+      "name": "null_while_active",
+      "expectCodes": [
+        "null_offer_while_active"
+      ],
+      "state": {
+        "rulesVersion": "core-001.v2",
+        "boardSize": 1,
+        "moveLimit": 5,
+        "blocked": [],
+        "cells": [
+          [
+            null
+          ]
+        ],
+        "offers": [
+          null,
+          {
+            "shape": "diamond",
+            "direction": "down"
+          },
+          {
+            "shape": "triangle",
+            "direction": "left"
+          }
+        ],
+        "futurePieces": [],
+        "turnsUsed": 0,
+        "score": 0,
+        "status": "in_progress"
+      }
+    },
+    {
+      "name": "one_spent_slot",
+      "expectCodes": [],
+      "state": {
+        "rulesVersion": "core-001.v2",
+        "boardSize": 1,
+        "moveLimit": 1,
+        "blocked": [],
+        "cells": [
+          [
+            null
+          ]
+        ],
+        "offers": [
+          null,
+          {
+            "shape": "diamond",
+            "direction": "down"
+          },
+          {
+            "shape": "triangle",
+            "direction": "left"
+          }
+        ],
+        "futurePieces": [],
+        "turnsUsed": 1,
+        "score": 0,
+        "status": "ended"
+      }
+    }
+  ]
+}

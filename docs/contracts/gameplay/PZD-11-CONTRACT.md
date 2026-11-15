@@ -50,3 +50,15 @@ All coordinates zero-based and rows increase downward. Fixtures may describe dir
 
 ## Blockers to disclose, not guess
 Exact official daily attempt lifecycle, RNG algorithm and seed versioning, and all-time rank formula are **outside** this task and remain Proposed elsewhere.
+
+## PZD-10 owner amendments
+
+These sentences record owner decisions from PZD-10. They do not accept the Blueprint or any ADR. Historical fixtures `01` through `12` stay byte-identical. `core-001.v1` remains the ruleset identifier. The compatibility matrix and the still-open early-board tray question are in `PZD-10-RECONCILIATION.md`.
+
+- PD-08: a generated full-move start has no horizontal or vertical run of 3. The checkers reject such a start. They do not clear it or award points before the first player move. A match-phase fixture may contain an intentional run. Corrupt resume or import is not specified.
+- PD-09: after a legal placement, resolve every match, clear, shift, cascade, and score, then evaluate the end. The game has ended when `turnsUsed` has reached `moveLimit` or the resolved board has no empty non-blocked cell. A clear that reopens space does not end the game while turns remain. Reaching the move limit ends the game even if the clear reopened space.
+- PD-10: when status is already ended, an in-bounds tap on an empty, blocked, or occupied cell returns `game_ended`. The board, score, turns, and offers stay unchanged. Out-of-bounds and malformed coordinates are not decided here.
+- PD-11: `moved` lists only pieces that change cells, in ascending source row-major index. Stationary pieces stay omitted.
+- PD-12: production play has no maximum wave count. A valid clear removes at least three occupied cells and a shift creates none, so a valid cascade finishes. A clear that does not remove three occupied cells is corrupt: checkers abort and do not present a partial score as verified. The 20-wave checker stop is a review hang-guard, not a score cap.
+- PD-13: `core-001.v1` is the first official gameplay ruleset identifier. A later normative rule change needs a new identifier. Status names and typed error strings are not frozen as the transport schema by this sentence.
+- PD-07: the piece supply is fixed before the game and is sufficient for the move budget. The final permitted move, the one that reaches `moveLimit`, does not require a replacement, and checkers must not invent one. The owner approved representation A: `offers` stays length 3, and the consumed slot is JSON `null` only when that move reaches `moveLimit` and `futurePieces` is empty. An ended tray has at most one null. An in-progress tray cannot contain `null`. An empty stream when the board fills before the move limit has no chosen tray; the checkers abort instead of writing null. This is `core-001.v2`. `core-001.v1` checkers still abort on an empty stream so historical fixtures keep their meaning. No migration from v1 replays onto v2 is claimed.
