@@ -1,193 +1,212 @@
 # ADR-E01 — CORE-001.v3 natural terminal and offer tray
 
-Status: **Proposed** (not Accepted) — revised after PZD-39 adversarial review
+Status: **Proposed** (not Accepted) — P0/P1 remediation revision
 Date: 2026-11-17
-Review companion: [CORE-001-V3-ARCHITECTURE-REVIEW.md](../engine/CORE-001-V3-ARCHITECTURE-REVIEW.md)
-Owner review required before any Dart/TypeScript implementation.
-Related: PZD-20 resolution, PZD-17/18/19, PZD-21 (`gen-001.v1`), Tournament T-10A, ADR-T02 TD-11, PZD-38 Gate C, Jira PZD-39.
-Must not modify: historical `core-001.v1` / `core-001.v2` fixtures, generators, or PZD-38 Phase A ingress.
+Jira: [PZD-39](https://puzzle-duel-app.atlassian.net/browse/PZD-39)
+Companions:
+- [CORE-001-V3-ARCHITECTURE-REVIEW.md](../engine/CORE-001-V3-ARCHITECTURE-REVIEW.md)
+- [canonical-v3-test-vectors.md](../contracts/gameplay/v3/canonical-v3-test-vectors.md)
+- [FIXTURE-SPEC.md](../contracts/gameplay/v3/FIXTURE-SPEC.md)
+
+Owner approval of D1–D10 required before Dart/TypeScript implementation.
+Must not modify: `core-001.v1` / `core-001.v2`, `gen-001.v1`, PZD-38 Phase A.
 
 ## 1. Context
 
-Tournament V1 (owner T-10A) requires that a subgame which reaches a deterministic state with **no legal move remaining** finish successfully at its already earned verified score and allow advance to the next ordinal. Historical `core-001.v2` fails closed on early board-full with an empty stream (`early_board_end_empty_stream`) and only allows a single JSON `null` offer after move-budget exhaustion. That blocks ranked natural completion.
-
-This ADR proposes separately versioned ruleset `core-001.v3` so v1/v2 remain byte-immutable.
+Tournament T-10A requires successful natural completion when no legal placement remains, preserving earned score. `core-001.v2` fails closed on early board-full with empty stream. This ADR proposes separately versioned `core-001.v3`.
 
 ## 2. Historical compatibility
 
-| Version | Behavior preserved |
+| Version | Preserved |
 | --- | --- |
-| `core-001.v1` | Empty stream never invents pieces; empty-stream commit fails closed (`empty_stream_not_terminal`). End = move limit **or** zero empty unblocked cells. |
-| `core-001.v2` | Single terminal `null` only when `ended` ∧ `turnsUsed >= moveLimit` ∧ empty stream; continuing trays forbid null; early board-full + empty stream fails closed. |
-| `gen-001.v1` | Unchanged. Challenges may pin `rulesVersion: core-001.v3` only after this ADR is Accepted and dual-engine parity PASS. |
+| `core-001.v1` | Empty-stream abort; end = move limit or board-full empty cells |
+| `core-001.v2` | Single terminal null only at budget+empty stream; early board-full+empty stream fail-closed |
+| `gen-001.v1` | Unchanged; may later pin `rulesVersion: core-001.v3` after Acceptance + parity |
 
-Dispatch by stored `rulesVersion`. No silent migration of saved sessions or replays to v3.
+## 3. State schema (v3)
 
-## 3. Exact v3 state schema
+### 3.1 Fields
 
-### 3.1 Top-level `GameState` (v3)
+| Field | Type | Invariants |
+| --- | --- | --- |
+| `rulesVersion` | `"core-001.v3"` | Exact |
+| `boardSize` | int ≥ 1 | ≤ 2^53−1 |
+| `moveLimit` | int ≥ 1 | ≤ 2^53−1 |
+| `blocked` | `int[2][]` | Row-major unique in-range; empty cells |
+| `cells` | `(Piece\|null)[][]` | Square; cell `null` = empty board cell |
+| `offers` | `OfferSlot[3]` | §3.2 |
+| `futurePieces` | `Piece[]` | Ordered; may be `[]` |
+| `turnsUsed` | int | `0…moveLimit` |
+| `score` | int | `0…2^53−1` |
+| `status` | `in_progress` \| `ended` | Must equal `deriveTerminalExpectation` (§5.3) |
+| `terminalReason` | `move_limit_reached` \| `no_legal_moves` \| `null` | `null` iff in_progress |
 
-| Field | Type | Nullability | Invariants |
-| --- | --- | --- | --- |
-| `rulesVersion` | string | required | Exactly `"core-001.v3"` |
-| `boardSize` | int ≥ 1 | required | Square board |
-| `moveLimit` | int ≥ 1 | required | ≤ 2^53−1 |
-| `blocked` | `int[2][]` | required | Row-major unique in-range; cells empty |
-| `cells` | `(Piece\|null)[][]` | required | `boardSize×boardSize`; board cell `null` means empty (not an offer spent marker) |
-| `offers` | `OfferSlot[3]` | required | Length exactly 3; §3.2 |
-| `futurePieces` | `Piece[]` | required | Finite ordered supply; may be `[]` |
-| `turnsUsed` | int | required | `0 ≤ turnsUsed ≤ moveLimit` |
-| `score` | int | required | `0 ≤ score ≤ 2^53−1`; integer-only; no terminal bonus |
-| `status` | `"in_progress"` \| `"ended"` | required | Must match §5 |
-| `terminalReason` | `TerminalReason` \| `null` | required | `null` iff `in_progress`; non-null iff `ended` |
+Closed document. All string tokens are enumerated ASCII (`shape`, `direction`, `kind`, `status`, `rulesVersion`, `terminalReason`).
 
-Closed document: unexpected properties → parse failure.
+`Piece` = `{ "shape", "direction" }` (no `kind` on board/stream pieces).
 
-`Piece` (board / stream / piece-offer payload): `{ "shape": <enum>, "direction": <enum> }` with the same enums as v1/v2. Board empty cells remain JSON `null`.
-
-### 3.2 `OfferSlot` (tagged) — recommended
+### 3.2 OfferSlot (D1)
 
 ```json
-"offers": [
-  { "kind": "piece", "shape": "circle", "direction": "right" },
-  { "kind": "spent" },
-  { "kind": "piece", "shape": "diamond", "direction": "down" }
-]
+{ "kind": "piece", "shape": "circle", "direction": "right" }
+{ "kind": "spent" }
 ```
 
-| `kind` | Extra fields | Meaning |
-| --- | --- | --- |
-| `piece` | `shape`, `direction` only | Selectable offer |
-| `spent` | none | Consumed with no stream replacement |
+- Length exactly 3; indices stable.
+- Bare `null` in `offers` invalid.
+- `spent` has no other fields.
+- Selecting `spent` → `offer_unavailable` (MoveUnsafe), not natural terminal.
 
-Invariants:
+### 3.3 Spent structural vs provenance (D4)
 
-- Exactly three slots; indices 0..2 stable.
-- Initial published challenges: three `piece` slots (no initial `spent`).
-- `spent` allowed while `in_progress` when produced by empty-stream commit.
-- Multiple `spent` allowed.
-- After a commit with **non-empty** stream, the consumed slot must be `piece` (replacement). A `spent` slot coexisting with a claim that the stream still owed a replacement is corrupt → parse/invariant failure.
-- Bare JSON `null` inside `offers` is **invalid** on v3.
-- Selecting `spent` → `offer_unavailable` (**MoveUnsafe**), never a natural terminal.
+**Structural (parse may enforce):**
 
-### 3.3 Alternatives
+- Well-formed `spent` / `piece`.
+- If any `spent` exists and a non-empty `futurePieces` would imply a deferred replacement still owed on that snapshot after a completed commit path, treat as corrupt when validating a **post-commit** snapshot that claims consistency with empty-stream spent rules: practical rule for published snapshots — **`spent` slots are only legal when `futurePieces` is empty`** (same spirit as review). Snapshots mid-illegal history remain rejectable by replay even if structure is pretty.
 
-| Option | Decision |
-| --- | --- |
-| A. Tagged `OfferSlot` | **Recommended** |
-| B. `Piece\|null` with v3 null-while-active | Rejected (collides with v2 null rules) |
-| C. Variable-length tray | Rejected (breaks offerIndex contract) |
+**Provenance (parser cannot prove alone):**
 
-## 4. Cascade and scoring (unchanged from PZD-20)
+- That a `spent` slot was created by consuming a real offer requires immutable initial challenge + accepted move ledger + deterministic consumption during **authoritative server replay**.
+- A syntactically valid forged snapshot is not “parse-proven legitimate history.”
 
-Place → cascade clear/shift loop → integer `uniqueCleared×100×wave` → then offer commit → then terminal evaluation. Rejected/unsafe paths leave state unchanged. No terminal score bonus.
+## 4. Cascade / scoring
 
-## 5. Terminal predicate (v3)
+Unchanged PZD-20 mechanics. Checked integer arithmetic (§10) at every intermediate. No terminal bonus.
 
-Evaluate **only** after successful placement, complete cascades, offer commit, and final structural validation:
+## 5. Legal placement, gameplay moves, terminal truth (P0-1)
 
-1. If `turnsUsed >= moveLimit` → `status=ended`, `terminalReason=move_limit_reached`.
-2. Else if `!hasLegalMove(state)` → `status=ended`, `terminalReason=no_legal_moves`.
-3. Else → `status=in_progress`, `terminalReason=null`.
+### 5.1 `hasLegalPlacement(candidate)` — status-agnostic
 
-Empty `futurePieces` alone does not end the game.
+Evaluates board, offers, blocked cells and PZD-18 placement geometry **without trusting `status` or `terminalReason`**.
 
-**Precedence:** if both (1) and (2) hold after the same move, record **`move_limit_reached` only**.
+```
+hasLegalPlacement(C) :=
+  ∃ offerIndex ∈ {0,1,2} where offers[offerIndex].kind == piece
+  ∧ ∃ tap in-bounds:
+      approved PZD-18 placement validation would yield PlacementApplied
+      on a provisional view of C that ignores claimed status
+      (treat as if gameplay were allowed solely for geometry testing)
+```
 
-### 5.1 `TerminalReason` (successful wire values only)
+Implementations must reuse PZD-18 rules (landing/direction/blocked/occupied), not a divergent heuristic.
 
-| Value | Meaning |
-| --- | --- |
-| `move_limit_reached` | Budget exhausted on a legal applied move |
-| `no_legal_moves` | Natural completion; score retained |
+**PZD-18 lemma (current code only):** any empty unblocked in-bounds tap with a live piece offer is placeable. Lemma is not the long-term contract if placement tightens.
 
-Integrity failures are **not** terminal reasons on `MoveApplied` / stored ended states. They remain parse failures or `MoveUnsafe`.
-
-## 6. Offer consumption (v3)
-
-For consumed index `i` after cascades:
-
-| Stream | Action |
-| --- | --- |
-| Non-empty | Slot `i` ← `{kind:piece,...}` from stream head; drop head |
-| Empty | Slot `i` ← `{kind:spent}` |
-
-Never invent pieces. Do not rewrite other slots.
-
-## 7. Legal-move predicate
-
-**Normative definition:**
+### 5.2 `hasLegalMove(state)` — gameplay availability
 
 ```
 hasLegalMove(S) :=
-  S.status == in_progress AND
-  ∃ offerIndex ∈ {0,1,2}, ∃ tap:
-    applyPlacement(S, Move(offerIndex, tap)) is PlacementApplied
+  S.status == in_progress
+  ∧ S.turnsUsed < S.moveLimit
+  ∧ hasLegalPlacement(S)
 ```
 
-Must call the approved placement implementation (PZD-18), not a competing heuristic.
+Used to decide whether the player may still submit moves. **Must not** be used as the sole check that a claimed `ended` terminal is truthful.
 
-**PZD-18 lemma (current engine only):** directional placement accepts every in-bounds empty unblocked tap when the selected offer is a live `piece`. Therefore today:
+### 5.3 `deriveTerminalExpectation(candidate)` — terminal truth
+
+After schema validation of a candidate post-commit (or initial) board/offers/budget:
 
 ```
-hasLegalMove(S) ⇔ (∃ piece offer) ∧ (∃ empty unblocked cell)
+if turnsUsed >= moveLimit:
+  expectedStatus = ended
+  expectedReason = move_limit_reached
+else if !hasLegalPlacement(candidate):
+  expectedStatus = ended
+  expectedReason = no_legal_moves
+else:
+  expectedStatus = in_progress
+  expectedReason = null
 ```
 
-If placement constraints change, the lemma may fail; the normative existential remains binding.
+Reject input if claimed `status`/`terminalReason` ≠ expected.
 
-## 8. Precedence
+Empty `futurePieces` alone never forces ended.
 
-1. Parse/validation failure → no mutation  
-2. Placement unsafe (OOB, spent/unavailable offer) → `MoveUnsafe`  
-3. Placement rejected (`game_ended`, `blocked_tap`, `occupied_tap`) → `MoveRejected`  
-4. Unresolved pre-move match → `MoveUnsafe`  
-5. Cascade/offer integrity failures → `MoveUnsafe`  
-6. Else apply §5  
+### 5.4 Mandatory examples (spec)
 
-Never map unsafe outcomes to `no_legal_moves`.
+| # | Candidate | Result |
+| --- | --- | --- |
+| 1 | Playable offers+cells, claimed `ended/no_legal_moves` | **Reject** (expectation in_progress) |
+| 2 | `turnsUsed >= moveLimit`, claimed `in_progress` | **Reject** |
+| 3 | All spent / no placement, budget remaining, claimed `in_progress` | **Reject** |
+| 4 | No legal placement, budget remaining, claimed `ended/no_legal_moves` | **Accept** |
+| 5 | Budget exhausted and no placement | **`move_limit_reached` only** |
+| 6 | Valid ended state; `hasLegalMove` query | **false**; terminal truth unchanged |
 
-## 9. Canonical serialization and hashing (v3)
+### 5.5 After a successful applied move
 
-**Single algorithm** (resolves prior sorted-vs-fixed-order contradiction):
+Compute post-commit candidate → set status/reason via §5.3 (same as derive). Never end before cascades+commit complete.
 
-1. Validate schema; reject non-integers / out-of-range ints / unexpected props.
-2. `canonical_json_v3`: recursively encode values; arrays keep order; **objects sort keys by UTF-8 byte order**; compact JSON; UTF-8 bytes.
-3. Enum/string content is ASCII wire tokens; do not apply Unicode compatibility normalization that would alter tokens.
-4. `stateHash = lowercase hex(SHA-256(canonical_utf8_bytes))`.
+## 6. Offer consumption
 
-Do not use Dart `Object.hashCode` or language map insertion order.
+Non-empty stream → replace consumed index with `piece` from head. Empty stream → `{kind:spent}` at index only.
 
-v1/v2 fixture file checksum ledgers are independent and immutable.
+## 7. Hashing vs validation vs ranked authority (P0-2)
 
-## 10. Failure semantics
+| Layer | Purpose | Not purpose |
+| --- | --- | --- |
+| **A. Canonical state hash** | Deterministic bytes; cross-language equality; detect drift vs **trusted** reference | Authenticate attacker-chosen score/board |
+| **B. State validation** | Schema, enums, tray shape, terminal consistency (§5.3), numeric bounds | Prove score was earned |
+| **C. Authoritative ranked replay** | Pin challenge; replay server-accepted moves; recompute waves/score/terminal; compare to trusted ledger/checkpoint | Trust client `stateHash` |
 
-Fail closed with no partial board/score for malformed tray/stream/geometry, unresolved pre-move match, cascade corruption, forged `terminalReason`/`score`/`stateHash`, unknown `rulesVersion`, and numeric overflow outside the JSON-safe domain.
+Client-supplied `stateHash` is never ranked authority. Checkpoints must be server-authenticated and bound to prior replay evidence—not arbitrary client checkpoints.
 
-## 11. Dart / TypeScript parity
+## 8. Canonical JSON (D5) — byte contract
 
-Dart: extend `packages/puzzle_duel_rules` with v3 dispatch.  
-TypeScript: new pure module for server replay (backend lacks a gameplay engine today; Py/Node checkers are not sufficient).  
-Parity = identical accept/reject, board, offers, stream, score, turns, status, terminalReason, stateHash on frozen fixtures + historical v1/v2 regression.
+Gameplay state admits only enumerated ASCII string tokens and JSON numbers that are integers in `-(2^53-1)…(2^53-1)` (gameplay scores/turns additionally ≥ 0).
 
-## 12. Golden fixtures
+Algorithm `canonical_json_v3`:
 
-See `docs/contracts/gameplay/v3/FIXTURE-SPEC.md`. Expected boards/hashes remain `PENDING_FREEZE` until dual-engine agreement.
+1. Reject floats, `NaN`, `Infinity`, `-0` if distinguishable from `0`, non-integers, out-of-range ints, unknown properties, non-ASCII string contents in state tokens.
+2. `null` → bytes `null`. Missing required field → schema error (not hashed).
+3. Integers → base-10 ASCII without leading zeros (except `0`), no exponent.
+4. Strings → JSON string with `"` and `\` escaped as `\"` and `\\`; control chars U+0000–U+001F as `\u00XX` lowercase hex (not expected in enum tokens; still defined). Reject unpaired surrogates / invalid UTF-8 at ingest.
+5. Arrays: preserve order; canonicalize elements.
+6. Objects: sort keys by UTF-8 byte lexicographic order; canonicalize values; emit compact form (no insignificant whitespace): `{` `key` `:` `value` `,` … `}`.
+7. `stateHash = lowercase hex(SHA-256(UTF-8 bytes of canonical form))`.
 
-## 13. Migration
+Independent minimal digests: see `canonical-v3-test-vectors.md` (**SPECIFIED**). Full GameState digests remain **PENDING_FREEZE**.
 
-Pin `core-001.v3` on new manifests only after Acceptance + parity PASS. Never rewrite historical sessions.
+Do not define the contract as “whatever `JSON.stringify` / `jsonEncode` does.”
 
-## 14. Security / replay risks
+v1/v2 fixture file checksum ledgers unchanged.
 
-Client terminal flags are not authoritative. Server replays under pinned version. Tagged trays reduce null-smuggling across versions. Canonical hashes prevent serializer drift.
+## 9. Initial challenges (D10)
 
-## 15. Acceptance criteria
+`parseInitialGameState` for new v3 challenges must require:
 
-1. Owner decides D1–D10 in the architecture review.  
-2. Fixture freeze after dual engines.  
-3. Dart+TS PASS + v1/v2 checksum regression.  
-4. Tournament boundary respected.
+- `status=in_progress`, `terminalReason=null`
+- `turnsUsed=0`, `moveLimit≥1`, `score=0`
+- Three `piece` offers; `hasLegalPlacement` true
+- No unresolved initial match
+- Valid geometry/blocked/stream/`rulesVersion`
 
-## 16. Outstanding owner decisions
+Impossible initial → fail closed. **Do not** auto-complete as zero-move success.
 
-See decision table in `CORE-001-V3-ARCHITECTURE-REVIEW.md`. This ADR stays **Proposed** until those are explicitly accepted.
+`parseGameState` may inspect non-initial snapshots but still enforces §5.3 consistency.
+
+## 10. Integer safety (D6)
+
+Before assigning results, both languages must fail closed if any intermediate leaves `0…2^53-1` (or would lose integer exactness):
+
+- `turnsUsed + 1`
+- clear counts / wave index
+- `uniqueCleared * 100 * wave`
+- sum of wave scores
+- `score + scoreDelta`
+- canonical integer emission
+
+Do not rely on post-hoc parse after silent float/precision loss. Historical v1/v2 arithmetic behavior unchanged on their versions.
+
+## 11. Dart / TypeScript
+
+Dart: v3 dispatch in `puzzle_duel_rules`. TS: new pure replay module. Parity only after freeze protocol (D9).
+
+## 12. Fixtures
+
+See FIXTURE-SPEC. Prose ≠ PASS.
+
+## 13–16. Migration, security, acceptance, decisions
+
+Pin v3 only after owner Accept + dual PASS + v1/v2 regression. Security: replay authority. Acceptance: D1–D10 owner approval then implementation stages. Decisions table in architecture review.

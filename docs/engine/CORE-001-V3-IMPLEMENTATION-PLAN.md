@@ -1,62 +1,37 @@
 # CORE-001.v3 implementation roadmap
 
-Status: Proposed plan — **no engine coding until ADR-E01 Accepted**.
-
-Revised after [CORE-001-V3-ARCHITECTURE-REVIEW.md](./CORE-001-V3-ARCHITECTURE-REVIEW.md) (PZD-39). Stage A now includes resolving owner decisions D1–D10 and canonicalization contract.
+Status: Proposed — **no engine coding until ADR-E01 Accepted by owner**.
+Revised for P0/P1 remediation (status-agnostic terminal validation; hash≠authority; canonical bytes; provenance; initial playability; checked ints).
 
 ## Stages
 
-### A — Proposed ADR + fixture approval (this PR)
+### A — Owner design approval (current)
 
-**Deliverables**
+Deliverables: ADR-E01 Proposed, architecture review, fixture spec, canonical vectors, this plan.  
+Tests: historical v1/v2 `reference_check.py` PASS; atom digests SPECIFIED.  
+Complete when: owner accepts D1–D10.
 
-- `docs/adr/ADR-E01-core-001-v3-natural-terminal.md`
-- `docs/contracts/gameplay/v3/FIXTURE-SPEC.md`
-- `docs/engine/CORE-001-V3-BASELINE-AUDIT.md`
-- `docs/engine/CORE-001-V3-TOURNAMENT-INTEGRATION.md`
+### B — Dart v3
 
-**Tests:** documentation review only; run historical checkers to prove non-regression of suites we did not touch:
+`hasLegalPlacement`, `deriveTerminalExpectation`, tagged offers, checked ints, v3 dispatch.  
+`dart test` + pending goldens.
 
-```bash
-# client or backend worktree
-python3 docs/contracts/gameplay/v1/reference_check.py
-python3 docs/contracts/gameplay/v2/reference_check.py
-```
+### C — TypeScript pure engine
 
-**Complete when:** owner Accepts or returns comments on ADR-E01 decisions.
+Independent replay module; same predicates; no Flutter/Dart runtime dependency.
 
-### B — Dart engine v3
+### D — Freeze
 
-**Deliverables:** `RulesVersion.core001V3`, tagged offers parse/validate, `hasLegalMove`, terminalReason, offer spent commit, version dispatch in `applyMove`.
+Independent oracle + dual PASS + negatives + v1/v2 regression + ledger. Only then FROZEN/PASS.
 
-**Tests:**
+### E — Tournament wiring
 
-```bash
-cd packages/puzzle_duel_rules && dart test
-```
+PZD-38 consumes engine results; owns identity/time/idempotency/writer/LB. Trusted checkpoints only.
 
-Plus new v3 golden tests once fixtures frozen.
+### F — Release evidence
 
-### C — TypeScript engine v3
+Matrix PASS/FAIL/SKIP/NOT_RUN. No production pin early.
 
-**Deliverables:** pure `src/engine/core001/` (name TBD) with no Nest/DB/HTTP; mirror Dart semantics.
+## NOT_RUN until later stages
 
-**Tests:** `node --experimental-strip-types --test test/engine/**/*.test.mts`
-
-### D — Golden parity + historical regression
-
-Freeze fixtures; dual-run; SHA-256 ledger; v1/v2 checksum unchanged.
-
-### E — Tournament integration contract
-
-Wire replay to PZD-38 series games only after engine PASS; engine must not mutate entitlement, deadlines, writer generation, journals, or leaderboards.
-
-### F — Final review / release evidence
-
-Matrix PASS/FAIL/SKIP/NOT_RUN; no production pin until evidence attached.
-
-## Non-goals until approval
-
-- Implementing Stages B–F code
-- Accepting ADR-E01 unilaterally
-- Touching `feature/PZD-38-trusted-ingress` / PR #13
+Dart/TS v3 code, full GameState hash freeze, Nest e2e, device UAT, deploy.

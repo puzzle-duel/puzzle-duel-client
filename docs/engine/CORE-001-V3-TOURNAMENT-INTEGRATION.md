@@ -1,31 +1,22 @@
 # CORE-001.v3 ↔ Tournament (PZD-38) integration boundary
 
-Status: Proposed contract sketch — implementation deferred.
+Status: Proposed — revised for P0-2 authority clarification.
 
-## Engine returns
+## Engine owns
 
-- Validated post-move `GameState` (`rulesVersion`, board, offers, stream, score, turns, status, terminalReason)
-- `stateHash`
-- Move application outcome (applied / rejected / unsafe)
+Placement/cascade/offers/`hasLegalPlacement`/`deriveTerminalExpectation`/score/canonical hash **of a candidate state**.
 
-## Engine must NOT
+## Tournament owns
 
-- Consume daily entitlement
-- Mutate inactivity / hard UTC deadlines
-- Change writer generation
-- Write admission journal rows
-- Publish daily/weekly leaderboard rows
-- Decide claim windows
+Identity, entitlement, trusted ingress time, idempotency, writer generation, command ordering, series advance, leaderboards, **authoritative replay**, authenticated checkpoints bound to move ledger.
 
-## Tournament service must
+## Explicit non-authority
 
-- Pin `rulesVersion` + `gen-001.v1` (or later) in immutable manifest per ordinal
-- Admit commands under PZD-38 trusted ingress
-- Authorize writer + board_revision
-- Replay moves server-side under pinned version
-- On subgame `ended` with `move_limit_reached` or `no_legal_moves`, allow Advance when series rules permit
-- Publish four category scores only after all six verified completions
+- Client `stateHash` / score / terminalReason are not ranked truth.
+- Matching hash to attacker JSON ≠ earned score.
+- Engine must not write admission journal, deadlines, or LB rows.
+- Checkpoint optimization allowed only if server-authenticated and replay-bound.
 
-## Client
+## Subgame completion
 
-- May show natural terminal UX; must not treat local terminal as ranked truth
+On verified `ended` with `move_limit_reached` or `no_legal_moves`, tournament may allow Advance per series rules. Four-category publish only after all six verified completions (ADR-T02).

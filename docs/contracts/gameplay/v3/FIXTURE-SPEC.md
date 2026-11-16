@@ -1,77 +1,56 @@
 # CORE-001.v3 golden fixture specification
 
-Status: **Proposed catalogue — executable vectors NOT frozen**
-Companion review: `docs/engine/CORE-001-V3-ARCHITECTURE-REVIEW.md`
+Status: Proposed catalogue — executable boards/hashes mostly **PENDING_FREEZE**
+Canonical atom digests: [canonical-v3-test-vectors.md](./canonical-v3-test-vectors.md) (**SPECIFIED**).
 
-**Important:** A prose catalogue is **not** executable Dart/TypeScript parity. Until Stage D freeze, expected boards/hashes are `PENDING_FREEZE`.
+## Freeze protocol (D9)
 
-## Format
+1. Hand-checkable / invariant oracles  
+2. Structural + mathematical checks  
+3. Dart engine  
+4. TypeScript engine  
+5. Cross-language byte equality  
+6. Negative/fail-closed cases  
+7. Historical v1/v2 regression  
+8. Immutable checksum ledger  
 
-| Field | Description |
-| --- | --- |
-| `id` / `number` / `kind` / `rulesVersion` / `summary` | Metadata |
-| `scenarios[]` | `given`, optional `when.moves`, `expected` |
-| `expected.stateHash` | SHA-256 of `canonical_json_v3(finalState)` once frozen |
-| `expected.status` | May be `PENDING_FREEZE` before dual-engine agreement |
+Dual agreement alone is necessary but not sufficient.
 
-## Freeze protocol
+Each fixture row uses: `SPECIFIED` | `PENDING_FREEZE` | `FROZEN` | `PASS` | `FAIL`.
 
-1. Implement Dart + TS v3 independently.  
-2. Run the same inputs; require byte-identical canonical states and hashes.  
-3. Write fixture bodies + `CHECKSUMS.txt`.  
-4. Re-run historical v1/v2 checksums unchanged.  
-5. Only then claim golden parity PASS.
+## Catalogue (V3-01…V3-35 retained; additions below)
 
-## Catalogue
-
-| ID | Scenario | Expected invariant | Freeze |
+| ID | Scenario | Oracle notes | Status |
 | --- | --- | --- | --- |
-| V3-01 | Normal legal placement | Valid state; stream advances if non-empty | PENDING_FREEZE |
-| V3-02 | Single-wave clear | `scoreDelta = uniqueCleared*100*1` (hand-checkable arithmetic) | ARITH_OK / board PENDING_FREEZE |
-| V3-03 | Multi-wave cascade | Full resolution before terminal; per-move wave reset | PENDING_FREEZE |
-| V3-04 | Board becomes full | `ended`; reason `no_legal_moves` unless move-limit also true → then `move_limit_reached` | PENDING_FREEZE |
-| V3-05 | Cascade reopens space | `in_progress` if budget + legal move remain | PENDING_FREEZE |
-| V3-06 | Empty stream, playable piece offers | Not terminal solely due to empty stream | PENDING_FREEZE |
-| V3-07 | No legal move; empty cells remain | All offers `spent`; `no_legal_moves`; score preserved | PENDING_FREEZE |
-| V3-08 | Consume with empty stream | Slot → `{kind:spent}`; others unchanged | PENDING_FREEZE |
-| V3-09 | Move budget exhausted | `move_limit_reached` | PENDING_FREEZE |
-| V3-10 | No available offers remain | Natural `no_legal_moves` | PENDING_FREEZE |
-| V3-11 | Illegal placement | Reject; zero mutation | PENDING_FREEZE |
-| V3-12 | Corrupted terminal proof | Fail closed | PENDING_FREEZE |
-| V3-13 | Malformed tray / bare null / unknown kind | Parse fail closed | PENDING_FREEZE |
-| V3-14 | Corrupt initial state | `parseInitialGameState` rejects | PENDING_FREEZE |
-| V3-15 | Duplicate finalization | Identical terminal envelope | PENDING_FREEZE |
-| V3-16 | Serialize/parse round-trip | Canonical equality + stable hash | PENDING_FREEZE |
-| V3-17 | Historical v1 fixtures | Unchanged bytes/checksums | **Historical ledger** |
-| V3-18 | Historical v2 fixtures | Unchanged bytes/checksums | **Historical ledger** |
-| V3-19 | v2 early-board-end-empty-stream | Historical fail-closed preserved | **Historical** |
-| V3-20 | v3 early natural terminal | Board-full / no-legal success under v3 | PENDING_FREEZE |
-| V3-21 | Pre-move unresolved match | `MoveUnsafe`; no score | PENDING_FREEZE |
-| V3-22 | Select spent slot | `offer_unavailable`; unchanged | PENDING_FREEZE |
-| V3-23 | Ended then empty tap | `game_ended` | PENDING_FREEZE |
-| V3-24 | Multiple spent slots mid-game | Valid `in_progress` if a piece offer + empty cell remain | PENDING_FREEZE |
-| V3-25 | Last playable offer consumed | Ends `no_legal_moves` if no other piece offers / cells | PENDING_FREEZE |
-| V3-26 | Move-limit and no-legal-move simultaneous | Reason **`move_limit_reached` only** | PENDING_FREEZE |
-| V3-27 | Malformed piece / extra properties | Parse reject | PENDING_FREEZE |
-| V3-28 | Duplicate/invalid blocked | Parse reject | PENDING_FREEZE |
-| V3-29 | Integer overflow / non-int score | Parse reject | PENDING_FREEZE |
-| V3-30 | JSON key-order independence | Same `stateHash` for permuted keys | PENDING_FREEZE |
-| V3-31 | Version-dispatch mismatch | v3 rules on v2 state rejected / not reinterpreted | PENDING_FREEZE |
-| V3-32 | Forged terminalReason on in_progress | Parse reject | PENDING_FREEZE |
-| V3-33 | Spent slot while stream non-empty (corrupt) | Invariant/parse reject | PENDING_FREEZE |
-| V3-34 | Repeated terminal evaluation | Idempotent ended snapshot | PENDING_FREEZE |
-| V3-35 | Cross-language hash parity | Dart hash == TS hash | PENDING_FREEZE (Stage D) |
+| V3-01…V3-35 | Prior catalogue | Boards PENDING_FREEZE; V3-02 arithmetic hand-checkable | PENDING_FREEZE / historical for 17–19 |
+| V3-36 | Playable board falsely `ended/no_legal_moves` | `deriveTerminalExpectation` reject | SPECIFIED (behavior) / board PENDING_FREEZE |
+| V3-37 | Budget exhausted falsely `in_progress` | Reject | SPECIFIED / PENDING_FREEZE |
+| V3-38 | No offers/placement falsely `in_progress` | Reject | SPECIFIED / PENDING_FREEZE |
+| V3-39 | No placement, budget left → `ended/no_legal_moves` | Accept | SPECIFIED / PENDING_FREEZE |
+| V3-40 | Budget + no placement simultaneous | `move_limit_reached` | SPECIFIED / PENDING_FREEZE |
+| V3-41 | Valid ended; `hasLegalMove` false | Gameplay false; terminal unchanged | SPECIFIED / PENDING_FREEZE |
+| V3-42 | Forged score + recomputed matching hash | Schema may pass; **replay FAIL** | SPECIFIED (class) |
+| V3-43 | Forged board + matching hash | Replay FAIL | SPECIFIED (class) |
+| V3-44 | Forged terminal + self-consistent hash | §5.3 reject and/or replay FAIL | SPECIFIED (class) |
+| V3-45 | Structurally pretty unreachable history | Parse may pass snapshot checks; **replay FAIL**; provenance | SPECIFIED (class) |
+| V3-46 | Altered move sequence → different score | Replay diverges from claimed | SPECIFIED (class) |
+| V3-47 | Wrong rulesVersion pin | Dispatch/reject; no silent reinterpret | SPECIFIED (class) |
+| V3-48 | Client overwrites trusted checkpoint | Tournament rejects; engine unused | SPECIFIED (class) |
+| V3-49 | Intermediate cascade arithmetic overflow | Fail closed both languages | SPECIFIED (class) / PENDING_FREEZE numeric fixture |
+| V3-50 | Impossible initial (no legal placement) | `parseInitialGameState` reject; not zero-move success | SPECIFIED / PENDING_FREEZE |
+| V3-51 | Exact canonical atom digests CV-01…09 | Independent Python SHA | **SPECIFIED** |
+| V3-52 | Full state key-order independence | Same stateHash | PENDING_FREEZE |
 
-## Directory layout (after Acceptance / freeze)
+### Authority matrix for negative hash/score cases
 
-```
-docs/contracts/gameplay/v3/
-  README.md
-  FIXTURE-SPEC.md
-  fixture.schema.json
-  fixtures/
-  invalid/
-  CHECKSUMS.txt
-  reference_check.py   # optional; not a product engine
-  validate.mjs
-```
+| Case | Schema/§5.3 | Hash self-match | Authoritative replay |
+| --- | --- | --- | --- |
+| V3-42 forged score | may pass | can match forged | **FAIL** |
+| V3-43 forged board | may pass | can match | **FAIL** |
+| V3-44 forged terminal | **reject** if inconsistent | irrelevant | FAIL if somehow stored |
+| V3-45 unreachable | structure maybe pass | maybe match | **FAIL** |
+| V3-46 sequence tamper | n/a | n/a | **FAIL** vs ledger |
+| V3-47 wrong version | reject / wrong dispatch | n/a | **FAIL** |
+| V3-48 checkpoint overwrite | n/a | n/a | Tournament **FAIL** |
+
+Parser alone does **not** detect all seven; replay/tournament authority required where noted.

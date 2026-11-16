@@ -1,12 +1,11 @@
 # core-001.v3 (Proposed)
 
-Design package only. **Not an Accepted ruleset.**
+**Not Accepted.** Docs-only design package.
 
-- [FIXTURE-SPEC.md](./FIXTURE-SPEC.md) — catalogue; vectors `PENDING_FREEZE`
-- ADR: `docs/adr/ADR-E01-core-001-v3-natural-terminal.md` (**Proposed**)
-- Review: `docs/engine/CORE-001-V3-ARCHITECTURE-REVIEW.md`
-- Baseline: `docs/engine/CORE-001-V3-BASELINE-AUDIT.md`
-- Plan: `docs/engine/CORE-001-V3-IMPLEMENTATION-PLAN.md`
-- Tournament boundary: `docs/engine/CORE-001-V3-TOURNAMENT-INTEGRATION.md`
+- ADR-E01 (Proposed, P0/P1 remediated)
+- Architecture review + D1–D10 package
+- FIXTURE-SPEC (PENDING_FREEZE boards; atom digests SPECIFIED)
+- [canonical-v3-test-vectors.md](./canonical-v3-test-vectors.md)
+- Implementation plan / tournament boundary
 
-Do not claim Dart/TypeScript parity until frozen fixtures execute in both engines.
+Do not claim engine parity or merge until owner approval + freeze protocol.
