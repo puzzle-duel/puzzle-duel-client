@@ -32,22 +32,22 @@ void main() {
   testWidgets('home renders without backend or sign-in', (tester) async {
     final session = GameSession();
     await pumpGame(tester, session);
-    expect(find.text('Puzzle Duel'), findsWidgets);
-    expect(
-      find.textContaining('No network or sign-in required'),
-      findsOneWidget,
-    );
+    expect(find.text('PUZZLE DUEL'), findsOneWidget);
+    expect(find.textContaining('Offline practice'), findsOneWidget);
+    expect(find.text('Easy'), findsOneWidget);
+    expect(find.text('Medium'), findsOneWidget);
+    expect(find.text('Hard'), findsOneWidget);
   });
 
   testWidgets('starts Easy round and shows board tray score', (tester) async {
     final session = GameSession();
     await pumpGame(tester, session);
-    await tester.tap(find.textContaining('Easy'));
+    await tester.tap(find.text('Play').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(session.view.phase, GameScreenPhase.playing);
-    expect(find.textContaining('Score'), findsWidgets);
-    expect(find.textContaining('Moves left'), findsOneWidget);
+    expect(find.text('SCORE'), findsOneWidget);
+    expect(find.text('MOVES LEFT'), findsOneWidget);
     expect(find.bySemanticsLabel('Offer tray, three pieces'), findsOneWidget);
   });
 
@@ -224,8 +224,9 @@ void main() {
     }
 
     await tester.pump();
-    expect(find.text('Play again'), findsOneWidget);
-    await tester.tap(find.text('Play again'));
+    expect(find.text('Play Again'), findsOneWidget);
+    expect(find.text('Change Difficulty'), findsOneWidget);
+    await tester.tap(find.text('Play Again'));
     await tester.pump();
     expect(session.view.phase, GameScreenPhase.playing);
     expect(session.view.canonicalState!.turnsUsed, 0);
@@ -265,6 +266,39 @@ void main() {
     );
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(find.textContaining('Score'), findsWidgets);
+    expect(find.text('SCORE'), findsOneWidget);
+    expect(find.text('MOVES LEFT'), findsOneWidget);
+  });
+
+  testWidgets('offer selection shows selected semantics', (tester) async {
+    final session = GameSession();
+    session.startRound(
+      profile: DifficultyProfile.easy,
+      seed: kUatChallengeSeed,
+    );
+    await pumpGame(tester, session);
+    await tester.tap(find.bySemanticsLabel(RegExp(r'Offer slot 1,')));
+    await tester.pump();
+    expect(session.view.selectedOfferIndex, 0);
+    expect(
+      find.bySemanticsLabel(RegExp(r'Offer slot 1,.*selected')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('5x5 6x6 7x7 boards render without overflow', (tester) async {
+    for (final profile in DifficultyProfile.values) {
+      final session = GameSession();
+      session.startRound(profile: profile, seed: kUatChallengeSeed);
+      await pumpGame(tester, session);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.bySemanticsLabel(
+          'Puzzle board, ${profile.boardSize} by ${profile.boardSize}',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('SCORE'), findsOneWidget);
+    }
   });
 }

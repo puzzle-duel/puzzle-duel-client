@@ -5,6 +5,7 @@ import 'package:flame/game.dart';
 import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/presentation_board.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/board_paint_utils.dart';
+import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 typedef ResolutionComplete = void Function({
@@ -42,16 +43,18 @@ final class PuzzleBoardGame extends FlameGame {
   int _stepIndex = 0;
   bool _disposed = false;
   double _shiftElapsed = 0;
-  static const _shiftDuration = 0.24;
+  static const _shiftDuration = 0.28;
+  double _placePulse = 1;
+  Coordinate? _placeAt;
 
-  Color cellColor = const Color(0xFFE8F0EC);
-  Color blockedColor = const Color(0xFF9AA5A0);
-  Color gridColor = const Color(0xFF5C6B64);
-  Color circleFill = const Color(0xFF1B4D3E);
-  Color diamondFill = const Color(0xFF5B3A8C);
-  Color triangleFill = const Color(0xFF8A5A1E);
-  Color strokeColor = const Color(0xFF122018);
-  Color clearFlash = const Color(0xFFFFF3B0);
+  Color cellColor = GameTokens.cellEmpty;
+  Color blockedColor = GameTokens.cellBlocked;
+  Color gridColor = GameTokens.gridLine;
+  Color circleFill = GameTokens.circleFill;
+  Color diamondFill = GameTokens.diamondFill;
+  Color triangleFill = GameTokens.triangleFill;
+  Color strokeColor = const Color(0xFF061018);
+  Color clearFlash = GameTokens.cellFlash;
 
   void configurePalette({
     required Color cell,
@@ -84,6 +87,8 @@ final class PuzzleBoardGame extends FlameGame {
     _board = PresentationBoard.fromGameState(state);
     _highlight = const [];
     _flying = const [];
+    _placeAt = null;
+    _placePulse = 1;
     _steps = const [];
     _stepIndex = 0;
   }
@@ -138,13 +143,17 @@ final class PuzzleBoardGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    if (_placeAt != null && _placePulse < 1.0) {
+      _placePulse = (_placePulse + dt * 4.2).clamp(0.0, 1.0);
+    }
     if (_flying.isEmpty) return;
     _shiftElapsed += dt;
-    final t = (_shiftElapsed / _shiftDuration).clamp(0.0, 1.0);
+    final raw = (_shiftElapsed / _shiftDuration).clamp(0.0, 1.0);
+    final t = 1 - (1 - raw) * (1 - raw) * (1 - raw);
     for (final flyer in _flying) {
       flyer.progress = t;
     }
-    if (t >= 1.0) {
+    if (raw >= 1.0) {
       final moved = [
         for (final flyer in _flying)
           MovedPiece(
@@ -172,11 +181,13 @@ final class PuzzleBoardGame extends FlameGame {
     switch (step.kind) {
       case AnimationStepKind.place:
         _board?.place(step.landing!, step.piece!);
-        _schedule(const Duration(milliseconds: 220));
+        _placeAt = step.landing;
+        _placePulse = 0.55;
+        _schedule(const Duration(milliseconds: 260));
       case AnimationStepKind.clearWave:
         _highlight = step.cleared;
         _schedule(
-          const Duration(milliseconds: 180),
+          const Duration(milliseconds: 220),
           after: () {
             _board?.clearCells(step.cleared);
             _highlight = const [];
@@ -268,6 +279,14 @@ final class PuzzleBoardGame extends FlameGame {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1,
         );
+        if (flash) {
+          final spark = Paint()..color = clearFlash.withValues(alpha: 0.9);
+          final c = rect.center;
+          final r = cell * 0.08;
+          canvas.drawCircle(c.translate(-cell * 0.22, -cell * 0.18), r, spark);
+          canvas.drawCircle(c.translate(cell * 0.2, -cell * 0.12), r * 0.7, spark);
+          canvas.drawCircle(c.translate(0, cell * 0.2), r * 0.85, spark);
+        }
         if (blocked) {
           final p = Paint()
             ..color = strokeColor.withValues(alpha: 0.55)
@@ -286,7 +305,10 @@ final class PuzzleBoardGame extends FlameGame {
         }
         final piece = board.pieceAt(row, col);
         if (piece != null) {
-          _paintPiece(canvas, rect.center, cell, piece);
+          final pulse = (_placeAt?.row == row && _placeAt?.column == col)
+              ? (0.86 + 0.14 * _placePulse)
+              : 1.0;
+          _paintPiece(canvas, rect.center, cell * pulse, piece);
         }
       }
     }
@@ -314,7 +336,7 @@ final class PuzzleBoardGame extends FlameGame {
     paintPieceGlyph(
       canvas,
       center: center,
-      size: cell * 0.82,
+      size: cell * 0.9,
       piece: piece,
       fill: fill,
       stroke: strokeColor,

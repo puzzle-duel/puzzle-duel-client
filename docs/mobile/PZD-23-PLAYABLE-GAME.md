@@ -48,7 +48,13 @@ flowchart TD
 
 Shift presentation interpolates piece centers between `from` and `to` (presentation-only). Gameplay remains engine-owned; no physics.
 
-UAT seed: `kUatChallengeSeed = 42` (documented local testing only).
+UAT seed: `kUatChallengeSeed = 42` (internal/debug only — **not** shown on the primary player-facing UI).
+
+## Visual overhaul (pre–visual UAT)
+
+See `docs/mobile/PZD-23-VISUAL-OVERHAUL.md` and evidence under `docs/mobile/uat-evidence/pzd23-visual/`.
+
+Presentation uses `GameTokens` + `PuzzleDuelTheme.dark()`, difficulty cards on home, board-first HUD, premium `PiecePainter` glyphs, and end-of-round overlay. Gameplay/engine contracts are unchanged.
 
 ## Visual animation state model
 

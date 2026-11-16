@@ -20,7 +20,7 @@ final class PuzzleDuelApp extends StatelessWidget {
     return MaterialApp(
       title: 'Puzzle Duel',
       debugShowCheckedModeBanner: false,
-      theme: PuzzleDuelTheme.light(),
+      theme: PuzzleDuelTheme.dark(),
       // Bridge supplies theme/localizations to Flame (legacy Material imports).
       builder: (context, child) {
         // ignore: deprecated_member_use

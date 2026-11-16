@@ -2,8 +2,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/accessible_board.dart';
 import 'package:puzzle_duel_mobile/presentation/game/offer_tray.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
+import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-/// Playable round screen for first UAT.
+/// Playable round screen — board-first arcade HUD.
 final class GameScreen extends StatelessWidget {
   const GameScreen({super.key, required this.session});
 
@@ -15,195 +18,463 @@ final class GameScreen extends StatelessWidget {
       listenable: session,
       builder: (context, _) {
         final view = session.view;
-        final theme = Theme.of(context);
         final state = view.canonicalState;
+        final profile = view.profile;
+        final difficulty = switch (profile) {
+          DifficultyProfile.easy => 'Easy',
+          DifficultyProfile.medium => 'Medium',
+          DifficultyProfile.hard => 'Hard',
+          null => 'Round',
+        };
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Puzzle Duel'),
-            leading: IconButton(
-              tooltip: 'Back to difficulty selection',
-              onPressed: session.returnToMenu,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            actions: [
-              if (view.isResolving)
-                TextButton(
-                  onPressed: () => session.skipResolution(
-                    generation: view.generation,
-                    resolutionId: view.activeResolutionId,
-                  ),
-                  child: const Text('Skip'),
-                ),
-            ],
-          ),
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final landscape = constraints.maxWidth > constraints.maxHeight;
-                final board = AccessibleBoard(session: session, view: view);
-                final side = _StatusColumn(session: session, view: view);
-                final tray = OfferTray(
-                  offers: state?.offers ?? const [null, null, null],
-                  selectedIndex: view.selectedOfferIndex,
-                  enabled: view.acceptsInput,
-                  onSelect: session.selectOffer,
-                );
+          backgroundColor: Colors.transparent,
+          body: ArcadeBackdrop(
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final landscape = constraints.maxWidth > constraints.maxHeight;
+                  final tray = OfferTray(
+                    offers: state?.offers ?? const [null, null, null],
+                    selectedIndex: view.selectedOfferIndex,
+                    enabled: view.acceptsInput,
+                    onSelect: session.selectOffer,
+                  );
+                  final board = AccessibleBoard(session: session, view: view);
+                  final hud = _HudBar(view: view);
+                  final hint = _HintLine(view: view);
+                  final feedback = _FeedbackBanner(view: view);
 
-                final column = Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: Text(
-                        _subtitle(view),
-                        style: theme.textTheme.titleMedium,
-                      ),
-                    ),
-                    if (view.feedbackKind != MoveFeedbackKind.none)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                        child: Semantics(
-                          liveRegion: true,
-                          child: Text(
-                            _feedbackText(view),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color:
-                                  view.feedbackKind == MoveFeedbackKind.unsafe
-                                  ? theme.colorScheme.error
-                                  : theme.colorScheme.onSurfaceVariant,
-                            ),
+                  return Stack(
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _TopNav(
+                            title: difficulty,
+                            resolving: view.isResolving,
+                            onBack: session.returnToMenu,
+                            onSkip: view.isResolving
+                                ? () => session.skipResolution(
+                                    generation: view.generation,
+                                    resolutionId: view.activeResolutionId,
+                                  )
+                                : null,
                           ),
-                        ),
-                      ),
-                    Expanded(
-                      child: landscape
-                          ? Row(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: board,
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 2,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: side,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                children: [
-                                  Expanded(child: board),
-                                  const SizedBox(height: 12),
-                                  side,
-                                ],
-                              ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+                            child: hud,
+                          ),
+                          if (view.feedbackKind != MoveFeedbackKind.none)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                              child: feedback,
                             ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: tray,
-                    ),
-                  ],
-                );
-
-                return column;
-              },
+                          Expanded(
+                            child: landscape
+                                ? Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 3,
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            12,
+                                            0,
+                                            6,
+                                            8,
+                                          ),
+                                          child: board,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            6,
+                                            0,
+                                            12,
+                                            8,
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              hint,
+                                              const Spacer(),
+                                              tray,
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Column(
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                        ),
+                                        child: hint,
+                                      ),
+                                      Expanded(
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            8,
+                                            4,
+                                            8,
+                                            4,
+                                          ),
+                                          child: board,
+                                        ),
+                                      ),
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          10,
+                                          0,
+                                          10,
+                                          10,
+                                        ),
+                                        child: tray,
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ],
+                      ),
+                      if (view.phase == GameScreenPhase.ended)
+                        _EndOverlay(session: session, view: view),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         );
       },
     );
   }
+}
 
-  static String _subtitle(GameSessionView view) {
-    final profile = view.profile?.wire ?? 'round';
-    final seed = view.seed ?? '—';
-    return '${_titleCase(profile)} · seed $seed'
-        '${view.isResolving ? ' · resolving' : ''}';
+final class _TopNav extends StatelessWidget {
+  const _TopNav({
+    required this.title,
+    required this.resolving,
+    required this.onBack,
+    required this.onSkip,
+  });
+
+  final String title;
+  final bool resolving;
+  final VoidCallback onBack;
+  final VoidCallback? onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 8, 0),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Back to difficulty selection',
+            onPressed: onBack,
+            icon: const Icon(Icons.arrow_back_rounded),
+            color: GameTokens.textPrimary,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                const Text(
+                  'PUZZLE DUEL',
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1.6,
+                    fontWeight: FontWeight.w700,
+                    color: GameTokens.textMuted,
+                  ),
+                ),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: GameTokens.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (resolving && onSkip != null)
+            TextButton(
+              onPressed: onSkip,
+              child: const Text('Skip'),
+            )
+          else
+            const SizedBox(width: 64),
+        ],
+      ),
+    );
   }
+}
 
-  static String _titleCase(String wire) {
-    if (wire.isEmpty) return wire;
-    return '${wire[0].toUpperCase()}${wire.substring(1)}';
+final class _HudBar extends StatelessWidget {
+  const _HudBar({required this.view});
+
+  final GameSessionView view;
+
+  @override
+  Widget build(BuildContext context) {
+    final scoreDelta = view.activeScript?.applied.scoreDelta;
+    final showDelta =
+        view.isResolving && scoreDelta != null && scoreDelta > 0;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: GameTokens.surface.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+        border: Border.all(color: GameTokens.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                label: 'Score ${view.score}',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SCORE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w700,
+                        color: GameTokens.textMuted,
+                      ),
+                    ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Flexible(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            child: Text(
+                              '${view.score}',
+                              key: ValueKey(view.score),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 32,
+                                height: 1.05,
+                                fontWeight: FontWeight.w800,
+                                color: GameTokens.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (showDelta) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '+$scoreDelta',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: GameTokens.scoreGlow,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 42,
+              color: GameTokens.border,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                label: 'Moves remaining ${view.movesRemaining}',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'MOVES LEFT',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w700,
+                        color: GameTokens.textMuted,
+                      ),
+                    ),
+                    Text(
+                      '${view.movesRemaining}',
+                      style: TextStyle(
+                        fontSize: 32,
+                        height: 1.05,
+                        fontWeight: FontWeight.w800,
+                        color: view.movesRemaining <= 2
+                            ? GameTokens.danger
+                            : GameTokens.accent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
+}
 
-  static String _feedbackText(GameSessionView view) {
-    return switch (view.feedbackKind) {
+final class _HintLine extends StatelessWidget {
+  const _HintLine({required this.view});
+
+  final GameSessionView view;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = view.selectedOfferIndex;
+    final text = selected == null
+        ? 'Select a piece, then tap an empty cell.'
+        : 'Selected offer ${selected + 1}. Tap an empty cell.';
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        color: GameTokens.textSecondary,
+        fontWeight: FontWeight.w500,
+      ),
+    );
+  }
+}
+
+final class _FeedbackBanner extends StatelessWidget {
+  const _FeedbackBanner({required this.view});
+
+  final GameSessionView view;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = switch (view.feedbackKind) {
       MoveFeedbackKind.none => '',
       MoveFeedbackKind.rejected =>
         'Move rejected: ${view.feedbackCode ?? 'rejected'}',
       MoveFeedbackKind.unsafe =>
         'Move could not be applied safely: ${view.feedbackCode ?? 'unsafe'}',
     };
+    final danger = view.feedbackKind == MoveFeedbackKind.unsafe;
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: (danger ? GameTokens.danger : GameTokens.borderBright)
+              .withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(GameTokens.radiusSm),
+          border: Border.all(
+            color: danger ? GameTokens.danger : GameTokens.borderBright,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Text(
+            text,
+            style: TextStyle(
+              color: danger ? GameTokens.danger : GameTokens.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
-final class _StatusColumn extends StatelessWidget {
-  const _StatusColumn({required this.session, required this.view});
+final class _EndOverlay extends StatelessWidget {
+  const _EndOverlay({required this.session, required this.view});
 
   final GameSession session;
   final GameSessionView view;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final selected = view.selectedOfferIndex;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Semantics(
-          liveRegion: true,
-          label: 'Score ${view.score}',
-          child: Text(
-            'Score ${view.score}',
-            style: theme.textTheme.headlineSmall,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Semantics(
-          liveRegion: true,
-          label: 'Moves remaining ${view.movesRemaining}',
-          child: Text(
-            'Moves left ${view.movesRemaining}',
-            style: theme.textTheme.titleMedium,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          selected == null
-              ? 'Select an offer, then tap an empty cell.'
-              : 'Selected offer ${selected + 1}. Tap an empty cell.',
-          style: theme.textTheme.bodyMedium,
-        ),
-        if (view.phase == GameScreenPhase.ended) ...[
-          const SizedBox(height: 12),
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              'Round complete. Final score ${view.score}.',
-              style: theme.textTheme.titleMedium,
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.62),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: GameTokens.surface,
+                borderRadius: BorderRadius.circular(GameTokens.radiusLg),
+                border: Border.all(color: GameTokens.borderBright),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    blurRadius: 28,
+                    offset: const Offset(0, 14),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'ROUND COMPLETE',
+                      style: TextStyle(
+                        letterSpacing: 1.8,
+                        fontWeight: FontWeight.w800,
+                        color: GameTokens.accent,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        'Final score ${view.score}',
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: GameTokens.textPrimary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Local practice score only.',
+                      style: TextStyle(color: GameTokens.textMuted),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: session.playAgain,
+                        child: const Text('Play Again'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: session.returnToMenu,
+                        child: const Text('Change Difficulty'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: session.playAgain,
-            child: const Text('Play again'),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed: session.returnToMenu,
-            child: const Text('New difficulty'),
-          ),
-        ],
-      ],
+        ),
+      ),
     );
   }
 }

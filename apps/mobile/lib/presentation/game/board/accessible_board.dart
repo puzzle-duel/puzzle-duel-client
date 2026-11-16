@@ -4,6 +4,7 @@ import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/puzzle_board_game.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
+import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Flame visual board with a Flutter semantics/input overlay.
@@ -59,16 +60,15 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
   }
 
   void _syncTheme() {
-    final scheme = Theme.of(context).colorScheme;
     _game.configurePalette(
-      cell: scheme.surfaceContainerHighest,
-      blocked: scheme.outline.withValues(alpha: 0.55),
-      grid: scheme.outline,
-      circle: scheme.primary,
-      diamond: scheme.tertiary,
-      triangle: scheme.secondary,
-      stroke: scheme.onSurface,
-      flash: scheme.tertiaryContainer,
+      cell: GameTokens.cellEmpty,
+      blocked: GameTokens.cellBlocked,
+      grid: GameTokens.gridLine,
+      circle: GameTokens.circleFill,
+      diamond: GameTokens.diamondFill,
+      triangle: GameTokens.triangleFill,
+      stroke: const Color(0xFF061018),
+      flash: GameTokens.cellFlash,
     );
   }
 
@@ -128,21 +128,41 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final side = constraints.biggest.shortestSide;
-        return SizedBox(
-          width: side,
-          height: side,
-          child: Semantics(
-            label: 'Puzzle board, ${state.boardSize} by ${state.boardSize}',
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                IgnorePointer(child: GameWidget(game: _game)),
-                _SemanticsGrid(
-                  state: interactionState,
-                  enabled: widget.view.acceptsInput,
-                  onTapCell: (coord) => widget.session.submitTap(coord),
+        return Center(
+          child: SizedBox(
+            width: side,
+            height: side,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: GameTokens.bgDeep.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+                border: Border.all(color: GameTokens.borderBright, width: 1.4),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Semantics(
+                  label:
+                      'Puzzle board, ${state.boardSize} by ${state.boardSize}',
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      IgnorePointer(child: GameWidget(game: _game)),
+                      _SemanticsGrid(
+                        state: interactionState,
+                        enabled: widget.view.acceptsInput,
+                        onTapCell: (coord) => widget.session.submitTap(coord),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         );
