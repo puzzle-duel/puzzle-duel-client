@@ -61,11 +61,8 @@ Zero matches → `shift == null` (no survivor movement).
 | 08 | Preoccupied destination; diamond `sourceIndex 12` only |
 | 09 | Edge and blocked destinations; empty `moved` |
 
-Score deltas and full-move `finalState` parity remain **NOT_RUN**.
+Full-move score deltas, offer commit, and `finalState` parity are implemented in [PZD-20-RESOLUTION.md](PZD-20-RESOLUTION.md).
 
 ## Deferred
 
-- Cascade rematch loops and wave multipliers (PZD-20).
-- Score accumulation and offer commit.
-- Final `ended` evaluation after resolution.
 - Flutter UI and backend replay.

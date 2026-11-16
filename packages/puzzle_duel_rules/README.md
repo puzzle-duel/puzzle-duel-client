@@ -4,7 +4,7 @@ Pure Dart rules package for Puzzle Duel.
 
 Location: `packages/puzzle_duel_rules`. Named by [ADR-001](../../docs/adr/ADR-001-client-stack.md). It does not import Flutter, Flame, or `dart:ui`.
 
-Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18), [PZD-19](https://puzzle-duel-app.atlassian.net/browse/PZD-19).
+Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18), [PZD-19](https://puzzle-duel-app.atlassian.net/browse/PZD-19), [PZD-20](https://puzzle-duel-app.atlassian.net/browse/PZD-20).
 
 ## Public API
 
@@ -25,18 +25,25 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](ht
 | `findMatches` / `clearMatches` | Match scan and simultaneous clear. No shift. |
 | `applyShift` / `MovedPiece` | Snapshot-based one-cell simultaneous shift. Invalid board/blocked geometry throws `ValidationFailure` first. |
 | `resolveAfterPlacement` | Single wave: clear once after placement; shift once only if cleared. |
+| `applyMove` | Full CORE-001 resolution: placement, cascades, integer scoring, offer commit, termination. |
+| `MoveApplied` / `WaveResult` | Legal full-move outcome and per-wave clear/score/moved records. |
+| `MoveRejected` / `MoveUnsafe` | Gameplay rejection or internal fail-closed stop; input state unchanged. Includes `unresolved_pre_move_match` when a resume board already has a run. |
 
-Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md).
+Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md), [`docs/engine/PZD-20-RESOLUTION.md`](../../docs/engine/PZD-20-RESOLUTION.md).
 
 `core-001.v1` and `core-001.v2` are the only rulesets. Lists returned by a state are unmodifiable copies.
 
+## Full-move resolution
+
+`applyMove` places one piece, clears and shifts until no matches remain, scores each wave as `uniqueClearedCount * 100 * waveNumber`, commits the consumed offer, then sets `ended` when the move budget is exhausted or no unblocked empty cell remains. Cascades are bounded by `floor(occupiedAfterPlacement / 3)`.
+
 ## Placement
 
-A legal placement lands one cell forward when that cell is in bounds, empty, and not blocked. Otherwise it lands on the tap. Exactly one turn is consumed. Score is unchanged. Status is not re-evaluated for board fill.
+A legal placement lands one cell forward when that cell is in bounds, empty, and not blocked. Otherwise it lands on the tap. Exactly one turn is consumed. Score is unchanged until resolution. Status is not re-evaluated for board fill in the placement phase alone.
 
 ## Match and shift
 
-`clearMatches` unions orthogonal shape runs of length ≥ 3 and clears unique cells once. `applyShift` proposes one neighbor per survivor from the pre-shift snapshot; contested or start-occupied destinations fail. Cascades, scoring, offer commit, and final end evaluation are **NOT_RUN**.
+`clearMatches` unions orthogonal shape runs of length ≥ 3 and clears unique cells once. `applyShift` proposes one neighbor per survivor from the pre-shift snapshot; contested or start-occupied destinations fail.
 
 ## Validation
 
@@ -62,7 +69,7 @@ A legal placement lands one cell forward when that cell is in bounds, empty, and
 | Run of 3 already present on a full-move start | `unresolved_initial_match` | `parseInitialGameState` only |
 | Offer index outside 0, 1, 2 | `illegal_offer_index` | Move |
 
-Out-of-bounds taps return `PlacementUnsafe.tapOutOfBounds` before any gameplay rejection, including when the game has already ended. That is a safety stop for an unspecified case, not a new transport-level precedence decision. In-bounds ended taps still return `game_ended`.
+Out-of-bounds taps return `PlacementUnsafe.tapOutOfBounds` / `MoveSafety.tapOutOfBounds` before any gameplay rejection, including when the game has already ended. That is a safety stop for an unspecified case, not a new transport-level precedence decision. In-bounds ended taps still return `game_ended`.
 
 ## Commands
 
