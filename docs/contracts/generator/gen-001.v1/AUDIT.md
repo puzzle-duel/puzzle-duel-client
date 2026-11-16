@@ -7,3 +7,5 @@ That script is not shipped as product code. The Dart `generateChallenge` impleme
 Retry evidence: `medium-seed-123456789.json` required two board attempts in the independent reference (first attempt rejected for an initial match). Dart tests assert both golden equality and `maxAttempts: 1` exhaustion for that seed.
 
 Client/backend TypeScript executable parity remains **NOT_RUN**.
+
+PR body Acceptance criteria section restored for quality-gate metadata check.
