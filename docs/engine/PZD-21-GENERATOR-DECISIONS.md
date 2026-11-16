@@ -49,7 +49,7 @@ PZD-17…PZD-20 already enforce: blocked uniqueness/row-major/occupancy, `parseI
 
 #### Recommended algorithm: PCG32 XSH-RR (single stream)
 
-Constants (fixed for this Proposed contract):
+Constants (fixed for the Accepted `gen-001.v1` contract):
 
 ```text
 MULT = 6364136223846793005          # uint64
@@ -108,7 +108,7 @@ Notes:
 1. Output extraction always uses **`oldstate`**, never the post-`step` state.
 2. `seed32` performs exactly two `step` calls and **zero** `nextU32` calls.
 3. The first consumer `nextU32` after `seed32` is draw index 0 of the stream.
-4. There is exactly one stream per `generateChallenge` call. No parallel streams in Proposed `gen-001.v1`.
+4. There is exactly one stream per `generateChallenge` call. No parallel streams in Accepted `gen-001.v1`.
 
 #### `randBound(n)` — unbiased rejection sampling
 
@@ -148,9 +148,9 @@ Language notes:
 | Dart | `BigInt` (or checked `int` that can hold `4294967296`) | `(BigInt.from(u) < limit)` then `(u % n)` |
 | TypeScript | `bigint` | `(BigInt(u) < limit)` then `(u % n)` |
 
-For Proposed `gen-001.v1`, production `randBound` calls use catalogue sizes `3`/`4` and cell-pool sizes up to `boardSize^2` (≤ 49 for Hard). The `n == 2^32` branch is unused there but remains defined.
+For Accepted `gen-001.v1`, production `randBound` calls use catalogue sizes `3`/`4` and cell-pool sizes up to `boardSize^2` (≤ 49 for Hard). The `n == 2^32` branch is unused there but remains defined.
 
-#### Proposed `randBound` self-check vectors (seed = 0)
+#### Accepted `randBound` self-check vectors (seed = 0)
 
 After `seed32(rng, 0)`, the first raw `nextU32` is `903765998`. Each row below starts from a **fresh** `seed32(rng, 0)` and performs a single `randBound(n)`.
 
@@ -174,7 +174,7 @@ Rejection note: for `n = 3`, `limit = 4294967295`, so only `u = 4294967295` is r
 
 Verified with the same Python/Node BigInt PCG32 references used for the raw seed vectors below.
 
-#### Proposed PRNG self-check vectors (not generator fixtures)
+#### Accepted PRNG self-check vectors (not generator fixtures)
 
 Verified independently with two separate BigInt implementations (Python and Node.js) using the pseudocode above. These are **PRNG-only** vectors. They are not challenge fixtures and do not authorize generator code.
 
@@ -364,8 +364,8 @@ Draw accounting for a **successful** board attempt before supply:
 
 **Question:** Exact draw order for offers + `futurePieces`, supply length, and which `rulesVersion` generated challenges use.
 
-Shape catalogue (Proposed fixed order): `circle`, `diamond`, `triangle`  
-Direction catalogue (Proposed fixed order): `up`, `right`, `down`, `left`
+Shape catalogue (Accepted fixed order): `circle`, `diamond`, `triangle`  
+Direction catalogue (Accepted fixed order): `up`, `right`, `down`, `left`
 
 ```text
 function drawPiece(rng):
@@ -416,11 +416,11 @@ If `supplyLength` were only `moveLimit` (15): offers 3 + future 12 → after 12 
 
 If `supplyLength = moveLimit + 2` and the game ends earlier by board-full, leftover future pieces simply remain unused; that is allowed. Early board-full with an **already empty** stream remains an unapproved product outcome and must not be synthesized by the generator.
 
-#### Production `rulesVersion` (still unresolved)
+#### Production `rulesVersion` (Accepted for new ranked challenges: `core-001.v2`)
 
 | Option | Effect |
 | --- | --- |
-| **A. Generate as `core-001.v2` (recommended for new ranked content)** | Matches the terminal empty-stream tray above |
+| **A. Generate as `core-001.v2` (ACCEPTED for new ranked content)** | Matches the terminal empty-stream tray above |
 | B. Generate as `core-001.v1` | Empty stream aborts; final-budget null path unavailable |
 | C. Config-selectable, default v2 | Ranked daily must still pin one value per challenge |
 
@@ -442,7 +442,7 @@ function generateChallenge(config, seed):
     rng = new Rng()
     seed32(rng, seed)                      # exactly two internal step() calls
 
-    for attempt in 1 .. maxAttempts:       # maxAttempts = 256 Proposed
+    for attempt in 1 .. maxAttempts:       # maxAttempts = 256 Accepted
         board = tryBuildBoard(rng, config) # consumes board draws only
         if board is Failure:
             # PRNG state is NOT rewound and NOT re-seeded.
@@ -480,12 +480,12 @@ Structural validity ≠ solvable ≠ Easy/Medium/Hard.
 
 | Tier | Check | MVP proposal |
 | --- | --- | --- |
-| S0 Structural | `parseInitialGameState`, profile sizes, obstacle count/order, supply length, no initial match | **Required** after approval |
+| S0 Structural | `parseInitialGameState`, profile sizes, obstacle count/order, supply length, no initial match | **Required — Accepted** |
 | S1 Soft playability | ≥1 empty non-blocked cell; three non-null offers; `moveLimit ≥ 1` | **Required** |
 | S2 Shallow engine probe | Bounded legal `applyMove` search requiring ≥1 `MoveApplied` | Optional later `generatorVersion` |
 | S3 Strategic quality | Human playtests, score distributions | Empirical; never a silent difficulty claim |
 
-**Recommended:** `gen-001.v1` ships S0+S1 only.
+**Accepted:** `gen-001.v1` ships S0+S1 only; S2 remains optional for a later version.
 
 **Owner approval recorded (2026-11-16):** mandatory tiers for `gen-001.v1`.
 
@@ -495,7 +495,7 @@ Structural validity ≠ solvable ≠ Easy/Medium/Hard.
 
 **Status: Accepted — owner-approved 2026-11-16**
 
-**Proposed canonical artifact:**
+**Accepted canonical artifact schema (complete fixture data required; arrays below are illustrative placeholders):**
 
 ```json
 {
@@ -532,19 +532,19 @@ Also require the GEN-01 PRNG self-check tables to pass in both languages before 
 
 ---
 
-## Recommended defaults (summary)
+## Accepted choices (summary)
 
-| GEN | Recommended default | Status |
+| GEN | Owner-approved choice | Status |
 | --- | --- | --- |
 | GEN-01 | PCG32 XSH-RR pseudocode + vectors above | **Accepted — owner-approved 2026-11-16** |
 | GEN-02 | `generatorVersion = gen-001.v1`, separate fixture tree | **Accepted — owner-approved 2026-11-16** |
 | GEN-03 | Occupied 6/10/16; partial FY `i..m-1`; obstacles then occupied | **Accepted — owner-approved 2026-11-16** |
-| GEN-04 | Catalogues; `supplyLength = moveLimit + 2`; lean v2 | **Accepted — owner-approved 2026-11-16** |
+| GEN-04 | Catalogues; `supplyLength = moveLimit + 2`; new ranked challenges use `core-001.v2` | **Accepted — owner-approved 2026-11-16** |
 | GEN-05 | `maxAttempts = 256`; continue PRNG; supply only after accepted board | **Accepted — owner-approved 2026-11-16** |
 | GEN-06 | S0+S1 required; no difficulty claims | **Accepted — owner-approved 2026-11-16** |
 | GEN-07 | Schema + checksums; parity NOT_RUN until backend exists | **Accepted — owner-approved 2026-11-16** |
 
-## Already approved vs requiring owner approval
+## Prior approvals and GEN-01–07 owner acceptance
 
 **Already approved:** PD-06 profiles, PD-07 supply finiteness + v2 terminal-null semantics, PD-08 no initial match, PD-13 rules versioning obligation, ADR-001 pure Dart boundary, PZD-17…20 engine APIs.
 
@@ -552,7 +552,7 @@ Also require the GEN-01 PRNG self-check tables to pass in both languages before 
 
 ## Unresolved constraints (carry to Jira)
 
-- Production ranked challenges: `core-001.v1` vs `core-001.v2` (GEN-04).
+- Production ranked challenges: **resolved for newly generated ranked content** as `core-001.v2` under GEN-04. Historical `core-001.v1` gameplay/replay remains unchanged; future support/sunsetting remains outside this approval.
 - Early board-full + empty stream tray (still unapproved; generator must not invent one).
 - Whether free-play offline generation may use a different profile/density than ranked daily.
 - How daily challenge UTC date maps to `seed` (transport/challenge-id; not frozen by GEN-01).
