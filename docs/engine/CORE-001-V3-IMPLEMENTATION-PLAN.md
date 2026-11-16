@@ -2,6 +2,8 @@
 
 Status: Proposed plan — **no engine coding until ADR-E01 Accepted**.
 
+Revised after [CORE-001-V3-ARCHITECTURE-REVIEW.md](./CORE-001-V3-ARCHITECTURE-REVIEW.md) (PZD-39). Stage A now includes resolving owner decisions D1–D10 and canonicalization contract.
+
 ## Stages
 
 ### A — Proposed ADR + fixture approval (this PR)

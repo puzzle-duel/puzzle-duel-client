@@ -1,9 +1,12 @@
 # core-001.v3 (Proposed)
 
-Design package only. See:
+Design package only. **Not an Accepted ruleset.**
 
-- [FIXTURE-SPEC.md](./FIXTURE-SPEC.md)
-- Client ADR: `docs/adr/ADR-E01-core-001-v3-natural-terminal.md`
-- Baseline audit: `docs/engine/CORE-001-V3-BASELINE-AUDIT.md`
+- [FIXTURE-SPEC.md](./FIXTURE-SPEC.md) — catalogue; vectors `PENDING_FREEZE`
+- ADR: `docs/adr/ADR-E01-core-001-v3-natural-terminal.md` (**Proposed**)
+- Review: `docs/engine/CORE-001-V3-ARCHITECTURE-REVIEW.md`
+- Baseline: `docs/engine/CORE-001-V3-BASELINE-AUDIT.md`
+- Plan: `docs/engine/CORE-001-V3-IMPLEMENTATION-PLAN.md`
+- Tournament boundary: `docs/engine/CORE-001-V3-TOURNAMENT-INTEGRATION.md`
 
-Do not treat this directory as an Accepted ruleset until ADR-E01 is Accepted and golden vectors are frozen.
+Do not claim Dart/TypeScript parity until frozen fixtures execute in both engines.
