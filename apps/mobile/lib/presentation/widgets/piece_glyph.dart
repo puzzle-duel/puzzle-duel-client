@@ -85,12 +85,19 @@ final class PiecePainter extends CustomPainter {
     final radius = size.shortestSide * 0.42;
     final path = shapePath(center, radius, piece.shape);
 
-    // Soft lift shadow
+    // Soft lift shadow without MaskFilter.blur (avoids first-frame blur
+    // shader compilation hitch on iOS during early interactions).
     canvas.drawPath(
-      path.shift(const Offset(0, 2.5)),
+      path.shift(const Offset(1.2, 2.8)),
       Paint()
-        ..color = Colors.black.withValues(alpha: selected ? 0.45 : 0.28)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+        ..color = Colors.black.withValues(alpha: selected ? 0.34 : 0.22)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      path.shift(const Offset(0.4, 1.2)),
+      Paint()
+        ..color = Colors.black.withValues(alpha: selected ? 0.18 : 0.12)
+        ..style = PaintingStyle.fill,
     );
 
     final rect = Rect.fromCircle(center: center, radius: radius);

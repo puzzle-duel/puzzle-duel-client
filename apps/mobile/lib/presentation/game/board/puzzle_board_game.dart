@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/presentation_board.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
+import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/board_paint_utils.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -115,6 +116,7 @@ final class PuzzleBoardGame extends FlameGame {
     _board = PresentationBoard.fromGameState(script.preState);
     _highlight = const [];
     _flying = const [];
+    InteractionPerf.mark('board.playScript.begin');
     if (reducedMotion) {
       _board = PresentationBoard.fromGameState(script.finalState);
       // Preserve outcome audio from actual MoveApplied waves (no invented clears).
@@ -130,6 +132,7 @@ final class PuzzleBoardGame extends FlameGame {
     _steps = buildAnimationSteps(script);
     _stepIndex = 0;
     _runNextStep();
+    InteractionPerf.mark('board.playScript.first_step_scheduled');
   }
 
   void skipToFinal(

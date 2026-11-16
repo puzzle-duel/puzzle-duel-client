@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
+import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/game/game_screen.dart';
 import 'package:puzzle_duel_mobile/presentation/home/home_screen.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
@@ -33,6 +34,13 @@ final class _PuzzleDuelAppState extends State<PuzzleDuelApp> {
     super.initState();
     _ownsSfx = widget.sfx == null;
     _sfx = widget.sfx ?? AssetGameSfx();
+    InteractionPerf.mark('app.init');
+    // Warm audio off the critical path after the first home frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      InteractionPerf.mark('app.first_frame');
+      // ignore: discarded_futures
+      _sfx.prepare();
+    });
   }
 
   @override

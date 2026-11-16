@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
+import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/move_feedback_toast.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/accessible_board.dart';
 import 'package:puzzle_duel_mobile/presentation/game/offer_tray.dart';
@@ -10,13 +11,31 @@ import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Playable round screen — board-first arcade HUD.
-final class GameScreen extends StatelessWidget {
+final class GameScreen extends StatefulWidget {
   const GameScreen({super.key, required this.session});
 
   final GameSession session;
 
   @override
+  State<GameScreen> createState() => _GameScreenState();
+}
+
+final class _GameScreenState extends State<GameScreen> {
+  @override
+  void initState() {
+    super.initState();
+    InteractionPerf.mark('game_screen.init');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      InteractionPerf.mark('game_screen.first_frame');
+      // Ensure audio warm-up completed even if home prepare was skipped/muted.
+      // ignore: discarded_futures
+      GameSfxScope.maybeOf(context)?.prepare();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
     return ListenableBuilder(
       listenable: session,
       builder: (context, _) {

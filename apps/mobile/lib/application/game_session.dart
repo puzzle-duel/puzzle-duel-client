@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/challenge_factory.dart';
 import 'package:puzzle_duel_mobile/application/game_constants.dart';
+import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 enum GameScreenPhase {
@@ -130,7 +131,10 @@ final class GameSession extends ChangeNotifier {
     required DifficultyProfile profile,
     int seed = kUatChallengeSeed,
   }) {
-    final result = _factory.generate(profile: profile, seed: seed);
+    InteractionPerf.mark('session.startRound.begin');
+    final result = InteractionPerf.spanSync('session.generateChallenge', () {
+      return _factory.generate(profile: profile, seed: seed);
+    });
     _invalidateResolutions();
     _generation += 1;
     _profile = profile;
@@ -145,6 +149,7 @@ final class GameSession extends ChangeNotifier {
             ? GameScreenPhase.ended
             : GameScreenPhase.playing;
         notifyListeners();
+        InteractionPerf.mark('session.startRound.ready');
         return true;
       case ChallengeGenerationFailure(:final code):
         _canonical = null;
@@ -163,6 +168,7 @@ final class GameSession extends ChangeNotifier {
     _selectedOffer = index;
     _clearFeedback();
     notifyListeners();
+    InteractionPerf.mark('session.selectOffer');
   }
 
   /// Single serialized move path. Returns false when the tap is ignored.
@@ -189,7 +195,11 @@ final class GameSession extends ChangeNotifier {
     final move = Move(offerIndex: selected, tap: tap);
     applyMoveCallCount += 1;
     final apply = applyMoveOverride ?? applyMove;
-    final result = apply(preState, move);
+    InteractionPerf.mark('session.submitTap.applyMove.begin');
+    final result = InteractionPerf.spanSync('session.applyMove', () {
+      return apply(preState, move);
+    });
+    InteractionPerf.mark('session.submitTap.applyMove.end');
 
     switch (result) {
       case MoveApplied():
@@ -207,6 +217,7 @@ final class GameSession extends ChangeNotifier {
         );
         _phase = GameScreenPhase.resolving;
         notifyListeners();
+        InteractionPerf.mark('session.submitTap.resolving');
         return true;
       case MoveRejected(:final code):
         _feedbackKind = MoveFeedbackKind.rejected;
