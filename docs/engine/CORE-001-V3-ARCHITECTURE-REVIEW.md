@@ -1,6 +1,6 @@
 # PZD-39 — CORE-001.v3 architecture review (P0/P1 remediation revision)
 
-Status: **Remediation complete — ADR-E01 remains Proposed**
+Status: **ADR-E01 Accepted for design on 2026-11-17; implementation / parity NOT_RUN**
 Date: 2026-11-17
 Supersedes prior review prose where they conflict; D1–D10 recommendations unchanged.
 Independent review source: PR #14 / #17 comments (2026-11-17 REQUEST REVISIONS).
@@ -27,7 +27,7 @@ Independent review source: PR #14 / #17 comments (2026-11-17 REQUEST REVISIONS).
 | P1-4 | Initial-state validity | `parseInitialGameState` requires playable in_progress | §Initial challenges | **REMEDIATED** |
 | P1-5 | Intermediate integer overflow | Checked arithmetic before precision loss | §Integer safety | **REMEDIATED** |
 
-## Final D1–D10 package (approval-ready)
+## Final D1–D10 package (owner-approved design, 2026-11-17)
 
 | ID | Final recommended behavior | Normative invariants | Prior defect | Remediation | Rejected alternatives | Compatibility | Acceptance tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -42,10 +42,10 @@ Independent review source: PR #14 / #17 comments (2026-11-17 REQUEST REVISIONS).
 | D9 | Independent oracle + dual engines before freeze | Agreement ≠ correctness | Dual-bug risk | Multi-layer freeze | Freeze from one engine | Release gate | Freeze protocol |
 | D10 | Initial challenges: 3 live pieces + legal placement + in_progress | Impossible initial fail-closed | Missing playability | Initial parse rules | Allow zero-move success | Generator later pin | V3-50 |
 
-**No additional owner questions.** Residual engineering detail (module paths) is not product-impacting.
+**Owner decision:** D1–D10 all explicitly approved on 2026-11-17 as written at backend PR #14 (`91838d9`) and client PR #17 (`1dc16a4`). No further product-design approval is required for these decisions. Future changes require separate ADR revision. Remaining implementation details are not automatically authorized.
 
 ## Recommendation
 
-**READY FOR OWNER DESIGN APPROVAL** of D1–D10 as revised in ADR-E01 (Proposed).
+**DESIGN APPROVED — ADR-E01 Accepted** for the D1–D10 ruleset. Acceptance does not certify software correctness.
 
-Not ready for: ADR Acceptance ceremony without owner sign-off; engine implementation; golden PASS claims; merge/deploy.
+Still NOT_RUN / NOT AUTHORIZED in this step: Dart/TypeScript engine implementation, executable golden parity, fixture freeze, ranked release, merge or deploy.
