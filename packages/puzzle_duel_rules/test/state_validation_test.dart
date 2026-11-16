@@ -18,7 +18,7 @@ void main() {
       () => first.blocked.add(Coordinate(row: 0, column: 0)),
       throwsUnsupportedError,
     );
-    expect(() => first.offers.add(null), throwsUnsupportedError);
+    expect(() => first.offers.add(const OfferSpent()), throwsUnsupportedError);
     expect(() => first.futurePieces.add(_piece()), throwsUnsupportedError);
     final changed = _valid()..['score'] = 10;
     expect(parseGameState(changed), isNot(first));
@@ -28,7 +28,7 @@ void main() {
     final state = parseGameState(_terminalNull());
     final again = parseGameState(jsonDecode(jsonEncode(state.toJson())));
     expect(again, state);
-    expect(again.offers[0], isNull);
+    expect(again.offers[0], isA<OfferEmpty>());
     expect(again.rulesVersion, RulesVersion.core001V2);
     expect(again.status, GameStatus.ended);
   });
@@ -193,7 +193,7 @@ void main() {
     ]);
     expect(
       parseGameState(_terminalNull()).offers
-          .where((slot) => slot == null)
+          .where((slot) => slot is OfferEmpty)
           .length,
       1,
     );
@@ -290,7 +290,7 @@ void main() {
       '$root/../../docs/contracts/gameplay/v2/invalid/early-board-end-empty-stream.json',
     );
     final earlyState = parseGameState(early['state']);
-    expect(earlyState.offers, everyElement(isNotNull));
+    expect(earlyState.offers, everyElement(isA<OfferLive>()));
     expect(earlyState.futurePieces, isEmpty);
     expect(earlyState.status, GameStatus.inProgress);
   });

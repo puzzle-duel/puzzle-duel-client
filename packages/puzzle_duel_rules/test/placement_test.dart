@@ -274,8 +274,8 @@ void main() {
     expect(offer.offerIndex, 2);
     expect(offer.replacement, state.futurePieces.first);
     expect(offer.remainingFuture, state.futurePieces.skip(1));
-    expect(state.offers[0], isNotNull);
-    expect(state.offers[1], isNotNull);
+    expect(state.offers[0], isA<OfferLive>());
+    expect(state.offers[1], isA<OfferLive>());
   });
 
   test('placement is deterministic and does not mutate the input', () {

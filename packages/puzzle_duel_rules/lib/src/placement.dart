@@ -195,8 +195,9 @@ PlacementResult applyPlacement(GameState state, Move move) {
     return PlacementRejected(code: GameplayRejection.occupiedTap, state: state);
   }
 
-  final selected = state.offers[move.offerIndex];
-  if (selected == null) {
+  final slot = state.offers[move.offerIndex];
+  final selected = slot.pieceOrNull;
+  if (!slot.isSelectable || selected == null) {
     return PlacementUnsafe(
       reason: PlacementSafety.offerUnavailable,
       state: state,
@@ -226,4 +227,66 @@ PlacementResult applyPlacement(GameState state, Move move) {
     score: state.score,
     offerConsumption: consumption,
   );
+}
+
+/// Status-agnostic placement geometry probe (ADR-E01 §5.1).
+///
+/// Does not trust [GameState.status]. Reuses PZD-18 empty/unblocked tap rules.
+bool canPlaceAt({
+  required int boardSize,
+  required List<List<Piece?>> cells,
+  required List<Coordinate> blocked,
+  required Piece piece,
+  required Coordinate tap,
+}) {
+  if (!_inBounds(boardSize, tap.row, tap.column)) return false;
+  final obstacles = _blockedKeys(blocked);
+  final key = '${tap.row},${tap.column}';
+  if (obstacles.contains(key)) return false;
+  if (cells[tap.row][tap.column] != null) return false;
+  // Direction affects landing only; acceptance matches applyPlacement.
+  return true;
+}
+
+bool hasLegalPlacement(GameState state) {
+  for (var offerIndex = 0; offerIndex < state.offers.length; offerIndex++) {
+    final slot = state.offers[offerIndex];
+    final piece = slot.pieceOrNull;
+    if (!slot.isSelectable || piece == null) continue;
+    for (var row = 0; row < state.boardSize; row++) {
+      for (var column = 0; column < state.boardSize; column++) {
+        final tap = Coordinate._(row, column);
+        if (canPlaceAt(
+          boardSize: state.boardSize,
+          cells: state.cells,
+          blocked: state.blocked,
+          piece: piece,
+          tap: tap,
+        )) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool hasLegalMove(GameState state) {
+  return state.status == GameStatus.inProgress &&
+      state.turnsUsed < state.moveLimit &&
+      hasLegalPlacement(state);
+}
+
+({GameStatus status, TerminalReason? reason}) deriveTerminalExpectation({
+  required int turnsUsed,
+  required int moveLimit,
+  required GameState candidate,
+}) {
+  if (turnsUsed >= moveLimit) {
+    return (status: GameStatus.ended, reason: TerminalReason.moveLimitReached);
+  }
+  if (!hasLegalPlacement(candidate)) {
+    return (status: GameStatus.ended, reason: TerminalReason.noLegalMoves);
+  }
+  return (status: GameStatus.inProgress, reason: null);
 }

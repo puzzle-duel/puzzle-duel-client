@@ -1,6 +1,6 @@
 part of '../puzzle_duel_rules.dart';
 
-const _stateKeys = {
+const _stateKeysV1V2 = {
   'rulesVersion',
   'boardSize',
   'moveLimit',
@@ -11,6 +11,20 @@ const _stateKeys = {
   'turnsUsed',
   'score',
   'status',
+};
+
+const _stateKeysV3 = {
+  'rulesVersion',
+  'boardSize',
+  'moveLimit',
+  'blocked',
+  'cells',
+  'offers',
+  'futurePieces',
+  'turnsUsed',
+  'score',
+  'status',
+  'terminalReason',
 };
 
 const _boardKeys = {'rulesVersion', 'boardSize', 'blocked', 'cells', 'wave'};
@@ -207,41 +221,101 @@ List<Coordinate> _blocked(
 }
 
 final class _Offers {
-  _Offers(this.slots, this.nulls, this.ok);
+  _Offers(this.slots, this.nulls, this.spent, this.ok);
 
-  final List<Piece?> slots;
+  final List<OfferSlot> slots;
   final int nulls;
+  final int spent;
   final bool ok;
 }
 
 _Offers _offers(Object? value, RulesVersion? rules, _Issues issues) {
   if (value is! List || value.length != 3) {
     issues.add(ValidationCode.malformedOffers);
-    return _Offers(const [], 0, false);
+    return _Offers(const [], 0, 0, false);
   }
-  final slots = <Piece?>[];
+  final slots = <OfferSlot>[];
   var nulls = 0;
+  var spent = 0;
   var ok = true;
   for (final raw in value) {
+    if (rules == RulesVersion.core001V3) {
+      if (raw == null) {
+        issues.add(ValidationCode.nullOffer);
+        ok = false;
+        slots.add(const OfferSpent());
+        continue;
+      }
+      final json = _map(raw);
+      if (json == null) {
+        issues.add(ValidationCode.malformedOfferSlot);
+        ok = false;
+        slots.add(const OfferSpent());
+        continue;
+      }
+      final kind = json['kind'];
+      if (kind == 'spent') {
+        final local = _Issues();
+        _closed(json, {'kind'}, local);
+        for (final code in local.codes) {
+          issues.add(code);
+        }
+        if (local.codes.isNotEmpty) ok = false;
+        spent += 1;
+        slots.add(const OfferSpent());
+        continue;
+      }
+      if (kind == 'piece') {
+        final local = _Issues();
+        _closed(json, {'kind', 'shape', 'direction'}, local);
+        final shape = Shape.tryParse(json['shape']);
+        final direction = Direction.tryParse(json['direction']);
+        if (shape == null) local.add(ValidationCode.malformedShape);
+        if (direction == null) local.add(ValidationCode.malformedDirection);
+        for (final code in local.codes) {
+          issues.add(code);
+        }
+        if (shape == null || direction == null || local.codes.isNotEmpty) {
+          ok = false;
+          slots.add(const OfferSpent());
+        } else {
+          slots.add(OfferLive(Piece(shape: shape, direction: direction)));
+        }
+        continue;
+      }
+      issues.add(ValidationCode.malformedOfferSlot);
+      ok = false;
+      slots.add(const OfferSpent());
+      continue;
+    }
+
+    // v1 / v2
     if (raw == null) {
       nulls += 1;
-      slots.add(null);
+      slots.add(const OfferEmpty());
       if (rules != RulesVersion.core001V2) {
         issues.add(ValidationCode.nullOffer);
         ok = false;
       }
       continue;
     }
+    // Reject tagged v3 objects on historical versions.
+    if (raw is Map && raw.containsKey('kind')) {
+      issues.add(ValidationCode.malformedOffers);
+      ok = false;
+      slots.add(const OfferEmpty());
+      continue;
+    }
     final before = issues.codes.length;
     final piece = _piece(raw, issues);
     if (piece == null || issues.codes.length != before) {
       ok = false;
-      slots.add(null);
+      slots.add(const OfferEmpty());
     } else {
-      slots.add(piece);
+      slots.add(OfferLive(piece));
     }
   }
-  return _Offers(slots, nulls, ok);
+  return _Offers(slots, nulls, spent, ok);
 }
 
 List<Piece>? _future(Object? value, _Issues issues) {
@@ -341,8 +415,12 @@ GameState _state(Object? json, {required bool initial}) {
   if (object == null) {
     throw ValidationFailure([ValidationCode.malformedBoard]);
   }
-  _closed(object, _stateKeys, issues);
-  final rules = RulesVersion.tryParse(object['rulesVersion']);
+  final rulesHint = RulesVersion.tryParse(object['rulesVersion']);
+  final allowedKeys = rulesHint == RulesVersion.core001V3
+      ? _stateKeysV3
+      : _stateKeysV1V2;
+  _closed(object, allowedKeys, issues);
+  final rules = rulesHint;
   if (object.containsKey('rulesVersion') && rules == null) {
     issues.add(ValidationCode.unknownRulesVersion);
   }
@@ -364,6 +442,12 @@ GameState _state(Object? json, {required bool initial}) {
       !turnsOk) {
     issues.add(ValidationCode.illegalTurnCount);
   }
+  if (rules == RulesVersion.core001V3) {
+    if ((moveLimit != null && !isJsonSafeNonNegativeInt(moveLimit)) ||
+        (turnsUsed != null && !isJsonSafeNonNegativeInt(turnsUsed))) {
+      issues.add(ValidationCode.integerOutOfRange);
+    }
+  }
   final grid = _cells(object['cells'], usableSize, issues);
   final blocked = _blocked(
     object['blocked'],
@@ -377,10 +461,34 @@ GameState _state(Object? json, {required bool initial}) {
   if (object.containsKey('score') && (score == null || score < 0)) {
     issues.add(ValidationCode.malformedScore);
   }
+  if (rules == RulesVersion.core001V3 &&
+      score != null &&
+      !isJsonSafeNonNegativeInt(score)) {
+    issues.add(ValidationCode.integerOutOfRange);
+  }
   final status = GameStatus.tryParse(object['status']);
   if (object.containsKey('status') && status == null) {
     issues.add(ValidationCode.inconsistentStatus);
   }
+
+  TerminalReason? terminalReason;
+  if (rules == RulesVersion.core001V3) {
+    final rawReason = object['terminalReason'];
+    if (rawReason == null) {
+      terminalReason = null;
+    } else {
+      terminalReason = TerminalReason.tryParse(rawReason);
+      if (terminalReason == null) {
+        issues.add(ValidationCode.inconsistentTerminalReason);
+      }
+    }
+    if (offers.spent > 0 && futurePieces != null && futurePieces.isNotEmpty) {
+      issues.add(ValidationCode.spentWithFuturePieces);
+    }
+  } else if (object.containsKey('terminalReason')) {
+    issues.add(ValidationCode.unexpectedProperty);
+  }
+
   _terminalOffers(
     offers: offers,
     rules: rules,
@@ -391,28 +499,72 @@ GameState _state(Object? json, {required bool initial}) {
     futurePieces: futurePieces,
     issues: issues,
   );
-  if (turnsOk && grid.rows != null && status != null) {
-    final ended =
-        turnsUsed >= moveLimit || _emptyPlayable(grid.rows!, blocked) == 0;
-    final actual = ended ? GameStatus.ended : GameStatus.inProgress;
-    if (status != actual) issues.add(ValidationCode.inconsistentStatus);
+
+  GameState? candidate;
+  if (rules != null &&
+      usableSize != null &&
+      moveLimit != null &&
+      turnsUsed != null &&
+      score != null &&
+      status != null &&
+      grid.rows != null &&
+      futurePieces != null &&
+      offers.slots.length == 3) {
+    candidate = GameState._(
+      rulesVersion: rules,
+      boardSize: usableSize,
+      moveLimit: moveLimit,
+      blocked: blocked,
+      cells: grid.rows!,
+      offers: offers.slots,
+      futurePieces: futurePieces,
+      turnsUsed: turnsUsed,
+      score: score,
+      status: status,
+      terminalReason: rules == RulesVersion.core001V3 ? terminalReason : null,
+    );
   }
+
+  if (candidate != null && turnsOk) {
+    final used = candidate.turnsUsed;
+    final limit = candidate.moveLimit;
+    if (rules == RulesVersion.core001V3) {
+      final expected = deriveTerminalExpectation(
+        turnsUsed: used,
+        moveLimit: limit,
+        candidate: candidate,
+      );
+      if (status != expected.status || terminalReason != expected.reason) {
+        issues.add(ValidationCode.inconsistentStatus);
+        if (terminalReason != expected.reason) {
+          issues.add(ValidationCode.inconsistentTerminalReason);
+        }
+      }
+    } else {
+      final ended = used >= limit || _emptyPlayable(grid.rows!, blocked) == 0;
+      final actual = ended ? GameStatus.ended : GameStatus.inProgress;
+      if (status != actual) issues.add(ValidationCode.inconsistentStatus);
+    }
+  }
+
   if (initial && grid.rows != null && _orthogonalRun(grid.rows!)) {
     issues.add(ValidationCode.unresolvedInitialMatch);
   }
+  if (initial && rules == RulesVersion.core001V3 && candidate != null) {
+    if (candidate.turnsUsed != 0 ||
+        candidate.score != 0 ||
+        candidate.status != GameStatus.inProgress ||
+        candidate.terminalReason != null ||
+        candidate.offers.any((slot) => slot is! OfferLive)) {
+      issues.add(ValidationCode.inconsistentStatus);
+    }
+    if (!hasLegalPlacement(candidate)) {
+      issues.add(ValidationCode.noLegalInitialPlacement);
+    }
+  }
+
   issues.throwIfNeeded();
-  return GameState._(
-    rulesVersion: rules!,
-    boardSize: usableSize!,
-    moveLimit: moveLimit!,
-    blocked: blocked,
-    cells: grid.rows!,
-    offers: offers.slots,
-    futurePieces: futurePieces!,
-    turnsUsed: turnsUsed!,
-    score: score!,
-    status: status!,
-  );
+  return candidate!;
 }
 
 int _emptyPlayable(List<List<Piece?>> cells, List<Coordinate> blocked) {

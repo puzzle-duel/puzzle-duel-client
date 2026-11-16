@@ -148,7 +148,7 @@ final class GeneratedChallenge extends ChallengeGenerationResult {
     'cells': [
       for (final row in state.cells) [for (final cell in row) cell?.toJson()],
     ],
-    'offers': [for (final offer in state.offers) offer?.toJson()],
+    'offers': [for (final offer in state.offers) offer.toJsonFor(rulesVersion)],
     'futurePieces': [for (final piece in state.futurePieces) piece.toJson()],
     'turnsUsed': state.turnsUsed,
     'score': state.score,
@@ -197,7 +197,9 @@ ChallengeGenerationResult generateChallenge(
     final supply = <Piece>[
       for (var index = 0; index < supplyLength; index++) _drawPiece(rng),
     ];
-    final offers = List<Piece?>.unmodifiable(supply.sublist(0, 3));
+    final offers = List<OfferSlot>.unmodifiable([
+      for (final piece in supply.sublist(0, 3)) OfferLive(piece),
+    ]);
     final future = List<Piece>.unmodifiable(supply.sublist(3));
 
     final state = GameState._(
@@ -211,6 +213,7 @@ ChallengeGenerationResult generateChallenge(
       turnsUsed: 0,
       score: 0,
       status: GameStatus.inProgress,
+      terminalReason: null,
     );
 
     try {
@@ -225,7 +228,8 @@ ChallengeGenerationResult generateChallenge(
     if (_emptyPlayable(state.cells, state.blocked) < 1) {
       continue;
     }
-    if (state.offers.length != 3 || state.offers.any((slot) => slot == null)) {
+    if (state.offers.length != 3 ||
+        state.offers.any((slot) => slot is! OfferLive)) {
       continue;
     }
     if (state.futurePieces.length != moveLimit - 1) {

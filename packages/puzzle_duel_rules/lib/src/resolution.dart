@@ -12,7 +12,8 @@ enum MoveSafety {
   cascadeCorrupt('cascade_corrupt'),
   cascadeBoundExceeded('cascade_bound_exceeded'),
   invalidShiftGeometry('invalid_shift_geometry'),
-  invalidFinalState('invalid_final_state');
+  invalidFinalState('invalid_final_state'),
+  scoreOverflow('score_overflow');
 
   const MoveSafety(this.wire);
 
@@ -163,7 +164,7 @@ List<List<Piece?>> _copyCells(List<List<Piece?>> cells) {
   ];
 }
 
-List<Piece?> _copyOffers(List<Piece?> offers) {
+List<OfferSlot> _copyOfferSlots(List<OfferSlot> offers) {
   return [for (final offer in offers) offer];
 }
 
@@ -230,15 +231,55 @@ MoveResult _finishApplied({
 }) {
   final turnsUsed = applied.turnsUsed;
   final scoreDelta = resolved.scoreDelta;
-  final score = original.score + scoreDelta;
-  final boardFull = _emptyPlayable(resolved.cells, original.blocked) == 0;
-  final budgetExhausted = turnsUsed >= original.moveLimit;
-  final status = budgetExhausted || boardFull
-      ? GameStatus.ended
-      : GameStatus.inProgress;
+  late final int score;
+  if (original.rulesVersion == RulesVersion.core001V3) {
+    var overflow = false;
+    void boom() => overflow = true;
+    score = checkedNonNegAdd(original.score, scoreDelta, onOverflow: boom);
+    if (overflow) {
+      return MoveUnsafe(reason: MoveSafety.scoreOverflow, state: original);
+    }
+  } else {
+    score = original.score + scoreDelta;
+  }
 
-  if (status == GameStatus.inProgress &&
-      committed.offers.any((slot) => slot == null)) {
+  // Provisional candidate for terminal derivation (status ignored by placement).
+  final provisional = GameState._(
+    rulesVersion: original.rulesVersion,
+    boardSize: original.boardSize,
+    moveLimit: original.moveLimit,
+    blocked: original.blocked,
+    cells: resolved.cells,
+    offers: committed.offers,
+    futurePieces: committed.futurePieces,
+    turnsUsed: turnsUsed,
+    score: score,
+    status: GameStatus.inProgress,
+    terminalReason: null,
+  );
+
+  final GameStatus status;
+  final TerminalReason? terminalReason;
+  if (original.rulesVersion == RulesVersion.core001V3) {
+    final expected = deriveTerminalExpectation(
+      turnsUsed: turnsUsed,
+      moveLimit: original.moveLimit,
+      candidate: provisional,
+    );
+    status = expected.status;
+    terminalReason = expected.reason;
+  } else {
+    final boardFull = _emptyPlayable(resolved.cells, original.blocked) == 0;
+    final budgetExhausted = turnsUsed >= original.moveLimit;
+    status = budgetExhausted || boardFull
+        ? GameStatus.ended
+        : GameStatus.inProgress;
+    terminalReason = null;
+  }
+
+  if (original.rulesVersion != RulesVersion.core001V3 &&
+      status == GameStatus.inProgress &&
+      committed.offers.any((slot) => slot is OfferEmpty)) {
     return MoveUnsafe(reason: MoveSafety.invalidFinalState, state: original);
   }
 
@@ -254,6 +295,7 @@ MoveResult _finishApplied({
       turnsUsed: turnsUsed,
       score: score,
       status: status,
+      terminalReason: terminalReason,
     );
     _requireResolvedFinal(finalState);
     return MoveApplied(
@@ -351,7 +393,22 @@ _CascadeOutcome _resolveCascades({
     }
 
     final waveNumber = waves.length + 1;
-    final waveScore = match.uniqueClearedCount * 100 * waveNumber;
+    late final int waveScore;
+    if (original.rulesVersion == RulesVersion.core001V3) {
+      var overflow = false;
+      void boom() => overflow = true;
+      final hundred = checkedNonNegMul(
+        match.uniqueClearedCount,
+        100,
+        onOverflow: boom,
+      );
+      waveScore = checkedNonNegMul(hundred, waveNumber, onOverflow: boom);
+      if (overflow) {
+        return _CascadeFail(fail(MoveSafety.scoreOverflow));
+      }
+    } else {
+      waveScore = match.uniqueClearedCount * 100 * waveNumber;
+    }
     waves.add(
       WaveResult(
         wave: waveNumber,
@@ -363,11 +420,26 @@ _CascadeOutcome _resolveCascades({
     board = _copyCells(shift.cells);
   }
 
-  return _CascadeOk(
-    cells: board,
-    waves: waves,
-    scoreDelta: waves.fold<int>(0, (sum, wave) => sum + wave.scoreDelta),
-  );
+  var totalDelta = 0;
+  if (original.rulesVersion == RulesVersion.core001V3) {
+    var overflow = false;
+    void boom() => overflow = true;
+    for (final wave in waves) {
+      totalDelta = checkedNonNegAdd(
+        totalDelta,
+        wave.scoreDelta,
+        onOverflow: boom,
+      );
+      if (overflow) {
+        return _CascadeFail(fail(MoveSafety.scoreOverflow));
+      }
+    }
+  } else {
+    for (final wave in waves) {
+      totalDelta += wave.scoreDelta;
+    }
+  }
+  return _CascadeOk(cells: board, waves: waves, scoreDelta: totalDelta);
 }
 
 sealed class _OfferOutcome {
@@ -382,12 +454,12 @@ final class _OfferFail extends _OfferOutcome {
 
 final class _OfferCommit extends _OfferOutcome {
   _OfferCommit({
-    required List<Piece?> offers,
+    required List<OfferSlot> offers,
     required List<Piece> futurePieces,
-  }) : offers = List<Piece?>.unmodifiable(offers),
+  }) : offers = List<OfferSlot>.unmodifiable(offers),
        futurePieces = List<Piece>.unmodifiable(futurePieces);
 
-  final List<Piece?> offers;
+  final List<OfferSlot> offers;
   final List<Piece> futurePieces;
 }
 
@@ -403,8 +475,8 @@ _OfferOutcome _commitOffers({
       :final replacement,
       :final remainingFuture,
     ):
-      final offers = _copyOffers(before.offers);
-      offers[offerIndex] = replacement;
+      final offers = _copyOfferSlots(before.offers);
+      offers[offerIndex] = OfferLive(replacement);
       return _OfferCommit(offers: offers, futurePieces: remainingFuture);
     case OfferReplacementDeferred(:final offerIndex):
       switch (before.rulesVersion) {
@@ -417,8 +489,8 @@ _OfferOutcome _commitOffers({
           );
         case RulesVersion.core001V2:
           if (budgetExhausted) {
-            final offers = _copyOffers(before.offers);
-            offers[offerIndex] = null;
+            final offers = _copyOfferSlots(before.offers);
+            offers[offerIndex] = const OfferEmpty();
             return _OfferCommit(offers: offers, futurePieces: const []);
           }
           if (boardFull) {
@@ -435,6 +507,10 @@ _OfferOutcome _commitOffers({
               state: before,
             ),
           );
+        case RulesVersion.core001V3:
+          final offers = _copyOfferSlots(before.offers);
+          offers[offerIndex] = const OfferSpent();
+          return _OfferCommit(offers: offers, futurePieces: const []);
       }
   }
 }
