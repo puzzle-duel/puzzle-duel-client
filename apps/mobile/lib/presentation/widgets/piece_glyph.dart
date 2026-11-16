@@ -126,27 +126,40 @@ final class PiecePainter extends CustomPainter {
             : math.max(1.8, size.shortestSide * 0.045),
     );
 
-    final arrowStroke = math.max(2.4, size.shortestSide * 0.09);
-    final arrowPaint = Paint()
-      ..color = stroke
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = arrowStroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
     switch (piece.shape) {
       case Shape.triangle:
-        // Shape-aware chevron: stays inside the upright triangle silhouette.
-        // Do not rotate the triangle — only the internal direction mark.
+        // Larger readable mark: filled arrowhead + stroke, still contained.
+        final arrowStroke = triangleArrowStroke(size.shortestSide);
         final glyph = triangleArrowGlyph(
           shapeCenter: center,
           radius: radius,
           direction: piece.direction,
           strokeWidth: arrowStroke,
         );
-        canvas.drawPath(glyph.path, arrowPaint);
+        canvas.drawPath(
+          glyph.filled,
+          Paint()
+            ..color = stroke
+            ..style = PaintingStyle.fill,
+        );
+        canvas.drawPath(
+          glyph.path,
+          Paint()
+            ..color = stroke
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = arrowStroke
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round,
+        );
       case Shape.circle:
       case Shape.diamond:
+        final arrowStroke = math.max(2.4, size.shortestSide * 0.09);
+        final arrowPaint = Paint()
+          ..color = stroke
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = arrowStroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
         final len = radius * 0.58;
         canvas.drawPath(arrowPath(center, len, piece.direction), arrowPaint);
         canvas.drawCircle(
@@ -156,6 +169,10 @@ final class PiecePainter extends CustomPainter {
         );
     }
   }
+
+  /// Triangle-only stroke: heavy enough at Hard 7×7, still leaves tip room.
+  static double triangleArrowStroke(double side) =>
+      math.max(2.4, side * 0.082);
 
   /// Equilateral-ish upright triangle matching [shapePath] for [Shape.triangle].
   static ({Offset apex, Offset bottomRight, Offset bottomLeft}) triangleVertices(
@@ -185,7 +202,17 @@ final class PiecePainter extends CustomPainter {
   }
 
   /// Chevron path + tip for triangle pieces, inset so stroke stays inside.
-  static ({Path path, Offset tip, Offset left, Offset right, Offset origin})
+  ///
+  /// Maximizes tip length / wing spread under [triangleArrowStrokeContained]
+  /// so marks stay large at Hard 7×7 while remaining balanced on the barycenter.
+  static ({
+    Path path,
+    Path filled,
+    Offset tip,
+    Offset left,
+    Offset right,
+    Offset origin,
+  })
   triangleArrowGlyph({
     required Offset shapeCenter,
     required double radius,
@@ -193,53 +220,86 @@ final class PiecePainter extends CustomPainter {
     required double strokeWidth,
   }) {
     final origin = triangleCentroid(shapeCenter, radius);
-    // Half-stroke clearance + pad so tip/wings never kiss the silhouette.
-    final edgeInset = strokeWidth * 0.55 + math.max(2.2, radius * 0.1);
+    // Half-stroke + light pad — prefer size over excess margin.
+    final edgeInset = strokeWidth * 0.5 + math.max(1.2, radius * 0.045);
 
-    final unit = switch (direction) {
+    Offset unitFor(Direction d) => switch (d) {
       Direction.up => const Offset(0, -1),
       Direction.right => const Offset(1, 0),
       Direction.down => const Offset(0, 1),
       Direction.left => const Offset(-1, 0),
     };
+    final unit = unitFor(direction);
 
-    // One shared tip length (tightest cardinal) keeps all four marks balanced
-    // on the barycenter — avoids asymmetric per-wing inset on L/R.
+    // Shared tip length from the tightest cardinal (balanced L/R/U/D).
     final tightestReach = Direction.values
         .map(
           (d) => _rayDistanceToTriangleEdge(
             origin,
-            switch (d) {
-              Direction.up => const Offset(0, -1),
-              Direction.right => const Offset(1, 0),
-              Direction.down => const Offset(0, 1),
-              Direction.left => const Offset(-1, 0),
-            },
+            unitFor(d),
             shapeCenter,
             radius,
           ),
         )
         .reduce(math.min);
-    final tipLen = (tightestReach - edgeInset).clamp(
-      radius * 0.2,
-      radius * 0.34,
-    );
-    final tip = origin + unit * tipLen;
 
-    // Wings sit behind the tip toward the centroid; symmetric about [unit].
-    final wingDepth = tipLen * 0.58;
-    final wingSpread = tipLen * 0.34;
-    final back = tip - unit * wingDepth;
-    final perp = Offset(-unit.dy, unit.dx);
-    final left = back + perp * wingSpread;
-    final right = back - perp * wingSpread;
+    // Maximize tip first, then keep a deep/wide filled wedge for glanceability.
+    var tipLen = (tightestReach - edgeInset) * 0.98;
+    tipLen = tipLen.clamp(radius * 0.3, radius * 0.52);
+    var wingDepthFactor = 0.82;
+    var wingSpreadFactor = 0.56;
+
+    late Offset tip;
+    late Offset left;
+    late Offset right;
+    for (var attempt = 0; attempt < 16; attempt++) {
+      tip = origin + unit * tipLen;
+      final wingDepth = tipLen * wingDepthFactor;
+      final wingSpread = tipLen * wingSpreadFactor;
+      final back = tip - unit * wingDepth;
+      final perp = Offset(-unit.dy, unit.dx);
+      left = back + perp * wingSpread;
+      right = back - perp * wingSpread;
+
+      if (_arrowPointsContained(
+        shapeCenter: shapeCenter,
+        radius: radius,
+        strokeWidth: strokeWidth,
+        tip: tip,
+        left: left,
+        right: right,
+        origin: origin,
+      )) {
+        break;
+      }
+      // Prefer shrinking wings before surrendering tip length.
+      if (wingSpreadFactor > 0.4) {
+        wingSpreadFactor *= 0.94;
+      } else if (wingDepthFactor > 0.65) {
+        wingDepthFactor *= 0.96;
+      } else {
+        tipLen *= 0.94;
+      }
+    }
 
     final path = Path()
       ..moveTo(left.dx, left.dy)
       ..lineTo(tip.dx, tip.dy)
       ..lineTo(right.dx, right.dy);
+    final filled = Path()
+      ..moveTo(left.dx, left.dy)
+      ..lineTo(tip.dx, tip.dy)
+      ..lineTo(right.dx, right.dy)
+      ..close();
 
-    return (path: path, tip: tip, left: left, right: right, origin: origin);
+    return (
+      path: path,
+      filled: filled,
+      tip: tip,
+      left: left,
+      right: right,
+      origin: origin,
+    );
   }
 
   /// Samples the chevron polyline expanded by half [strokeWidth].
@@ -256,27 +316,48 @@ final class PiecePainter extends CustomPainter {
       direction: direction,
       strokeWidth: strokeWidth,
     );
+    return _arrowPointsContained(
+      shapeCenter: shapeCenter,
+      radius: radius,
+      strokeWidth: strokeWidth,
+      tip: glyph.tip,
+      left: glyph.left,
+      right: glyph.right,
+      origin: glyph.origin,
+    );
+  }
+
+  static bool _arrowPointsContained({
+    required Offset shapeCenter,
+    required double radius,
+    required double strokeWidth,
+    required Offset tip,
+    required Offset left,
+    required Offset right,
+    required Offset origin,
+  }) {
     final half = strokeWidth * 0.5;
     final centerline = <Offset>[
-      glyph.tip,
-      glyph.left,
-      glyph.right,
-      glyph.origin,
-      ..._sampleSegment(glyph.left, glyph.tip, 10),
-      ..._sampleSegment(glyph.right, glyph.tip, 10),
+      tip,
+      left,
+      right,
+      origin,
+      ..._sampleSegment(left, tip, 10),
+      ..._sampleSegment(right, tip, 10),
+      // Filled arrowhead interior samples.
+      Offset.lerp(left, right, 0.5)!,
+      Offset.lerp(Offset.lerp(left, right, 0.5)!, tip, 0.5)!,
     ];
     for (final p in centerline) {
       if (!pointInTriangle(p, shapeCenter, radius)) return false;
-      // Stroke centerline must keep ≥ half-stroke clearance from edges.
       if (_minDistanceToEdges(p, shapeCenter, radius) < half - 0.05) {
         return false;
       }
     }
-    // Cap discs may reach the safe boundary but must stay inside the fill.
     for (final p in [
-      ..._sampleDisc(glyph.tip, half, 16),
-      ..._sampleDisc(glyph.left, half, 12),
-      ..._sampleDisc(glyph.right, half, 12),
+      ..._sampleDisc(tip, half, 16),
+      ..._sampleDisc(left, half, 12),
+      ..._sampleDisc(right, half, 12),
     ]) {
       if (!pointInTriangle(p, shapeCenter, radius)) return false;
     }

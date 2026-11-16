@@ -41,7 +41,7 @@ void main() {
     for (final board in [5, 6, 7]) {
       final size = pieceSizeForBoard(board);
       final radius = size * 0.42;
-      final stroke = mathMax(2.4, size * 0.09);
+      final stroke = PiecePainter.triangleArrowStroke(size);
 
       for (final direction in Direction.values) {
         test('board ${board}x$board $direction stroke stays inside', () {
@@ -59,6 +59,22 @@ void main() {
                 '($board×$board, size=$size, $direction)',
           );
         });
+
+        test('board ${board}x$board $direction tipLen is readable', () {
+          final center = Offset(size / 2, size / 2);
+          final glyph = PiecePainter.triangleArrowGlyph(
+            shapeCenter: center,
+            radius: radius,
+            direction: direction,
+            strokeWidth: stroke,
+          );
+          final tipLen = (glyph.tip - glyph.origin).distance;
+          expect(
+            tipLen,
+            greaterThanOrEqualTo(radius * 0.28),
+            reason: 'chevron must stay large enough at $board×$board',
+          );
+        });
       }
     }
 
@@ -66,7 +82,7 @@ void main() {
       const size = 60.0;
       final c = const Offset(30, 30);
       const r = size * 0.42;
-      const stroke = 5.4;
+      final stroke = PiecePainter.triangleArrowStroke(size);
 
       Offset tip(Direction d) => PiecePainter.triangleArrowGlyph(
         shapeCenter: c,
@@ -173,6 +189,118 @@ void main() {
       },
       skip: _skipGoldensOnCi,
     );
+
+    /// Real board-cell and tray slot scales (not oversized hero art).
+    testWidgets(
+      'real-scale board cells and tray slots four directions',
+      (tester) async {
+        const traySlot = 56.0;
+        final sizes = {
+          5: pieceSizeForBoard(5),
+          6: pieceSizeForBoard(6),
+          7: pieceSizeForBoard(7),
+        };
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: RepaintBoundary(
+              child: ColoredBox(
+                color: GameTokens.bgDeep,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final board in [5, 6, 7]) ...[
+                        Text(
+                          '$board×$board board cell',
+                          style: const TextStyle(
+                            color: GameTokens.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final d in Direction.values)
+                              Padding(
+                                padding: const EdgeInsets.all(3),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: GameTokens.cellEmpty,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: GameTokens.gridLine,
+                                    ),
+                                  ),
+                                  child: SizedBox.square(
+                                    dimension: sizes[board]!,
+                                    child: _glyph(
+                                      Piece(
+                                        shape: Shape.triangle,
+                                        direction: d,
+                                      ),
+                                      sizes[board]!,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      const Text(
+                        'Offer tray slots',
+                        style: TextStyle(
+                          color: GameTokens.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final d in Direction.values)
+                            Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: GameTokens.surfaceHigh,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: GameTokens.border,
+                                  ),
+                                ),
+                                child: SizedBox.square(
+                                  dimension: traySlot,
+                                  child: _glyph(
+                                    Piece(
+                                      shape: Shape.triangle,
+                                      direction: d,
+                                    ),
+                                    traySlot,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await expectLater(
+          find.byType(RepaintBoundary).first,
+          matchesGoldenFile('goldens/triangle_real_scale_board_tray.png'),
+        );
+      },
+      skip: _skipGoldensOnCi,
+    );
   });
 
   group('circle and diamond golden regression', () {
@@ -208,5 +336,3 @@ void main() {
     }
   });
 }
-
-double mathMax(double a, double b) => a > b ? a : b;
