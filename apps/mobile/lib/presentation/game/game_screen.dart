@@ -1,5 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/move_feedback_toast.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/accessible_board.dart';
 import 'package:puzzle_duel_mobile/presentation/game/offer_tray.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
@@ -43,7 +46,6 @@ final class GameScreen extends StatelessWidget {
                   final board = AccessibleBoard(session: session, view: view);
                   final hud = _HudBar(view: view);
                   final hint = _HintLine(view: view);
-                  final feedback = _FeedbackBanner(view: view);
 
                   return Stack(
                     children: [
@@ -65,11 +67,6 @@ final class GameScreen extends StatelessWidget {
                             padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
                             child: hud,
                           ),
-                          if (view.feedbackKind != MoveFeedbackKind.none)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                              child: feedback,
-                            ),
                           Expanded(
                             child: landscape
                                 ? Row(
@@ -139,6 +136,7 @@ final class GameScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                      MoveFeedbackToast(session: session),
                       if (view.phase == GameScreenPhase.ended)
                         _EndOverlay(session: session, view: view),
                     ],
@@ -354,55 +352,31 @@ final class _HintLine extends StatelessWidget {
   }
 }
 
-final class _FeedbackBanner extends StatelessWidget {
-  const _FeedbackBanner({required this.view});
-
-  final GameSessionView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = switch (view.feedbackKind) {
-      MoveFeedbackKind.none => '',
-      MoveFeedbackKind.rejected =>
-        'Move rejected: ${view.feedbackCode ?? 'rejected'}',
-      MoveFeedbackKind.unsafe =>
-        'Move could not be applied safely: ${view.feedbackCode ?? 'unsafe'}',
-    };
-    final danger = view.feedbackKind == MoveFeedbackKind.unsafe;
-    return Semantics(
-      liveRegion: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: (danger ? GameTokens.danger : GameTokens.borderBright)
-              .withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(GameTokens.radiusSm),
-          border: Border.all(
-            color: danger ? GameTokens.danger : GameTokens.borderBright,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Text(
-            text,
-            style: TextStyle(
-              color: danger ? GameTokens.danger : GameTokens.textSecondary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _EndOverlay extends StatelessWidget {
+final class _EndOverlay extends StatefulWidget {
   const _EndOverlay({required this.session, required this.view});
 
   final GameSession session;
   final GameSessionView view;
 
   @override
+  State<_EndOverlay> createState() => _EndOverlayState();
+}
+
+final class _EndOverlayState extends State<_EndOverlay> {
+  var _playedRoundEnd = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_playedRoundEnd) return;
+    _playedRoundEnd = true;
+    GameSfxScope.maybeOf(context)?.play(GameSfxEvent.roundEnd);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
+    final view = widget.view;
     return Positioned.fill(
       child: ColoredBox(
         color: Colors.black.withValues(alpha: 0.62),

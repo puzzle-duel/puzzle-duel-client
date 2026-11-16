@@ -2,8 +2,10 @@ import 'dart:async' as async;
 import 'dart:ui';
 
 import 'package:flame/game.dart';
+import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/presentation_board.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/board_paint_utils.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -12,6 +14,8 @@ typedef ResolutionComplete = void Function({
   required int generation,
   required int resolutionId,
 });
+
+typedef AnimationSfx = void Function(GameSfxEvent event);
 
 final class _FlyingPiece {
   _FlyingPiece({
@@ -29,9 +33,10 @@ final class _FlyingPiece {
 
 /// Flame board renderer. Canonical rules stay in the application layer.
 final class PuzzleBoardGame extends FlameGame {
-  PuzzleBoardGame({required this.onResolutionComplete});
+  PuzzleBoardGame({required this.onResolutionComplete, this.onSfx});
 
   final ResolutionComplete onResolutionComplete;
+  final AnimationSfx? onSfx;
 
   PresentationBoard? _board;
   List<Coordinate> _highlight = const [];
@@ -41,6 +46,7 @@ final class PuzzleBoardGame extends FlameGame {
   async.Timer? _stepTimer;
   List<AnimationStep> _steps = const [];
   int _stepIndex = 0;
+  bool _clearedAnyWave = false;
   bool _disposed = false;
   double _shiftElapsed = 0;
   static const _shiftDuration = 0.28;
@@ -100,6 +106,7 @@ final class PuzzleBoardGame extends FlameGame {
   void playScript(AnimationScript script, {required bool reducedMotion}) {
     if (_disposed) return;
     _cancelTimer();
+    _clearedAnyWave = false;
     _generation = script.generation;
     _resolutionId = script.resolutionId;
     _board = PresentationBoard.fromGameState(script.preState);
@@ -138,6 +145,21 @@ final class PuzzleBoardGame extends FlameGame {
   void disposeGame() {
     _disposed = true;
     _cancelTimer();
+  }
+
+  /// Test-only: run presentation steps without a full [AnimationScript].
+  @visibleForTesting
+  void debugRunSteps(List<AnimationStep> steps) {
+    if (_disposed) return;
+    _cancelTimer();
+    _clearedAnyWave = false;
+    _generation = 1;
+    _resolutionId = 1;
+    _highlight = const [];
+    _flying = const [];
+    _steps = steps;
+    _stepIndex = 0;
+    _runNextStep();
   }
 
   @override
@@ -183,9 +205,12 @@ final class PuzzleBoardGame extends FlameGame {
         _board?.place(step.landing!, step.piece!);
         _placeAt = step.landing;
         _placePulse = 0.55;
+        onSfx?.call(GameSfxEvent.place);
         _schedule(const Duration(milliseconds: 260));
       case AnimationStepKind.clearWave:
         _highlight = step.cleared;
+        _clearedAnyWave = true;
+        onSfx?.call(sfxForClearWave(step.wave ?? 1));
         _schedule(
           const Duration(milliseconds: 220),
           after: () {
@@ -210,6 +235,9 @@ final class PuzzleBoardGame extends FlameGame {
         _shiftElapsed = 0;
       // Advancement continues from [update] when interpolation completes.
       case AnimationStepKind.settle:
+        if (_clearedAnyWave) {
+          onSfx?.call(GameSfxEvent.chainComplete);
+        }
         _finish(generation: _generation, resolutionId: _resolutionId);
     }
   }

@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
 import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Local / macOS UAT evidence capture.
@@ -25,7 +26,7 @@ Future<void> _pumpPhone(WidgetTester tester, GameSession session) async {
   await tester.pumpWidget(
     RepaintBoundary(
       key: _captureKey,
-      child: PuzzleDuelApp(session: session),
+      child: PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
     ),
   );
   await tester.pump(const Duration(milliseconds: 16));

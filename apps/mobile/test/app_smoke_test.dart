@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
 import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 Coordinate? firstEmpty(GameState state) {
@@ -22,7 +23,7 @@ Future<void> pumpGame(WidgetTester tester, GameSession session) async {
     MediaQuery(
       // Tall phone with room for board + tray.
       data: const MediaQueryData(size: Size(400, 900)),
-      child: PuzzleDuelApp(session: session),
+      child: PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
     ),
   );
   await tester.pump();
@@ -147,7 +148,7 @@ void main() {
           size: Size(400, 900),
           disableAnimations: true,
         ),
-        child: PuzzleDuelApp(session: session),
+        child: PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
       ),
     );
     await tester.pump();
@@ -243,7 +244,9 @@ void main() {
       profile: DifficultyProfile.hard,
       seed: kUatChallengeSeed,
     );
-    await tester.pumpWidget(PuzzleDuelApp(session: session));
+    await tester.pumpWidget(
+      PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
+    );
     await tester.pump();
     expect(tester.takeException(), isNull);
     expect(find.bySemanticsLabel('Offer tray, three pieces'), findsOneWidget);
@@ -261,7 +264,7 @@ void main() {
           size: Size(390, 844),
           textScaler: TextScaler.linear(1.6),
         ),
-        child: PuzzleDuelApp(session: session),
+        child: PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
       ),
     );
     await tester.pump();

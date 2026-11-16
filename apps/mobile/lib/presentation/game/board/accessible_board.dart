@@ -2,6 +2,7 @@ import 'package:flame/game.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/animation_script.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/puzzle_board_game.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
@@ -31,6 +32,10 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
           generation: generation,
           resolutionId: resolutionId,
         );
+      },
+      onSfx: (event) {
+        if (!mounted) return;
+        GameSfxScope.maybeOf(context)?.play(event);
       },
     );
   }
