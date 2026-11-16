@@ -4,12 +4,18 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 final class AnimationScript {
   const AnimationScript({
     required this.generation,
+    required this.resolutionId,
     required this.preState,
     required this.applied,
     required this.placedPiece,
   });
 
+  /// Round / session generation. Invalidates work after restart or menu.
   final int generation;
+
+  /// Per-move resolution token. Unique for each accepted [MoveApplied].
+  final int resolutionId;
+
   final GameState preState;
   final MoveApplied applied;
   final Piece placedPiece;

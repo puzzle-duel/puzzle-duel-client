@@ -40,10 +40,13 @@ flowchart TD
 
 1. `selectOffer(index)` while `playing`.
 2. `submitTap(coord)` builds `Move` and calls `applyMove` **once**.
-3. `MoveApplied` → set `canonicalState = finalState`, publish `AnimationScript`, phase `resolving`.
+3. `MoveApplied` → set `canonicalState = finalState`, mint a new `resolutionId`, publish `AnimationScript`, phase `resolving`.
 4. `MoveRejected` / `MoveUnsafe` → keep prior state, show feedback.
-5. Animation completion / skip / reduced-motion → `completeResolution(generation)`.
-6. Stale callbacks from older `generation` are ignored.
+5. Animation completion / skip / reduced-motion → `completeResolution(generation, resolutionId)`.
+6. Stale callbacks must match **both** round `generation` and per-move `resolutionId`; otherwise they are ignored.
+7. Restart / menu / new move invalidates prior resolution tokens.
+
+Shift presentation interpolates piece centers between `from` and `to` (presentation-only). Gameplay remains engine-owned; no physics.
 
 UAT seed: `kUatChallengeSeed = 42` (documented local testing only).
 

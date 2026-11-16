@@ -25,6 +25,7 @@ final class GameSessionView {
   const GameSessionView({
     required this.phase,
     required this.generation,
+    required this.activeResolutionId,
     required this.supportedProfiles,
     this.profile,
     this.seed,
@@ -38,6 +39,10 @@ final class GameSessionView {
 
   final GameScreenPhase phase;
   final int generation;
+
+  /// Active per-move resolution token, or 0 when not resolving.
+  final int activeResolutionId;
+
   final List<DifficultyProfile> supportedProfiles;
   final DifficultyProfile? profile;
   final int? seed;
@@ -72,6 +77,8 @@ final class GameSession extends ChangeNotifier {
   final ChallengeFactory _factory;
 
   int _generation = 0;
+  int _resolutionSeq = 0;
+  int _activeResolutionId = 0;
   GameScreenPhase _phase = GameScreenPhase.menu;
   DifficultyProfile? _profile;
   int? _seed;
@@ -93,6 +100,7 @@ final class GameSession extends ChangeNotifier {
   GameSessionView get view => GameSessionView(
     phase: _phase,
     generation: _generation,
+    activeResolutionId: _activeResolutionId,
     supportedProfiles: DifficultyProfile.values,
     profile: _profile,
     seed: _seed,
@@ -105,13 +113,13 @@ final class GameSession extends ChangeNotifier {
   );
 
   void returnToMenu() {
+    _invalidateResolutions();
     _generation += 1;
     _phase = GameScreenPhase.menu;
     _profile = null;
     _seed = null;
     _canonical = null;
     _selectedOffer = null;
-    _script = null;
     _clearFeedback();
     _generationFailure = null;
     notifyListeners();
@@ -123,11 +131,11 @@ final class GameSession extends ChangeNotifier {
     int seed = kUatChallengeSeed,
   }) {
     final result = _factory.generate(profile: profile, seed: seed);
+    _invalidateResolutions();
     _generation += 1;
     _profile = profile;
     _seed = seed;
     _selectedOffer = null;
-    _script = null;
     _clearFeedback();
     switch (result) {
       case GeneratedChallenge(:final state):
@@ -185,24 +193,24 @@ final class GameSession extends ChangeNotifier {
 
     switch (result) {
       case MoveApplied():
+        _resolutionSeq += 1;
+        _activeResolutionId = _resolutionSeq;
         _canonical = result.finalState;
         _selectedOffer = null;
         _clearFeedback();
         _script = AnimationScript(
           generation: _generation,
+          resolutionId: _activeResolutionId,
           preState: preState,
           applied: result,
           placedPiece: placedPiece,
         );
-        _phase = result.finalState.status == GameStatus.ended
-            ? GameScreenPhase.resolving
-            : GameScreenPhase.resolving;
+        _phase = GameScreenPhase.resolving;
         notifyListeners();
         return true;
       case MoveRejected(:final code):
         _feedbackKind = MoveFeedbackKind.rejected;
         _feedbackCode = code.wire;
-        // State unchanged.
         notifyListeners();
         return true;
       case MoveUnsafe(:final reason):
@@ -213,23 +221,31 @@ final class GameSession extends ChangeNotifier {
     }
   }
 
-  /// Called when presentation finishes, skips, or cancels animation.
+  /// Completes presentation for a specific move resolution.
   ///
-  /// Converges UI to authoritative [GameSessionView.canonicalState]. Ignores
-  /// stale callbacks from older generations.
-  void completeResolution({required int generation}) {
+  /// Requires both [generation] and [resolutionId] to match the active script.
+  /// Duplicate or stale callbacks are no-ops and never unlock a newer move.
+  void completeResolution({
+    required int generation,
+    required int resolutionId,
+  }) {
     if (generation != _generation) return;
+    if (resolutionId != _activeResolutionId) return;
     if (_phase != GameScreenPhase.resolving) return;
+    if (_script == null) return;
+    if (_script!.resolutionId != resolutionId) return;
+
     _script = null;
+    _activeResolutionId = 0;
     _phase = _canonical?.status == GameStatus.ended
         ? GameScreenPhase.ended
         : GameScreenPhase.playing;
     notifyListeners();
   }
 
-  /// Skips remaining animation for the active generation.
-  void skipResolution({required int generation}) {
-    completeResolution(generation: generation);
+  /// Skips remaining animation for the active resolution only.
+  void skipResolution({required int generation, required int resolutionId}) {
+    completeResolution(generation: generation, resolutionId: resolutionId);
   }
 
   void playAgain() {
@@ -240,6 +256,11 @@ final class GameSession extends ChangeNotifier {
       return;
     }
     startRound(profile: profile, seed: seed);
+  }
+
+  void _invalidateResolutions() {
+    _script = null;
+    _activeResolutionId = 0;
   }
 
   void _clearFeedback() {

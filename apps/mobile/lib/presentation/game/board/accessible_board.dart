@@ -25,8 +25,11 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
   void initState() {
     super.initState();
     _game = PuzzleBoardGame(
-      onResolutionComplete: (generation) {
-        widget.session.completeResolution(generation: generation);
+      onResolutionComplete: ({required generation, required resolutionId}) {
+        widget.session.completeResolution(
+          generation: generation,
+          resolutionId: resolutionId,
+        );
       },
     );
   }
@@ -78,15 +81,26 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
     _game.setReducedMotion(reducedMotion);
 
     final script = view.activeScript;
-    if (view.isResolving && script != null && !identical(script, _playing)) {
-      _playing = script;
-      _game.playScript(script, reducedMotion: reducedMotion);
+    if (view.isResolving && script != null) {
+      final same =
+          _playing != null &&
+          _playing!.generation == script.generation &&
+          _playing!.resolutionId == script.resolutionId;
+      if (!same) {
+        _playing = script;
+        _game.playScript(script, reducedMotion: reducedMotion);
+      }
       return;
     }
 
     if (!view.isResolving) {
+      // Skip path: settle visuals to canonical final before clearing script id.
+      if (_playing != null) {
+        _game.showSettled(state, generation: view.generation, resolutionId: 0);
+      } else {
+        _game.showSettled(state, generation: view.generation, resolutionId: 0);
+      }
       _playing = null;
-      _game.showSettled(state, generation: view.generation);
     }
   }
 
@@ -102,24 +116,37 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
     if (state == null) {
       return const SizedBox.shrink();
     }
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Semantics(
-        label: 'Puzzle board, ${state.boardSize} by ${state.boardSize}',
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Visual-only Flame layer; input goes through the semantics grid.
-            IgnorePointer(child: GameWidget(game: _game)),
-            // Semantics/input use canonical state (authoritative after commit).
-            _SemanticsGrid(
-              state: state,
-              enabled: widget.view.acceptsInput,
-              onTapCell: (coord) => widget.session.submitTap(coord),
+
+    // Interactive labels must reflect the pre-move board while resolving so
+    // that "empty" semantics are not rewritten by the committed finalState.
+    // Input is disabled during resolving; settled play uses canonical state.
+    final interactionState =
+        widget.view.isResolving && widget.view.activeScript != null
+        ? widget.view.activeScript!.preState
+        : state;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = constraints.biggest.shortestSide;
+        return SizedBox(
+          width: side,
+          height: side,
+          child: Semantics(
+            label: 'Puzzle board, ${state.boardSize} by ${state.boardSize}',
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                IgnorePointer(child: GameWidget(game: _game)),
+                _SemanticsGrid(
+                  state: interactionState,
+                  enabled: widget.view.acceptsInput,
+                  onTapCell: (coord) => widget.session.submitTap(coord),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -148,6 +175,7 @@ final class _SemanticsGrid extends StatelessWidget {
                 for (var col = 0; col < n; col++)
                   Expanded(
                     child: _CellSemantics(
+                      key: ValueKey('board-cell-$row-$col'),
                       row: row,
                       column: col,
                       piece: state.cells[row][col],
@@ -166,6 +194,7 @@ final class _SemanticsGrid extends StatelessWidget {
 
 final class _CellSemantics extends StatelessWidget {
   const _CellSemantics({
+    super.key,
     required this.row,
     required this.column,
     required this.piece,
@@ -196,6 +225,7 @@ final class _CellSemantics extends StatelessWidget {
       child: Material(
         type: MaterialType.transparency,
         child: InkWell(
+          key: ValueKey('board-ink-$row-$column'),
           onTap: enabled && !blocked ? onTap : null,
           child: const SizedBox.expand(),
         ),

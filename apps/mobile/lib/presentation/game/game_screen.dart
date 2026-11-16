@@ -29,8 +29,10 @@ final class GameScreen extends StatelessWidget {
             actions: [
               if (view.isResolving)
                 TextButton(
-                  onPressed: () =>
-                      session.skipResolution(generation: view.generation),
+                  onPressed: () => session.skipResolution(
+                    generation: view.generation,
+                    resolutionId: view.activeResolutionId,
+                  ),
                   child: const Text('Skip'),
                 ),
             ],

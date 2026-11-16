@@ -41,6 +41,7 @@ void main() {
 
       final script = AnimationScript(
         generation: 1,
+        resolutionId: 7,
         preState: generated.state,
         applied: applied!,
         placedPiece: placed!,
