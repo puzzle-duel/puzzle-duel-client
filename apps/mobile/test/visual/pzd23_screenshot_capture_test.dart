@@ -46,7 +46,7 @@ void main() {
   testWidgets('capture home menu', (tester) async {
     await _pumpPhone(tester, GameSession());
     await _golden(tester, '01-home-menu');
-  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
+  }, skip: _skipOnCi);
 
   testWidgets('capture easy medium hard boards', (tester) async {
     for (final entry in [
@@ -59,7 +59,7 @@ void main() {
       await _pumpPhone(tester, session);
       await _golden(tester, entry.$2);
     }
-  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
+  }, skip: _skipOnCi);
 
   testWidgets('capture selected offer', (tester) async {
     final session = GameSession()
@@ -68,7 +68,7 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp(r'Offer slot 1,')));
     await tester.pump(const Duration(milliseconds: 160));
     await _golden(tester, '05-selected-piece');
-  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
+  }, skip: _skipOnCi);
 
   testWidgets('capture resolving and end overlay', (tester) async {
     final session = GameSession();
@@ -151,5 +151,5 @@ void main() {
           ? '08-completed-round'
           : '08-completed-round-fallback',
     );
-  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
+  }, skip: _skipOnCi);
 }
