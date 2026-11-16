@@ -6,6 +6,7 @@ part of '../puzzle_duel_rules.dart';
 enum MoveSafety {
   tapOutOfBounds('tap_out_of_bounds'),
   offerUnavailable('offer_unavailable'),
+  unresolvedPreMoveMatch('unresolved_pre_move_match'),
   emptyStreamNotTerminal('empty_stream_not_terminal'),
   earlyBoardEndEmptyStream('early_board_end_empty_stream'),
   cascadeCorrupt('cascade_corrupt'),
@@ -185,6 +186,14 @@ MoveResult applyMove(GameState state, Move move) {
         state: state,
       );
     case final PlacementApplied applied:
+      // Placement accepted, but a corrupt resume board must not score pre-existing
+      // runs as part of this move's cascade. Check the pre-move snapshot only.
+      if (state.hasOrthogonalRun) {
+        return MoveUnsafe(
+          reason: MoveSafety.unresolvedPreMoveMatch,
+          state: state,
+        );
+      }
       switch (_resolveCascades(
         cells: applied.cells,
         blocked: state.blocked,

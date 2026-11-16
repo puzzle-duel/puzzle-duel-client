@@ -22,16 +22,23 @@ Results and nested collections are deeply immutable. The UI must not recalculate
 
 1. Call `applyPlacement`.
 2. On rejection or placement safety stop, map to `MoveRejected` / `MoveUnsafe` and stop.
-3. Scan matches with `clearMatches`.
-4. If no match, skip shift and end the cascade.
-5. On a match, clear unique cells once, score the wave, then `applyShift` once.
-6. Rematch the shifted board. Repeat until no matches remain.
-7. Commit offer replacement from PZD-18 `OfferConsumption`.
-8. Evaluate terminal status only after cascades and offer commit.
-9. Construct `GameState`, reject residual matches, round-trip through `parseGameState`.
-10. Return `MoveApplied`.
+3. After a placement request is accepted, if the **pre-move** `state.hasOrthogonalRun` is true, fail closed with `MoveSafety.unresolvedPreMoveMatch`. Do not cascade, score, commit offers, or return `MoveApplied`.
+4. Scan matches with `clearMatches` on the post-placement board.
+5. If no match, skip shift and end the cascade.
+6. On a match, clear unique cells once, score the wave, then `applyShift` once.
+7. Rematch the shifted board. Repeat until no matches remain.
+8. Commit offer replacement from PZD-18 `OfferConsumption`.
+9. Evaluate terminal status only after cascades and offer commit.
+10. Construct `GameState`, reject residual matches, round-trip through `parseGameState`.
+11. Return `MoveApplied`.
 
 No global shift without a clear. Input state is never mutated.
+
+## Corrupt pre-move / resume boundary
+
+`parseGameState` may keep an existing orthogonal run (structural resume / inspection). `parseInitialGameState` rejects the same board with `unresolved_initial_match`.
+
+`applyMove` follows the initial-move integrity rule for scoring: once placement would otherwise proceed, an unresolved pre-move run is an internal integrity failure (`unresolved_pre_move_match`), not a gameplay/transport rejection. Board, score, turns, offers, future pieces, rules version, and status stay unchanged. Approved codes `game_ended`, `blocked_tap`, and `occupied_tap`, plus out-of-bounds safety stops, still take effect first when placement rejects or stops before this check.
 
 ## Cascade bound
 
@@ -84,7 +91,7 @@ A clear that reopens space can keep the game `in_progress` when turns remain. Re
 
 ## Failure atomicity
 
-`MoveRejected` and `MoveUnsafe` always carry the original unchanged state. Successful paths validate the final snapshot before returning. Callers never receive a half-applied board with a claimed score.
+`MoveRejected` and `MoveUnsafe` always carry the original unchanged state. Successful paths validate the final snapshot before returning. Callers never receive a half-applied board with a claimed score. An unresolved pre-move match yields no waves, no score delta, and no offer consumption.
 
 ## Golden fixture coverage
 

@@ -27,7 +27,7 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](ht
 | `resolveAfterPlacement` | Single wave: clear once after placement; shift once only if cleared. |
 | `applyMove` | Full CORE-001 resolution: placement, cascades, integer scoring, offer commit, termination. |
 | `MoveApplied` / `WaveResult` | Legal full-move outcome and per-wave clear/score/moved records. |
-| `MoveRejected` / `MoveUnsafe` | Gameplay rejection or internal fail-closed stop; input state unchanged. |
+| `MoveRejected` / `MoveUnsafe` | Gameplay rejection or internal fail-closed stop; input state unchanged. Includes `unresolved_pre_move_match` when a resume board already has a run. |
 
 Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md), [`docs/engine/PZD-20-RESOLUTION.md`](../../docs/engine/PZD-20-RESOLUTION.md).
 

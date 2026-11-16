@@ -118,6 +118,81 @@ void main() {
     expect(result.state, state);
   });
 
+  test('unresolved pre-move match fails closed without scoring', () {
+    final raw = _blank()
+      ..['cells'] = [
+        for (var row = 0; row < 5; row++)
+          [
+            for (var column = 0; column < 5; column++)
+              row == 2 && column < 3
+                  ? {'shape': 'circle', 'direction': 'left'}
+                  : null,
+          ],
+      ]
+      ..['score'] = 40
+      ..['turnsUsed'] = 2;
+    final state = parseGameState(raw);
+    expect(state.hasOrthogonalRun, isTrue);
+    expect(state.status, GameStatus.inProgress);
+    expect(
+      () => parseInitialGameState(raw),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.codes,
+          'codes',
+          contains(ValidationCode.unresolvedInitialMatch),
+        ),
+      ),
+    );
+
+    final snapshot = parseGameState(state.toJson());
+    final result = applyMove(
+      state,
+      parseMove({
+        'offerIndex': 1,
+        'tap': [0, 0],
+      }),
+    );
+    expect(result, isA<MoveUnsafe>());
+    expect((result as MoveUnsafe).reason, MoveSafety.unresolvedPreMoveMatch);
+    expect(result.state, state);
+    expect(state, snapshot);
+    expect(state.score, 40);
+    expect(state.turnsUsed, 2);
+    expect(state.offers, snapshot.offers);
+    expect(state.futurePieces, snapshot.futurePieces);
+    expect(state.rulesVersion, RulesVersion.core001V1);
+    expect(state.status, GameStatus.inProgress);
+  });
+
+  test('pre-move match does not override gameplay rejections', () {
+    final raw = _blank()
+      ..['cells'] = [
+        for (var row = 0; row < 5; row++)
+          [
+            for (var column = 0; column < 5; column++)
+              row == 2 && column < 3
+                  ? {'shape': 'circle', 'direction': 'left'}
+                  : null,
+          ],
+      ]
+      ..['status'] = 'ended'
+      ..['turnsUsed'] = 5
+      ..['moveLimit'] = 5;
+    final state = parseGameState(raw);
+    expect(state.hasOrthogonalRun, isTrue);
+    final result = applyMove(
+      state,
+      parseMove({
+        'offerIndex': 0,
+        'tap': [4, 4],
+      }),
+    );
+    expect(result, isA<MoveRejected>());
+    expect((result as MoveRejected).code, GameplayRejection.gameEnded);
+    expect(result.state, state);
+  });
+
   test('deep immutability of applied results', () {
     final step = _firstStep('05-horizontal-match.json');
     final result = applyMove(step.state, step.move) as MoveApplied;
