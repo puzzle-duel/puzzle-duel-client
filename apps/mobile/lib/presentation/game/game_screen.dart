@@ -55,9 +55,12 @@ final class _GameScreenState extends State<GameScreen> {
             child: SafeArea(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final landscape = constraints.maxWidth > constraints.maxHeight;
+                  final landscape =
+                      constraints.maxWidth > constraints.maxHeight;
                   final tray = OfferTray(
-                    offers: state?.offers ?? const [null, null, null],
+                    offers:
+                        state?.offers ??
+                        const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
                     selectedIndex: view.selectedOfferIndex,
                     enabled: view.acceptsInput,
                     onSelect: session.selectOffer,
@@ -219,10 +222,7 @@ final class _TopNav extends StatelessWidget {
             ),
           ),
           if (resolving && onSkip != null)
-            TextButton(
-              onPressed: onSkip,
-              child: const Text('Skip'),
-            )
+            TextButton(onPressed: onSkip, child: const Text('Skip'))
           else
             const SizedBox(width: 64),
         ],
@@ -239,8 +239,7 @@ final class _HudBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scoreDelta = view.activeScript?.applied.scoreDelta;
-    final showDelta =
-        view.isResolving && scoreDelta != null && scoreDelta > 0;
+    final showDelta = view.isResolving && scoreDelta != null && scoreDelta > 0;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -305,11 +304,7 @@ final class _HudBar extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              width: 1,
-              height: 42,
-              color: GameTokens.border,
-            ),
+            Container(width: 1, height: 42, color: GameTokens.border),
             const SizedBox(width: 14),
             Expanded(
               child: Semantics(

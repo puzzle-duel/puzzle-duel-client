@@ -19,7 +19,7 @@ Coordinate? firstEmpty(GameState state) {
   GameState state,
 ) {
   for (var offer = 0; offer < 3; offer++) {
-    if (state.offers[offer] == null) continue;
+    if (!state.offers[offer].isSelectable) continue;
     for (var r = 0; r < state.boardSize; r++) {
       for (var c = 0; c < state.boardSize; c++) {
         final tap = Coordinate(row: r, column: c);
@@ -249,7 +249,7 @@ void main() {
     // by rejecting index that has null when present after a v2 terminal move.
     final state = session.view.canonicalState!;
     for (var i = 0; i < 3; i++) {
-      if (state.offers[i] == null) {
+      if (!state.offers[i].isSelectable) {
         session.selectOffer(i);
         expect(session.view.selectedOfferIndex, isNot(i));
       }
@@ -272,7 +272,7 @@ void main() {
       if (legal.applied.waves.isEmpty) continue;
       withWaves = legal.applied;
       pre = generated.state;
-      placed = generated.state.offers[legal.offer];
+      placed = generated.state.offers[legal.offer].pieceOrNull;
     }
     expect(withWaves, isNotNull);
     expect(placed, isNotNull);
