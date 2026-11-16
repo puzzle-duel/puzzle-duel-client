@@ -1,0 +1,4 @@
+00:00 +0: loading /private/tmp/pzd22-compat-spike/test/compat_smoke_test.dart
+00:00 +0: MaterialApp + GameWidget + ColorEffect compile and mount
+00:00 +1: app-owned code does not import legacy material
+00:00 +2: All tests passed!

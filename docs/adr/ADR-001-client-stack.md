@@ -32,7 +32,7 @@ Versions, pages, and commands are in [PZD-14-EVIDENCE.md](../architecture/PZD-14
 - Flame 1.38.2, published 2026-08-27, declares Dart `>=3.11.0 <4.0.0` and Flutter `>=3.41.0`, and depends on Flutter.
 - This machine has Flutter 3.47.8 and Dart 3.13.7. A disposable `flutter pub get` resolved Flame 1.38.2 and was deleted. That run is not a Flutter 3.50 result.
 - Flutter 3.50 deprecates the in-framework Material and Cupertino libraries and publishes `package:material_ui` and `package:cupertino_ui`. Source: [the breaking-change note](https://docs.flutter.dev/release/breaking-changes/material-ui-and-cupertino-ui).
-- Flame 1.38.2 has not been resolved or analyzed on Flutter 3.50.0. The 3.50 SDK archive was not downloaded. The gate in the evidence log is **NOT_RUN**.
+- Flame 1.38.2 was unresolved on Flutter 3.50.0 at PZD-14 review time (gate **NOT_RUN** then). **PZD-22 executed the disposable gate on Flutter 3.50.0 / Dart 3.14.0 and recorded PASS** — see [PZD-22-BOOTSTRAP.md](../mobile/PZD-22-BOOTSTRAP.md).
 - No frame-time number was measured.
 
 Minimum platform assumption, taken from the Flutter 3.50 support page and not from a device run: Android API 24 and iOS 15. Store-policy targets above that floor are an owner choice.
@@ -84,7 +84,7 @@ A compromised animation clock must not change the committed board. State changes
 
 Pure Dart tests can run on Ubuntu and must consume [the fixture suites](../contracts/gameplay/v1/README.md) as specified in the parity document. Flame widget tests are a later presentation suite. They do not replace fixture replay.
 
-Before scaffolding, the Flutter 3.50 gate in the evidence log must pass: version banner, `flutter pub get` for Flame 1.38.2, `flutter analyze` of a Flame import, and no required call that crosses a legacy public type. A deprecation info is recorded. An analyzer error fails the gate. The current gate result is **NOT_RUN**.
+Before scaffolding, the Flutter 3.50 gate in the evidence log must pass: version banner, `flutter pub get` for Flame 1.38.2, `flutter analyze` of a Flame import, and no required call that crosses a legacy public type. A deprecation info is recorded. An analyzer error fails the gate. PZD-14 recorded **NOT_RUN**; PZD-22 recorded **PASS** in [PZD-22-BOOTSTRAP.md](../mobile/PZD-22-BOOTSTRAP.md) before scaffolding.
 
 This repository's current workflow checks the Python and Node reference checkers when fixture files change. It does not compile Flutter. Adding macOS runners for iOS builds is a later cost and is not part of this change. No dollar figure is claimed.
 
@@ -124,6 +124,6 @@ Reject a native-only client for MVP. Keep custom rendering without Flame as a do
 
 ## 14. Owner-approval requirements
 
-**Owner decision: Accepted (2026-11-15)** with an explicit execution prerequisite. Before any `flutter create`, Flame dependency commit, or UI implementation, the Flutter 3.50.0 / Dart 3.14.0 + Flame 1.38.2 gate in [PZD-14-EVIDENCE.md](../architecture/PZD-14-EVIDENCE.md) **MUST PASS** (`flutter --version`, `flutter pub get`, `flutter analyze` for `GameWidget` and `ColorEffect`, and no incompatible first-party/legacy public-type boundary). Its current result is **NOT_RUN**. A failed gate blocks scaffolding and requires owner-reviewed remediation; Accepted is **not** a claim of successful execution.
+**Owner decision: Accepted (2026-11-15)** with an explicit execution prerequisite. Before any `flutter create`, Flame dependency commit, or UI implementation, the Flutter 3.50.0 / Dart 3.14.0 + Flame 1.38.2 gate in [PZD-14-EVIDENCE.md](../architecture/PZD-14-EVIDENCE.md) **MUST PASS** (`flutter --version`, `flutter pub get`, `flutter analyze` for `GameWidget` and `ColorEffect`, and no incompatible first-party/legacy public-type boundary). PZD-14 left that gate **NOT_RUN**. **PZD-22 executed it and recorded PASS** ([PZD-22-BOOTSTRAP.md](../mobile/PZD-22-BOOTSTRAP.md)). A failed gate still blocks scaffolding and requires owner-reviewed remediation.
 
 PZD-12 does not block this client recommendation. It blocks backend host claims only.
