@@ -4,7 +4,7 @@ Pure Dart rules package for Puzzle Duel.
 
 Location: `packages/puzzle_duel_rules`. Named by [ADR-001](../../docs/adr/ADR-001-client-stack.md). It does not import Flutter, Flame, or `dart:ui`.
 
-Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18).
+Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18), [PZD-19](https://puzzle-duel-app.atlassian.net/browse/PZD-19).
 
 ## Public API
 
@@ -22,8 +22,11 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](ht
 | `PlacementApplied` | Landing, placed piece, post-placement cells, absolute turns, unchanged score, offer-consumption intent. Not a finished move. |
 | `GameplayRejection` | `blocked_tap`, `occupied_tap`, `game_ended`. |
 | `OfferWillReplace` / `OfferReplacementDeferred` | Post-resolution offer handoff. Terminal null is not written here. |
+| `findMatches` / `clearMatches` | Match scan and simultaneous clear. No shift. |
+| `applyShift` / `MovedPiece` | Snapshot-based one-cell simultaneous shift. |
+| `resolveAfterPlacement` | Single wave: clear once after placement; shift once only if cleared. |
 
-Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md).
+Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md).
 
 `core-001.v1` and `core-001.v2` are the only rulesets. Lists returned by a state are unmodifiable copies.
 
@@ -31,7 +34,9 @@ Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.
 
 A legal placement lands one cell forward when that cell is in bounds, empty, and not blocked. Otherwise it lands on the tap. Exactly one turn is consumed. Score is unchanged. Status is not re-evaluated for board fill.
 
-Match, clear, shift, cascade, scoring, and final end evaluation are **NOT_RUN**.
+## Match and shift
+
+`clearMatches` unions orthogonal shape runs of length ≥ 3 and clears unique cells once. `applyShift` proposes one neighbor per survivor from the pre-shift snapshot; contested or start-occupied destinations fail. Cascades, scoring, offer commit, and final end evaluation are **NOT_RUN**.
 
 ## Validation
 
