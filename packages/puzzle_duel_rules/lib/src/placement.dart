@@ -20,7 +20,8 @@ enum GameplayRejection {
 /// piece. The contract has not approved a precedence for those cases.
 enum PlacementSafety {
   tapOutOfBounds('tap_out_of_bounds'),
-  offerUnavailable('offer_unavailable');
+  offerUnavailable('offer_unavailable'),
+  integerOverflow('integer_overflow');
 
   const PlacementSafety(this.wire);
 
@@ -217,13 +218,31 @@ PlacementResult applyPlacement(GameState state, Move move) {
     );
   }
 
+  late final int nextTurns;
+  if (state.rulesVersion == RulesVersion.core001V3) {
+    var overflow = false;
+    nextTurns = checkedNonNegAdd(
+      state.turnsUsed,
+      1,
+      onOverflow: () => overflow = true,
+    );
+    if (overflow) {
+      return PlacementUnsafe(
+        reason: PlacementSafety.integerOverflow,
+        state: state,
+      );
+    }
+  } else {
+    nextTurns = state.turnsUsed + 1;
+  }
+
   return PlacementApplied(
     before: state,
     placedPiece: selected,
     landing: land,
     offerIndex: move.offerIndex,
     cells: placed,
-    turnsUsed: state.turnsUsed + 1,
+    turnsUsed: nextTurns,
     score: state.score,
     offerConsumption: consumption,
   );

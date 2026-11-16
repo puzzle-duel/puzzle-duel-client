@@ -251,6 +251,44 @@ void main() {
       expect(result.waves, hasLength(1));
       expect(result.finalState.score, 300);
     });
+
+    test('cascade clear reopens playable space before terminal', () {
+      final state = parseGameState(_v3CascadeReopen());
+      final result = applyMove(
+        state,
+        parseMove({
+          'offerIndex': 0,
+          'tap': [0, 2],
+        }),
+      ) as MoveApplied;
+      expect(result.scoreDelta, 300);
+      expect(result.finalState.status, GameStatus.inProgress);
+      expect(result.finalState.terminalReason, isNull);
+      expect(hasLegalPlacement(result.finalState), isTrue);
+    });
+
+    test('all spent offers with empty cells ends no_legal_moves', () {
+      final state = parseGameState(_v3AllSpentEmptyBoard());
+      expect(state.status, GameStatus.ended);
+      expect(state.terminalReason, TerminalReason.noLegalMoves);
+      expect(hasLegalPlacement(state), isFalse);
+      expect(hasLegalMove(state), isFalse);
+    });
+
+    test('post-terminal in-bounds tap returns game_ended', () {
+      final state = parseGameState(_v3BoardFullEnded());
+      final before = jsonEncode(state.toJson());
+      final result = applyMove(
+        state,
+        parseMove({
+          'offerIndex': 1,
+          'tap': [0, 0],
+        }),
+      ) as MoveRejected;
+      expect(result.code, GameplayRejection.gameEnded);
+      expect(result.state, state);
+      expect(jsonEncode(state.toJson()), before);
+    });
   });
 
   group('v3 security negatives', () {
@@ -264,6 +302,16 @@ void main() {
       expectCodes(() => parseGameState(json), ['unexpected_property']);
     });
 
+    test('spent slot rejects extra properties', () {
+      final json = _v3OneSpentPlayable()
+        ..['offers'] = [
+          {'kind': 'spent', 'note': 'x'},
+          _offerPiece(shape: 'diamond', direction: 'down'),
+          _offerPiece(shape: 'triangle', direction: 'left'),
+        ];
+      expectCodes(() => parseGameState(json), ['unexpected_property']);
+    });
+
     test('self-consistent hash is not ranked authority marker', () {
       final state = parseGameState(_v3Playable());
       final hash = stateHashV3(state);
@@ -272,9 +320,62 @@ void main() {
       expect(state.score, 0);
     });
 
+    test(
+      'forged higher score with matching hash is still not ranked proof',
+      () {
+        final forged = parseGameState(_v3Playable()..['score'] = 999);
+        final hash = stateHashV3(forged);
+        expect(hash, hasLength(64));
+        expect(stateHashV3(parseGameState(_v3Playable())), isNot(hash));
+        // No engine API authenticates forged.score via hash.
+      },
+    );
+
     test('integer out of JSON-safe range rejected on v3', () {
       final json = _v3Playable()..['score'] = 9007199254740992;
       expectCodes(() => parseGameState(json), ['integer_out_of_range']);
+    });
+
+    test('score overflow fails closed and preserves original state', () {
+      final state = parseGameState(
+        _v3MatchReady()..['score'] = kJsonMaxSafeInteger - 100,
+      );
+      final before = jsonEncode(state.toJson());
+      final result = applyMove(
+        state,
+        parseMove({
+          'offerIndex': 0,
+          'tap': [0, 2],
+        }),
+      );
+      expect(result, isA<MoveUnsafe>());
+      expect((result as MoveUnsafe).reason, MoveSafety.scoreOverflow);
+      expect(result.state, state);
+      expect(jsonEncode(state.toJson()), before);
+    });
+
+    test('checked turnsUsed+1 overflows at JSON-safe bound', () {
+      var overflow = false;
+      checkedNonNegAdd(
+        kJsonMaxSafeInteger,
+        1,
+        onOverflow: () => overflow = true,
+      );
+      expect(overflow, isTrue);
+    });
+
+    test('checked wave multiply overflows near JSON-safe bound', () {
+      var overflow = false;
+      checkedNonNegMul(
+        kJsonMaxSafeInteger,
+        2,
+        onOverflow: () => overflow = true,
+      );
+      expect(overflow, isTrue);
+      overflow = false;
+      final ok = checkedNonNegMul(3, 100, onOverflow: () => overflow = true);
+      expect(overflow, isFalse);
+      expect(ok, 300);
     });
 
     test('rejected illegal tap preserves original state', () {
@@ -408,6 +509,28 @@ void main() {
       );
       expect(
         () => canonicalJsonV3(1.5),
+        throwsA(isA<CanonicalJsonException>()),
+      );
+    });
+
+    test('different values produce different digests', () {
+      expect(
+        sha256HexOfUtf8(canonicalJsonV3(0)),
+        isNot(sha256HexOfUtf8(canonicalJsonV3(1))),
+      );
+      expect(
+        sha256HexOfUtf8(canonicalJsonV3({'kind': 'spent'})),
+        isNot(sha256HexOfUtf8(canonicalJsonV3({'kind': 'piece'}))),
+      );
+    });
+
+    test('rejects integers outside JSON-safe domain', () {
+      expect(
+        () => canonicalJsonV3(kJsonMaxSafeInteger + 1),
+        throwsA(isA<CanonicalJsonException>()),
+      );
+      expect(
+        () => canonicalJsonV3(-(kJsonMaxSafeInteger + 1)),
         throwsA(isA<CanonicalJsonException>()),
       );
     });
@@ -635,6 +758,63 @@ Map<String, Object?> _v3MatchReady() => {
   'score': 0,
   'status': 'in_progress',
   'terminalReason': null,
+};
+
+Map<String, Object?> _v3CascadeReopen() => {
+  'rulesVersion': 'core-001.v3',
+  'boardSize': 3,
+  'moveLimit': 5,
+  'blocked': <Object?>[],
+  'cells': [
+    [
+      {'shape': 'circle', 'direction': 'up'},
+      {'shape': 'circle', 'direction': 'up'},
+      null,
+    ],
+    [
+      {'shape': 'diamond', 'direction': 'down'},
+      {'shape': 'triangle', 'direction': 'left'},
+      {'shape': 'diamond', 'direction': 'up'},
+    ],
+    [
+      {'shape': 'triangle', 'direction': 'right'},
+      {'shape': 'diamond', 'direction': 'left'},
+      {'shape': 'triangle', 'direction': 'down'},
+    ],
+  ],
+  'offers': [
+    _offerPiece(shape: 'circle', direction: 'left'),
+    _offerPiece(shape: 'diamond', direction: 'down'),
+    _offerPiece(shape: 'triangle', direction: 'up'),
+  ],
+  'futurePieces': [
+    {'shape': 'diamond', 'direction': 'right'},
+  ],
+  'turnsUsed': 0,
+  'score': 0,
+  'status': 'in_progress',
+  'terminalReason': null,
+};
+
+Map<String, Object?> _v3AllSpentEmptyBoard() => {
+  'rulesVersion': 'core-001.v3',
+  'boardSize': 2,
+  'moveLimit': 5,
+  'blocked': <Object?>[],
+  'cells': [
+    [null, null],
+    [null, null],
+  ],
+  'offers': [
+    {'kind': 'spent'},
+    {'kind': 'spent'},
+    {'kind': 'spent'},
+  ],
+  'futurePieces': <Object?>[],
+  'turnsUsed': 2,
+  'score': 0,
+  'status': 'ended',
+  'terminalReason': 'no_legal_moves',
 };
 
 void expectCodes(void Function() body, List<String> required) {
