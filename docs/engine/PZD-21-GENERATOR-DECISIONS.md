@@ -2,16 +2,16 @@
 
 Jira: [PZD-21](https://puzzle-duel-app.atlassian.net/browse/PZD-21).
 
-Status: **Proposed — Owner Approval Required**
+Status: **Accepted — explicitly owner-approved 2026-11-16 (GEN-01–GEN-07)**
 
-Every GEN-01…GEN-07 row below remains **Proposed — Owner Approval Required**. Nothing in this document is Accepted.
+All GEN-01…GEN-07 decisions below are **Accepted**, explicitly approved by the product owner on 2026-11-16 for the exact reviewed PR #14 HEAD `3c395f4a8d5f60e803695c0bebf90c92e7f13f18`. The approval includes `core-001.v2` for newly generated ranked challenges. This approval does not merge the PR, accept the overall DRAFT Blueprint, authorize backend changes, or resolve the explicitly listed downstream boundaries.
 
 Branch: `feature/PZD-21-versioned-level-generator`  
 Client `main` base at analysis: `b4f7500f3cd21d914f0846f7b2644ecfcb0d4696` (PZD-20 merged).
 
-This document freezes **nothing**. It proposes a complete cross-runtime generator contract so the owner can approve, reject, or amend it before any production algorithm lands in `packages/puzzle_duel_rules`.
+This document records the owner-approved cross-runtime **`gen-001.v1` generator contract**. Phase C implementation may proceed **on the same PR branch** using the exact algorithm, draw order, known-answer vectors, policy and failure semantics below. Future changes to generator behavior require a separately reviewed new generator version, not silent edits.
 
-Do **not** treat recommendations below as Accepted. Do **not** implement Phase C until the required GEN rows are owner-approved. Do **not** use host `Random(seed)` / `Math.random` as the contract.
+GEN-01–GEN-07 were explicitly accepted by the owner before Phase C. Do **not** use host `Random(seed)` / `Math.random` as the contract. CI execution and cross-runtime parity still require implementation evidence; approval alone does **not** turn NOT_RUN into PASS.
 
 ## Already owner-approved (not reopened here)
 
@@ -29,7 +29,7 @@ PZD-17…PZD-20 already enforce: blocked uniqueness/row-major/occupancy, `parseI
 
 ### GEN-01 — Seed and PRNG
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Question:** What seed encoding and deterministic PRNG produce identical integer sequences on Dart and TypeScript?
 
@@ -227,13 +227,13 @@ After `seed32(rng, seed)`, the first 10 `nextU32` values:
 
 Future Dart/TypeScript PRNG units must match these tables exactly before any challenge fixture is trusted.
 
-**Owner must approve:** algorithm choice, constants, seed range/serialization, init protocol, wide-`limit` `randBound` (not `u32`-narrowed), and these self-check vectors.
+**Owner approval recorded (2026-11-16):** algorithm choice, constants, seed range/serialization, init protocol, wide-`limit` `randBound` (not `u32`-narrowed), and these self-check vectors.
 
 ---
 
 ### GEN-02 — Generator version
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Question:** How is the generation algorithm versioned independently of `rulesVersion`?
 
@@ -250,13 +250,13 @@ Rules:
 3. Bumping `rulesVersion` alone must not silently change board/stream generation.
 4. Fixture directory proposal: `docs/contracts/generator/gen-001.v1/` (separate from gameplay `v1`/`v2`).
 
-**Owner must approve:** id vocabulary, fixture root path, and storage obligation on ranked challenges.
+**Owner approval recorded (2026-11-16):** id vocabulary, fixture root path, and storage obligation on ranked challenges.
 
 ---
 
 ### GEN-03 — Initial board density and Fisher–Yates selection
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Question:** How many non-blocked cells start occupied, and how are cells chosen deterministically?
 
@@ -354,13 +354,13 @@ Draw accounting for a **successful** board attempt before supply:
 | Piece shape+direction | `2 * occupiedCount` |
 | **Total board draws** | `obstacleCount + 3 * occupiedCount` |
 
-**Owner must approve:** density numbers, partial Fisher–Yates direction/index rule, obstacle-then-occupied order, and reject-only (no local repair).
+**Owner approval recorded (2026-11-16):** density numbers, partial Fisher–Yates direction/index rule, obstacle-then-occupied order, and reject-only (no local repair).
 
 ---
 
 ### GEN-04 — Piece supply and production `rulesVersion`
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Question:** Exact draw order for offers + `futurePieces`, supply length, and which `rulesVersion` generated challenges use.
 
@@ -424,13 +424,13 @@ If `supplyLength = moveLimit + 2` and the game ends earlier by board-full, lefto
 | B. Generate as `core-001.v1` | Empty stream aborts; final-budget null path unavailable |
 | C. Config-selectable, default v2 | Ranked daily must still pin one value per challenge |
 
-**Owner must approve:** catalogues, supply formula, stream split, and production `rulesVersion`.
+**Owner approval recorded (2026-11-16):** catalogues, supply formula, stream split, and production `rulesVersion`.
 
 ---
 
 ### GEN-05 — Generation failure and PRNG flow
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Question:** How many attempts, what retries, how PRNG advances on failure, and when supply is drawn?
 
@@ -468,13 +468,13 @@ function generateChallenge(config, seed):
 5. Impossible configs fail **before** `seed32` / the loop with `invalid_config` (examples: Monster in MVP API, `obstacleCount >= boardSize^2`, `occupiedCount > free cells`, unsupported versions, seed out of range).
 6. No infinite loops. Exhaustion returns typed fail-closed `generation_exhausted` with no partial challenge.
 
-**Owner must approve:** `maxAttempts`, continue-on-failure PRNG policy, supply-after-accept ordering, and failure code names.
+**Owner approval recorded (2026-11-16):** `maxAttempts`, continue-on-failure PRNG policy, supply-after-accept ordering, and failure code names.
 
 ---
 
 ### GEN-06 — Playability and quality
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 Structural validity ≠ solvable ≠ Easy/Medium/Hard.
 
@@ -487,13 +487,13 @@ Structural validity ≠ solvable ≠ Easy/Medium/Hard.
 
 **Recommended:** `gen-001.v1` ships S0+S1 only.
 
-**Owner must approve:** mandatory tiers for `gen-001.v1`.
+**Owner approval recorded (2026-11-16):** mandatory tiers for `gen-001.v1`.
 
 ---
 
 ### GEN-07 — Cross-runtime parity
 
-**Status: Proposed — Owner Approval Required**
+**Status: Accepted — owner-approved 2026-11-16**
 
 **Proposed canonical artifact:**
 
@@ -528,7 +528,7 @@ Parity status rules:
 
 Also require the GEN-01 PRNG self-check tables to pass in both languages before challenge fixtures are compared.
 
-**Owner must approve:** schema fields, serializer rules, and fixture directory layout.
+**Owner approval recorded (2026-11-16):** schema fields, serializer rules, and fixture directory layout.
 
 ---
 
@@ -536,19 +536,19 @@ Also require the GEN-01 PRNG self-check tables to pass in both languages before 
 
 | GEN | Recommended default | Status |
 | --- | --- | --- |
-| GEN-01 | PCG32 XSH-RR pseudocode + vectors above | **Proposed — Owner Approval Required** |
-| GEN-02 | `generatorVersion = gen-001.v1`, separate fixture tree | **Proposed — Owner Approval Required** |
-| GEN-03 | Occupied 6/10/16; partial FY `i..m-1`; obstacles then occupied | **Proposed — Owner Approval Required** |
-| GEN-04 | Catalogues; `supplyLength = moveLimit + 2`; lean v2 | **Proposed — Owner Approval Required** |
-| GEN-05 | `maxAttempts = 256`; continue PRNG; supply only after accepted board | **Proposed — Owner Approval Required** |
-| GEN-06 | S0+S1 required; no difficulty claims | **Proposed — Owner Approval Required** |
-| GEN-07 | Schema + checksums; parity NOT_RUN until backend exists | **Proposed — Owner Approval Required** |
+| GEN-01 | PCG32 XSH-RR pseudocode + vectors above | **Accepted — owner-approved 2026-11-16** |
+| GEN-02 | `generatorVersion = gen-001.v1`, separate fixture tree | **Accepted — owner-approved 2026-11-16** |
+| GEN-03 | Occupied 6/10/16; partial FY `i..m-1`; obstacles then occupied | **Accepted — owner-approved 2026-11-16** |
+| GEN-04 | Catalogues; `supplyLength = moveLimit + 2`; lean v2 | **Accepted — owner-approved 2026-11-16** |
+| GEN-05 | `maxAttempts = 256`; continue PRNG; supply only after accepted board | **Accepted — owner-approved 2026-11-16** |
+| GEN-06 | S0+S1 required; no difficulty claims | **Accepted — owner-approved 2026-11-16** |
+| GEN-07 | Schema + checksums; parity NOT_RUN until backend exists | **Accepted — owner-approved 2026-11-16** |
 
 ## Already approved vs requiring owner approval
 
 **Already approved:** PD-06 profiles, PD-07 supply finiteness + v2 terminal-null semantics, PD-08 no initial match, PD-13 rules versioning obligation, ADR-001 pure Dart boundary, PZD-17…20 engine APIs.
 
-**Requires explicit owner approval before Phase C:** GEN-01 through GEN-07 as specified in this revision.
+**Owner approval received for Phase C:** GEN-01 through GEN-07 as specified in this decision record, including new ranked `rulesVersion = core-001.v2`. Implementation may start on the existing PZD-21 feature branch; code review, executable parity and final merge remain separate gates.
 
 ## Unresolved constraints (carry to Jira)
 
@@ -559,8 +559,8 @@ Also require the GEN-01 PRNG self-check tables to pass in both languages before 
 - Backend TypeScript generator authorization → parity remains **NOT_RUN**.
 - Empirical difficulty validation (playtest) is outside this gate.
 
-## Stop line
+## Phase B approval record and Phase C gate
 
-Phase B remains open for owner approval. No generator source, no frozen generator fixtures, no `PZD-21-GENERATOR.md` algorithm lock, and no client/backend generator parity claim until the owner approves the required GEN decisions (or amends them in writing).
+**Phase B: CLOSED — owner approved GEN-01–GEN-07 on 2026-11-16** against reviewed HEAD `3c395f4a8d5f60e803695c0bebf90c92e7f13f18`, including `core-001.v2` for newly generated ranked challenges.
 
-Phase C may continue on this same branch only after that approval.
+**Phase C: AUTHORIZED but NOT IMPLEMENTED by this documentation commit.** Continue in the same PZD-21 branch / PR #14. The developer must add the production generator, exact versioned fixtures and tests, independently verify the RNG/rejection sampling vectors, and report true client/backend executable parity as PASS only after both runtimes are tested. Preserve historical v1/v2 gameplay fixtures, and keep unresolved early-board-full/empty-stream, UTC-date-to-seed mapping, free-play-specific policy, and empirical difficulty validation explicitly open. No merge, deploy, Jira Done, backend implementation or PZD-22 without separate approval.
