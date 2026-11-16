@@ -48,6 +48,8 @@ final class PuzzleBoardGame extends FlameGame {
   int _stepIndex = 0;
   bool _clearedAnyWave = false;
   bool _disposed = false;
+  /// Prevents duplicate SFX across reduced-motion, skip, rebuild, or stale work.
+  bool _sfxEmittedForResolution = false;
   double _shiftElapsed = 0;
   static const _shiftDuration = 0.28;
   double _placePulse = 1;
@@ -107,6 +109,7 @@ final class PuzzleBoardGame extends FlameGame {
     if (_disposed) return;
     _cancelTimer();
     _clearedAnyWave = false;
+    _sfxEmittedForResolution = false;
     _generation = script.generation;
     _resolutionId = script.resolutionId;
     _board = PresentationBoard.fromGameState(script.preState);
@@ -114,6 +117,8 @@ final class PuzzleBoardGame extends FlameGame {
     _flying = const [];
     if (reducedMotion) {
       _board = PresentationBoard.fromGameState(script.finalState);
+      // Preserve outcome audio from actual MoveApplied waves (no invented clears).
+      _emitScriptSfxOnce(script);
       async.scheduleMicrotask(
         () => _finish(
           generation: script.generation,
@@ -139,7 +144,27 @@ final class PuzzleBoardGame extends FlameGame {
     _board = PresentationBoard.fromGameState(finalState);
     _highlight = const [];
     _flying = const [];
+    // Do not re-fire SFX on skip — animated steps (or reduced-motion emit)
+    // already covered what was heard; remaining waves stay silent.
+    _sfxEmittedForResolution = true;
     _finish(generation: generation, resolutionId: resolutionId);
+  }
+
+  void _emitScriptSfxOnce(AnimationScript script) {
+    if (_disposed || _sfxEmittedForResolution) return;
+    if (script.generation != _generation ||
+        script.resolutionId != _resolutionId) {
+      return;
+    }
+    _sfxEmittedForResolution = true;
+    for (final event in sfxEventsForWaves(script.waves.map((w) => w.wave))) {
+      onSfx?.call(event);
+    }
+  }
+
+  void _emitStepSfx(GameSfxEvent event) {
+    if (_disposed || _sfxEmittedForResolution) return;
+    onSfx?.call(event);
   }
 
   void disposeGame() {
@@ -153,6 +178,7 @@ final class PuzzleBoardGame extends FlameGame {
     if (_disposed) return;
     _cancelTimer();
     _clearedAnyWave = false;
+    _sfxEmittedForResolution = false;
     _generation = 1;
     _resolutionId = 1;
     _highlight = const [];
@@ -205,12 +231,12 @@ final class PuzzleBoardGame extends FlameGame {
         _board?.place(step.landing!, step.piece!);
         _placeAt = step.landing;
         _placePulse = 0.55;
-        onSfx?.call(GameSfxEvent.place);
+        _emitStepSfx(GameSfxEvent.place);
         _schedule(const Duration(milliseconds: 260));
       case AnimationStepKind.clearWave:
         _highlight = step.cleared;
         _clearedAnyWave = true;
-        onSfx?.call(sfxForClearWave(step.wave ?? 1));
+        _emitStepSfx(sfxForClearWave(step.wave ?? 1));
         _schedule(
           const Duration(milliseconds: 220),
           after: () {
@@ -236,8 +262,10 @@ final class PuzzleBoardGame extends FlameGame {
       // Advancement continues from [update] when interpolation completes.
       case AnimationStepKind.settle:
         if (_clearedAnyWave) {
-          onSfx?.call(GameSfxEvent.chainComplete);
+          _emitStepSfx(GameSfxEvent.chainComplete);
         }
+        // Mark complete so skip/rebuild cannot duplicate the sequence.
+        _sfxEmittedForResolution = true;
         _finish(generation: _generation, resolutionId: _resolutionId);
     }
   }

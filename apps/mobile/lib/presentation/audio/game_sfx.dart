@@ -18,6 +18,26 @@ enum GameSfxEvent {
 GameSfxEvent sfxForClearWave(int wave) =>
     wave <= 1 ? GameSfxEvent.clear : GameSfxEvent.cascade;
 
+/// Canonical SFX sequence for a resolved move's waves (no invented clears).
+List<GameSfxEvent> sfxEventsForWaves(
+  Iterable<int> waveNumbers, {
+  bool includePlace = true,
+}) {
+  final events = <GameSfxEvent>[];
+  if (includePlace) {
+    events.add(GameSfxEvent.place);
+  }
+  var cleared = false;
+  for (final wave in waveNumbers) {
+    events.add(sfxForClearWave(wave));
+    cleared = true;
+  }
+  if (cleared) {
+    events.add(GameSfxEvent.chainComplete);
+  }
+  return events;
+}
+
 /// Mute-ready SFX API. Implementations must never throw into gameplay.
 abstract class GameSfx extends ChangeNotifier {
   bool get muted;
@@ -26,17 +46,36 @@ abstract class GameSfx extends ChangeNotifier {
 }
 
 /// Asset-backed SFX with debounce, haptics, and fail-soft playback.
+///
+/// Lifecycle rules:
+/// - Queued work checks mute/dispose before acquire, after awaits, before play.
+/// - Dispose is safe while playback is in flight (late work is dropped).
+/// - One transient failure does not permanently disable audio.
+/// - Distinct events may overlap via a small player pool; same-event spam is
+///   debounced.
 final class AssetGameSfx extends GameSfx {
-  AssetGameSfx({AudioPlayer Function()? playerFactory})
-    : _playerFactory = playerFactory ?? AudioPlayer.new;
+  AssetGameSfx({
+    AudioPlayer Function()? playerFactory,
+    this.playOverride,
+  }) : _playerFactory = playerFactory ?? AudioPlayer.new;
 
   final AudioPlayer Function() _playerFactory;
+
+  /// Test seam: when set, skips AudioPlayer and invokes this instead.
+  @visibleForTesting
+  final Future<void> Function(String assetPath, double volume)? playOverride;
   final List<AudioPlayer> _pool = [];
   final Map<GameSfxEvent, DateTime> _lastPlayed = {};
+  final Set<int> _inFlight = {};
 
   bool _muted = false;
   bool _disposed = false;
-  bool _audioAvailable = true;
+  int _playEpoch = 0;
+  int _nextTicket = 0;
+  int _failureStreak = 0;
+  DateTime? _cooldownUntil;
+  static const _maxTransientFailures = 3;
+  static const _cooldown = Duration(seconds: 2);
 
   @override
   bool get muted => _muted;
@@ -45,7 +84,16 @@ final class AssetGameSfx extends GameSfx {
   set muted(bool value) {
     if (_muted == value) return;
     _muted = value;
+    // Invalidate queued async work so mute takes effect immediately.
+    _playEpoch++;
     notifyListeners();
+  }
+
+  /// True when a short cooldown is active after repeated transient failures.
+  @visibleForTesting
+  bool get isInFailureCooldown {
+    final until = _cooldownUntil;
+    return until != null && DateTime.now().isBefore(until);
   }
 
   static const _asset = {
@@ -66,9 +114,16 @@ final class AssetGameSfx extends GameSfx {
     GameSfxEvent.roundEnd: Duration(milliseconds: 400),
   };
 
+  bool get _playbackAllowed {
+    if (_disposed || _muted) return false;
+    final until = _cooldownUntil;
+    if (until != null && DateTime.now().isBefore(until)) return false;
+    return true;
+  }
+
   @override
   void play(GameSfxEvent event) {
-    if (_disposed || _muted || !_audioAvailable) return;
+    if (!_playbackAllowed) return;
     final now = DateTime.now();
     final last = _lastPlayed[event];
     final gap = _minInterval[event] ?? Duration.zero;
@@ -89,42 +144,90 @@ final class AssetGameSfx extends GameSfx {
       }
     } catch (_) {}
 
+    final epoch = _playEpoch;
+    final ticket = ++_nextTicket;
+    _inFlight.add(ticket);
+
     // Isolate plugin/channel failures from gameplay / test zones.
     scheduleMicrotask(() {
       runZonedGuarded(() {
         // ignore: discarded_futures
-        _playAsset(event);
-      }, _onAudioError);
+        _playAsset(event, epoch: epoch, ticket: ticket);
+      }, (error, stack) {
+        _inFlight.remove(ticket);
+        _noteTransientFailure(error, stack);
+      });
     });
   }
 
-  void _onAudioError(Object error, StackTrace stack) {
-    _audioAvailable = false;
+  void _noteTransientFailure(Object error, StackTrace stack) {
+    if (_disposed) return;
+    _failureStreak++;
     assert(() {
-      debugPrint('GameSfx disabled after error: $error\n$stack');
+      debugPrint('GameSfx transient failure ($_failureStreak): $error\n$stack');
       return true;
     }());
-  }
-
-  Future<void> _playAsset(GameSfxEvent event) async {
-    if (!_audioAvailable) return;
-    final path = _asset[event];
-    if (path == null) return;
-    try {
-      final player = _acquire();
-      if (player == null) return;
-      await player.stop();
-      await player.play(AssetSource(path), volume: 0.7);
-    } catch (error, stack) {
-      _onAudioError(error, stack);
+    if (_failureStreak >= _maxTransientFailures) {
+      _cooldownUntil = DateTime.now().add(_cooldown);
+      _failureStreak = 0;
     }
   }
 
+  void _noteSuccess() {
+    _failureStreak = 0;
+    _cooldownUntil = null;
+  }
+
+  Future<void> _playAsset(
+    GameSfxEvent event, {
+    required int epoch,
+    required int ticket,
+  }) async {
+    try {
+      if (!_stillValid(epoch)) return;
+      final path = _asset[event];
+      if (path == null) return;
+
+      final override = playOverride;
+      if (override != null) {
+        if (!_stillValid(epoch)) return;
+        await override(path, 0.7);
+        if (!_stillValid(epoch)) return;
+        _noteSuccess();
+        return;
+      }
+
+      if (!_stillValid(epoch)) return;
+      final player = _acquire();
+      if (player == null) return;
+      if (!_stillValid(epoch)) return;
+
+      await player.stop();
+      if (!_stillValid(epoch)) return;
+
+      await player.play(AssetSource(path), volume: 0.7);
+      if (!_stillValid(epoch)) return;
+      _noteSuccess();
+    } catch (error, stack) {
+      _noteTransientFailure(error, stack);
+    } finally {
+      _inFlight.remove(ticket);
+    }
+  }
+
+  bool _stillValid(int epoch) =>
+      !_disposed && !_muted && epoch == _playEpoch && !isInFailureCooldown;
+
   AudioPlayer? _acquire() {
-    if (!_audioAvailable) return null;
+    if (_disposed || _muted) return null;
     try {
       if (_pool.length < 4) {
         final created = _playerFactory();
+        if (_disposed) {
+          // ignore: discarded_futures
+          created.dispose();
+          return null;
+        }
         _pool.add(created);
         return created;
       }
@@ -132,7 +235,7 @@ final class AssetGameSfx extends GameSfx {
       _pool.add(next);
       return next;
     } catch (error, stack) {
-      _onAudioError(error, stack);
+      _noteTransientFailure(error, stack);
       return null;
     }
   }
@@ -140,11 +243,21 @@ final class AssetGameSfx extends GameSfx {
   @override
   void dispose() {
     _disposed = true;
-    for (final p in _pool) {
-      // ignore: discarded_futures
-      p.dispose();
-    }
+    _playEpoch++;
+    _inFlight.clear();
+    final players = List<AudioPlayer>.from(_pool);
     _pool.clear();
+    for (final p in players) {
+      // ignore: discarded_futures
+      Future<void>(() async {
+        try {
+          await p.stop();
+        } catch (_) {}
+        try {
+          await p.dispose();
+        } catch (_) {}
+      });
+    }
     super.dispose();
   }
 }

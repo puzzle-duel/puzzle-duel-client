@@ -24,3 +24,13 @@ These tones were generated in-repo for development/UAT (no third-party sample pa
 ## Mute
 
 `GameSfx.muted` is the toggle hook. No settings UI yet.
+
+## Lifecycle
+
+`AssetGameSfx` drops queued playback after mute or dispose, checks lifecycle
+before/after async work, and uses a short cooldown after repeated transient
+failures instead of permanently disabling audio.
+
+Reduced-motion skips visual steps but still emits place/clear/cascade/chain
+SFX from the actual `MoveApplied` waves (unless muted). Skip/rebuild/stale
+callbacks do not re-fire the sequence.
