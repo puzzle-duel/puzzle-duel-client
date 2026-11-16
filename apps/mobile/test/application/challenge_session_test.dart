@@ -12,18 +12,12 @@ void main() {
 
   test('application state does not mutate the engine snapshot', () {
     final session = ChallengeSession();
-    session.runGeneratorSmokeTest(
-      profile: DifficultyProfile.easy,
-      seed: 42,
-    );
+    session.runGeneratorSmokeTest(profile: DifficultyProfile.easy, seed: 42);
     final first = session.snapshot.lastChallenge!;
     final scoreBefore = first.state.score;
     final blockedBefore = first.state.blocked.length;
 
-    session.runGeneratorSmokeTest(
-      profile: DifficultyProfile.medium,
-      seed: 1,
-    );
+    session.runGeneratorSmokeTest(profile: DifficultyProfile.medium, seed: 1);
 
     expect(first.state.score, scoreBefore);
     expect(first.state.blocked.length, blockedBefore);
@@ -32,10 +26,7 @@ void main() {
 
   test('typed failures surface on the session snapshot', () {
     final session = ChallengeSession();
-    session.runGeneratorSmokeTest(
-      profile: DifficultyProfile.easy,
-      seed: -1,
-    );
+    session.runGeneratorSmokeTest(profile: DifficultyProfile.easy, seed: -1);
     expect(session.snapshot.hasFailure, isTrue);
     expect(
       session.snapshot.lastFailure,

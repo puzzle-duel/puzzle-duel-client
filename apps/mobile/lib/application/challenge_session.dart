@@ -39,7 +39,9 @@ final class ChallengeSessionSnapshot {
       ready: ready ?? this.ready,
       lastProfile: lastProfile ?? this.lastProfile,
       lastSeed: lastSeed ?? this.lastSeed,
-      lastChallenge: clearChallenge ? null : (lastChallenge ?? this.lastChallenge),
+      lastChallenge: clearChallenge
+          ? null
+          : (lastChallenge ?? this.lastChallenge),
       lastFailure: clearFailure ? null : (lastFailure ?? this.lastFailure),
       lastErrorMessage: clearFailure
           ? null

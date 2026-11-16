@@ -29,10 +29,7 @@ void main() {
   });
 
   test('generated result carries correct generator and rules versions', () {
-    final result = factory.generate(
-      profile: DifficultyProfile.medium,
-      seed: 1,
-    );
+    final result = factory.generate(profile: DifficultyProfile.medium, seed: 1);
     final challenge = result as GeneratedChallenge;
     expect(challenge.generatorVersion, GeneratorVersion.gen001V1);
     expect(challenge.rulesVersion, RulesVersion.core001V2);
@@ -41,10 +38,7 @@ void main() {
   });
 
   test('typed generation failures propagate for invalid seed', () {
-    final result = factory.generate(
-      profile: DifficultyProfile.easy,
-      seed: -1,
-    );
+    final result = factory.generate(profile: DifficultyProfile.easy, seed: -1);
     expect(result, isA<ChallengeGenerationFailure>());
     final failure = result as ChallengeGenerationFailure;
     expect(failure.code, ChallengeGenerationError.invalidConfig);

@@ -10,7 +10,9 @@ void main() {
   final repoRoot = _findRepoRoot();
 
   test('puzzle_duel_rules must not import Flutter, Flame, or dart:ui', () {
-    final rulesLib = Directory('${repoRoot.path}/packages/puzzle_duel_rules/lib');
+    final rulesLib = Directory(
+      '${repoRoot.path}/packages/puzzle_duel_rules/lib',
+    );
     expect(rulesLib.existsSync(), isTrue);
 
     final forbidden = <String>[
@@ -41,7 +43,8 @@ void main() {
     expect(
       violations,
       isEmpty,
-      reason: 'Forbidden imports in puzzle_duel_rules:\n${violations.join('\n')}',
+      reason:
+          'Forbidden imports in puzzle_duel_rules:\n${violations.join('\n')}',
     );
   });
 
@@ -73,12 +76,15 @@ void main() {
     expect(
       violations,
       isEmpty,
-      reason: 'Deprecated design imports in app-owned code:\n${violations.join('\n')}',
+      reason:
+          'Deprecated design imports in app-owned code:\n${violations.join('\n')}',
     );
   });
 
   test('rules package pubspec has no Flutter or Flame dependency', () {
-    final pubspec = File('${repoRoot.path}/packages/puzzle_duel_rules/pubspec.yaml');
+    final pubspec = File(
+      '${repoRoot.path}/packages/puzzle_duel_rules/pubspec.yaml',
+    );
     final text = pubspec.readAsStringSync();
     expect(text.contains('flutter:'), isFalse);
     expect(text.contains('flame:'), isFalse);

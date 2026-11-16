@@ -12,9 +12,6 @@ final class ChallengeFactory {
     required DifficultyProfile profile,
     required int seed,
   }) {
-    return generateChallenge(
-      ChallengeGenerationConfig.profile(profile),
-      seed,
-    );
+    return generateChallenge(ChallengeGenerationConfig.profile(profile), seed);
   }
 }
