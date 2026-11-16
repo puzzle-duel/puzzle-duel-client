@@ -1,0 +1,25 @@
+name: puzzle_duel_mobile
+description: "Puzzle Duel iOS/Android client bootstrap (PZD-22)"
+publish_to: "none"
+version: 0.1.0+1
+
+# Pinned to Accepted ADR-001: Flutter 3.50.0 / Dart 3.14.0.
+environment:
+  sdk: ^3.14.0
+  flutter: ">=3.50.0 <3.51.0"
+
+dependencies:
+  flame: 1.38.2
+  flutter:
+    sdk: flutter
+  material_ui: ^1.11.0
+  puzzle_duel_rules:
+    path: ../../packages/puzzle_duel_rules
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

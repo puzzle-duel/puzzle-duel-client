@@ -1,0 +1,9 @@
+=== flutter pub deps (flame/material_ui) ===
+5:├── flame 1.38.2
+11:├── flutter 0.0.0
+75:└── material_ui 1.11.0
+=== pubspec.lock flame ===
+68:  flame:
+71:      name: flame
+163:  material_ui:
+166:      name: material_ui

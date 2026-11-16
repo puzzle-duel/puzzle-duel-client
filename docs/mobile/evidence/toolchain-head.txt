@@ -1,0 +1,74 @@
+=== flutter --version ===
+Flutter 3.50.0 • channel stable • https://github.com/flutter/flutter.git
+Framework • revision ab2912035e (7 days ago) • 2026-11-09 08:50:21 -0800
+Engine • hash bf601093ad255aaf5c6d0fc5c4f9acfa60943b2a (revision 371f77202a) (7 days ago) • 2026-11-09 15:57:36.000Z
+Tools • Dart 3.14.0 • DevTools 2.61.0
+=== dart --version ===
+Dart SDK version: 3.14.0 (stable) (Wed Nov 4 16:28:39 2026 -0800) on "macos_arm64"
+=== flutter doctor -v ===
+[✓] Flutter (Channel stable, 3.50.0, on macOS 27.2 26B123 darwin-arm64, locale en-TR) [1,404ms]
+    • Flutter version 3.50.0 on channel stable at /private/tmp/pzd17-flutter/flutter
+    • Upstream repository https://github.com/flutter/flutter.git
+    • Framework revision ab2912035e (7 days ago), 2026-11-09 08:50:21 -0800
+    • Engine revision 371f77202a
+    • Dart version 3.14.0
+    • DevTools version 2.61.0
+    • Feature flags: enable-web, enable-linux-desktop, enable-macos-desktop, enable-windows-desktop, enable-android, enable-ios, cli-animations, enable-native-assets, enable-record-use, no-enable-swift-package-manager, omit-legacy-version-file, enable-lldb-debugging, enable-uiscene-migration
+
+[!] Android toolchain - develop for Android devices (Android SDK version 36.0.0) [1,832ms]
+    • Android SDK at /Users/gokhanaydin/Library/Android/sdk
+    • Emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+    ✗ cmdline-tools component is missing.
+      Try installing or updating Android Studio.
+      Alternatively, download the tools from https://developer.android.com/studio#command-line-tools-only and make sure to set the ANDROID_HOME environment variable.
+      See https://developer.android.com/studio/command-line for more details.
+    ✗ Android license status unknown.
+      Run `flutter doctor --android-licenses` to accept the SDK licenses.
+      See https://flutter.dev/to/macos-android-setup for more details.
+
+[!] Xcode - develop for iOS and macOS (Xcode 27.0) [1,947ms]
+    • Xcode at /Applications/Xcode27.app/Contents/Developer
+    • Build 27A266a
+    ! iOS 27.0 Simulator not installed; this may be necessary for iOS and macOS development.
+      To download and install the platform, open Xcode, select Xcode > Settings > Components,
+      and click the GET button for the required platform.
+
+      For more information, please visit:
+        https://developer.apple.com/documentation/xcode/installing-additional-simulator-runtimes
+    ! CocoaPods 1.14.2 out of date (1.16.2 is recommended).
+        CocoaPods is a package manager for iOS or macOS platform code.
+        Without CocoaPods, plugins will not work on iOS or macOS.
+        For more info, see https://flutter.dev/to/platform-plugins
+      To update CocoaPods, see https://guides.cocoapods.org/using/getting-started.html#updating-cocoapods
+
+[✓] Chrome - develop for the web [7ms]
+    • Chrome at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+
+Unknown architecture arm64e.x1, defaulting to arm64
+[✓] Connected device (3 available) [8.6s]
+    • iPhone (wireless) (mobile) • 00008160-001C5C993E80000A • ios            • iOS 27.0.1 24A446
+    • macOS (desktop)            • macos                     • darwin-arm64   • macOS 27.2 26B123 darwin-arm64
+    • Chrome (web)               • chrome                    • web-javascript • Google Chrome 157.0.8103.52
+
+[✓] Network resources [356ms]
+    • All expected network resources are available.
+
+! Doctor found issues in 2 categories.
+=== xcodebuild -version ===
+Xcode 27.0
+Build version 27A266a
+=== flutter devices ===
+Unknown architecture arm64e.x1, defaulting to arm64
+Found 2 connected devices:
+  macOS (desktop) • macos  • darwin-arm64   • macOS 27.2 26B123 darwin-arm64
+  Chrome (web)    • chrome • web-javascript • Google Chrome 157.0.8103.52
+
+Checking for wireless devices...
+Unknown architecture arm64e.x1, defaulting to arm64
+
+Found 1 wirelessly connected device:
+  iPhone (wireless) (mobile) • 00008160-001C5C993E80000A • ios • iOS 27.0.1 24A446
+
+Run "flutter emulators" to list and start any available device emulators.
+
+If you expected another device to be detected, please run "flutter doctor" to diagnose potential issues. You may also try increasing the time to wait for connected devices with the "--device-timeout" flag. Visit https://flutter.dev/setup/ for troubleshooting tips.

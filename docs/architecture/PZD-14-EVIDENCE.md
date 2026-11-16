@@ -70,7 +70,11 @@ Scaffolding does not start until a disposable directory, outside both repositori
 | Analyze | `flutter analyze` exits 0 for a file that imports `package:flame/game.dart` and names `ColorEffect` and `GameWidget`. | An error is reported. A deprecation info is recorded and does not by itself fail the gate. |
 | Public types | First-party code can call the Flame APIs it needs without passing a `package:material_ui` value into a parameter whose type is declared by `package:flutter/material.dart` or `package:flutter/cupertino.dart`. | A required call crosses that type boundary. `MaterialUiCompatibilityBridge` does not count as a fix for this row. |
 
-Current result of this gate: **NOT_RUN**. The 3.47.8 resolve and the source scan are inputs, not a pass.
+Current result of this gate at PZD-14 review: **NOT_RUN**. The 3.47.8 resolve and the source scan are inputs, not a pass.
+
+### PZD-22 execution update (client)
+
+On 2026-11-16, PZD-22 ran the disposable Flutter **3.50.0** / Dart **3.14.0** + Flame **1.38.2** gate outside the repository (`/tmp/pzd22-compat-spike`) and recorded **PASS** for SDK, resolve, analyze (`GameWidget` + `ColorEffect` + `material_ui`), and required public API compatibility. Full command transcript and matrix: [PZD-22-BOOTSTRAP.md](../mobile/PZD-22-BOOTSTRAP.md). Backend twin of this evidence file should receive the same additive note for byte parity.
 
 ## NestJS 12 smoke test
 
@@ -87,10 +91,10 @@ Current result: **NOT_RUN**. Local Node v20.20.2 was not used for this test.
 
 ## NOT_RUN
 
-- The Flutter 3.50 Flame gate above. Flame's published floor is Flutter 3.41.0. That constraint is not an execution result on 3.50.0.
+- ~~The Flutter 3.50 Flame gate above.~~ **Cleared by PZD-22 PASS** (see execution update under the gate table). Flame's published floor remains Flutter 3.41.0; that constraint alone was never an execution result.
 - Frame time, memory, battery, cold start, and CI minute measurements. No numbers of that kind are claimed.
 - The NestJS 12 smoke test above. `nest new` was not run. No production scaffold was created.
-- iOS and Android device or simulator launches.
+- iOS and Android device or simulator launches were **NOT_RUN** at PZD-14 time; PZD-22 later recorded simulator/emulator launches in [PZD-22-BOOTSTRAP.md](../mobile/PZD-22-BOOTSTRAP.md).
 - Database creation, migrations, host inventory, and deployment.
 
 ## Decision summary

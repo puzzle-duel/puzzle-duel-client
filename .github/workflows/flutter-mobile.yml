@@ -1,0 +1,36 @@
+name: Flutter mobile
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/mobile/**"
+      - "packages/puzzle_duel_rules/**"
+      - ".github/workflows/flutter-mobile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  flutter-test:
+    name: flutter-analyze-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Flutter version
+        run: |
+          flutter --version
+          dart --version
+      - name: Pub get, analyze, and test
+        working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
