@@ -203,34 +203,36 @@ final class PiecePainter extends CustomPainter {
       Direction.left => const Offset(-1, 0),
     };
 
-    final maxReach = _rayDistanceToTriangleEdge(origin, unit, shapeCenter, radius);
-    // Prefer a compact chevron centered on the barycenter over reaching the tip.
-    final tipLen = (maxReach - edgeInset).clamp(radius * 0.2, radius * 0.36);
+    // One shared tip length (tightest cardinal) keeps all four marks balanced
+    // on the barycenter — avoids asymmetric per-wing inset on L/R.
+    final tightestReach = Direction.values
+        .map(
+          (d) => _rayDistanceToTriangleEdge(
+            origin,
+            switch (d) {
+              Direction.up => const Offset(0, -1),
+              Direction.right => const Offset(1, 0),
+              Direction.down => const Offset(0, 1),
+              Direction.left => const Offset(-1, 0),
+            },
+            shapeCenter,
+            radius,
+          ),
+        )
+        .reduce(math.min);
+    final tipLen = (tightestReach - edgeInset).clamp(
+      radius * 0.2,
+      radius * 0.34,
+    );
     final tip = origin + unit * tipLen;
 
-    // Wings sit behind the tip toward the centroid; keep them inside.
+    // Wings sit behind the tip toward the centroid; symmetric about [unit].
     final wingDepth = tipLen * 0.58;
     final wingSpread = tipLen * 0.34;
     final back = tip - unit * wingDepth;
     final perp = Offset(-unit.dy, unit.dx);
-    var left = back + perp * wingSpread;
-    var right = back - perp * wingSpread;
-
-    // Pull wings inward if stroke would breach the silhouette.
-    left = _insetToward(
-      left,
-      origin,
-      shapeCenter,
-      radius,
-      edgeInset,
-    );
-    right = _insetToward(
-      right,
-      origin,
-      shapeCenter,
-      radius,
-      edgeInset,
-    );
+    final left = back + perp * wingSpread;
+    final right = back - perp * wingSpread;
 
     final path = Path()
       ..moveTo(left.dx, left.dy)
