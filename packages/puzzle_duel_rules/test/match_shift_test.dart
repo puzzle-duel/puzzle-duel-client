@@ -215,6 +215,106 @@ void main() {
     expect(rejected.code, GameplayRejection.blockedTap);
     expect(identical(rejected.state, state), isTrue);
   });
+
+  test('shift rejects a piece on a blocked cell without mutating input', () {
+    final cells = _empty(5);
+    cells[2][3] = _piece(Shape.circle, Direction.right);
+    final blocked = [Coordinate(row: 2, column: 3)];
+    final before = jsonEncode([
+      for (final row in cells) [for (final cell in row) cell?.toJson()],
+    ]);
+    try {
+      applyShift(cells, blocked: blocked);
+      fail('expected ValidationFailure');
+    } on ValidationFailure catch (failure) {
+      expect(failure.wires, contains('blocked_cell_occupied'));
+    }
+    expect(
+      jsonEncode([
+        for (final row in cells) [for (final cell in row) cell?.toJson()],
+      ]),
+      before,
+    );
+  });
+
+  test('shift rejects duplicate, out-of-range, and unsorted blocked lists', () {
+    final cells = _empty(5);
+    expect(
+      () => applyShift(
+        cells,
+        blocked: [Coordinate(row: 1, column: 1), Coordinate(row: 1, column: 1)],
+      ),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.wires,
+          'wires',
+          contains('duplicate_blocked'),
+        ),
+      ),
+    );
+    expect(
+      () => applyShift(cells, blocked: [Coordinate(row: 9, column: 0)]),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.wires,
+          'wires',
+          contains('blocked_out_of_range'),
+        ),
+      ),
+    );
+    expect(
+      () => applyShift(
+        cells,
+        blocked: [Coordinate(row: 1, column: 2), Coordinate(row: 1, column: 0)],
+      ),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.wires,
+          'wires',
+          contains('blocked_not_row_major'),
+        ),
+      ),
+    );
+  });
+
+  test('match and clear reject empty or non-square boards', () {
+    expect(
+      () => findMatches(const <List<Piece?>>[]),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.wires,
+          'wires',
+          contains('malformed_board'),
+        ),
+      ),
+    );
+    expect(
+      () => clearMatches([
+        [null, null],
+        [null],
+      ]),
+      throwsA(
+        isA<ValidationFailure>().having(
+          (failure) => failure.wires,
+          'wires',
+          contains('malformed_board'),
+        ),
+      ),
+    );
+    final jagged = [
+      [null, null],
+      [null],
+    ];
+    final before = jagged.map((row) => List<Piece?>.from(row)).toList();
+    try {
+      clearMatches(jagged);
+      fail('expected ValidationFailure');
+    } on ValidationFailure catch (failure) {
+      expect(failure.wires, contains('malformed_board'));
+    }
+    expect(jagged[0].length, before[0].length);
+    expect(jagged[1].length, before[1].length);
+  });
 }
 
 Map<String, Object?> _fixture(String name) {

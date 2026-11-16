@@ -90,16 +90,76 @@ final class SingleWaveResult {
   final ShiftResult? shift;
 }
 
-/// Unique matching cells in ascending row-major order.
-///
-/// Shape identity only. Direction is ignored. Diagonals are not scanned.
-List<Coordinate> findMatches(List<List<Piece?>> cells) {
+void _requireSquareCells(List<List<Piece?>> cells, _Issues issues) {
+  if (cells.isEmpty) {
+    issues.add(ValidationCode.malformedBoard);
+    return;
+  }
   final size = cells.length;
   for (final row in cells) {
     if (row.length != size) {
-      throw StateError('match scan requires a square board');
+      issues.add(ValidationCode.malformedBoard);
+      return;
     }
   }
+}
+
+/// Validates [blocked] against a square [cells] matrix using PZD-17 codes.
+void _requireBlockedGeometry(
+  List<List<Piece?>> cells,
+  List<Coordinate> blocked,
+  _Issues issues,
+) {
+  if (cells.isEmpty || issues.codes.contains(ValidationCode.malformedBoard)) {
+    return;
+  }
+  final size = cells.length;
+  final seen = <String>{};
+  for (var index = 0; index < blocked.length; index++) {
+    final cell = blocked[index];
+    final key = '${cell.row},${cell.column}';
+    if (!seen.add(key)) issues.add(ValidationCode.duplicateBlocked);
+    if (cell.row < 0 ||
+        cell.column < 0 ||
+        cell.row >= size ||
+        cell.column >= size) {
+      issues.add(ValidationCode.blockedOutOfRange);
+      continue;
+    }
+    if (cells[cell.row][cell.column] != null) {
+      issues.add(ValidationCode.blockedCellOccupied);
+    }
+    if (index > 0) {
+      final previous = blocked[index - 1];
+      final ordered =
+          cell.row > previous.row ||
+          (cell.row == previous.row && cell.column > previous.column);
+      if (!ordered) issues.add(ValidationCode.blockedNotRowMajor);
+    }
+  }
+}
+
+void _requireMatchBoard(List<List<Piece?>> cells) {
+  final issues = _Issues();
+  _requireSquareCells(cells, issues);
+  issues.throwIfNeeded();
+}
+
+void _requireShiftBoard(List<List<Piece?>> cells, List<Coordinate> blocked) {
+  final issues = _Issues();
+  _requireSquareCells(cells, issues);
+  _requireBlockedGeometry(cells, blocked, issues);
+  issues.throwIfNeeded();
+}
+
+/// Unique matching cells in ascending row-major order.
+///
+/// Shape identity only. Direction is ignored. Diagonals are not scanned.
+/// Empty or non-square boards throw [ValidationFailure] with
+/// [ValidationCode.malformedBoard]. They do not invent matches.
+List<Coordinate> findMatches(List<List<Piece?>> cells) {
+  _requireMatchBoard(cells);
+  final size = cells.length;
   final found = <String>{};
   final ordered = <Coordinate>[];
 
@@ -164,7 +224,10 @@ List<Coordinate> findMatches(List<List<Piece?>> cells) {
 }
 
 /// Clears every unique match cell at once. Does not shift survivors.
+///
+/// Empty or non-square boards throw [ValidationFailure] before any clear.
 MatchClearResult clearMatches(List<List<Piece?>> cells) {
+  _requireMatchBoard(cells);
   final before = [
     for (final row in cells) [for (final cell in row) cell],
   ];
@@ -176,12 +239,6 @@ MatchClearResult clearMatches(List<List<Piece?>> cells) {
     for (final row in before) [for (final cell in row) cell],
   ];
   for (final cell in cleared) {
-    if (cell.row < 0 ||
-        cell.column < 0 ||
-        cell.row >= after.length ||
-        cell.column >= after[cell.row].length) {
-      throw StateError('match clear coordinate is outside the board');
-    }
     if (after[cell.row][cell.column] == null) {
       throw StateError('match clear tried to clear an empty cell twice');
     }
@@ -191,16 +248,17 @@ MatchClearResult clearMatches(List<List<Piece?>> cells) {
 }
 
 /// One simultaneous one-cell shift using a single pre-shift occupancy snapshot.
+///
+/// Validates square cells and blocked geometry with PZD-17 [ValidationCode]
+/// values before any proposal. A piece on a blocked cell fails closed with
+/// [ValidationCode.blockedCellOccupied]. Invalid input never yields a
+/// [ShiftResult] or movement records, and the caller matrix is not mutated.
 ShiftResult applyShift(
   List<List<Piece?>> cells, {
   required List<Coordinate> blocked,
 }) {
+  _requireShiftBoard(cells, blocked);
   final size = cells.length;
-  for (final row in cells) {
-    if (row.length != size) {
-      throw StateError('shift requires a square board');
-    }
-  }
   final before = [
     for (final row in cells) [for (final cell in row) cell],
   ];

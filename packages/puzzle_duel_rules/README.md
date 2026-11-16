@@ -23,7 +23,7 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](ht
 | `GameplayRejection` | `blocked_tap`, `occupied_tap`, `game_ended`. |
 | `OfferWillReplace` / `OfferReplacementDeferred` | Post-resolution offer handoff. Terminal null is not written here. |
 | `findMatches` / `clearMatches` | Match scan and simultaneous clear. No shift. |
-| `applyShift` / `MovedPiece` | Snapshot-based one-cell simultaneous shift. |
+| `applyShift` / `MovedPiece` | Snapshot-based one-cell simultaneous shift. Invalid board/blocked geometry throws `ValidationFailure` first. |
 | `resolveAfterPlacement` | Single wave: clear once after placement; shift once only if cleared. |
 
 Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md).
