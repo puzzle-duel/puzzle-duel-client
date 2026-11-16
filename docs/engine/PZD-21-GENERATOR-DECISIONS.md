@@ -112,24 +112,67 @@ Notes:
 
 #### `randBound(n)` — unbiased rejection sampling
 
+**P1 fix:** Do **not** store the acceptance bound as a `uint32`.  
+`floor(2^32 / n) * n` equals `2^32` whenever `n` divides `2^32` (for example `n = 1, 2, 4, 8, 16, 32, …`). Narrowing that product with `u32(...)` wraps it to `0`, so `u < threshold` never succeeds and the loop never terminates.
+
+Correct contract: keep `limit` as an integer in `1 … 2^32` inclusive (use `uint64` / `BigInt` in Dart and TypeScript). Compare the `uint32` draw `u` against that wide `limit`.
+
 ```text
+TWO32 = 4294967296                         # 2^32; not a uint32 value
+
 function randBound(rng, n):
     # Valid n: integer, 1 <= n <= 2^32
-    # n == 1 returns 0 with one or more nextU32 draws as below.
     # n < 1 or n > 2^32 is a contract violation (generator bug / invalid_config).
-    assert 1 <= n <= 4294967296
-    if n == 4294967296:
-        return nextU32(rng)                # full 32-bit range; one draw
-    threshold = u32( (floor(2^32 / n) * n) )   # largest multiple of n below 2^32
-    # Equivalently in uint32 arithmetic:
-    #   threshold = u32(0 - (u32(0 - n) % n))  # when n < 2^32
+    assert 1 <= n <= TWO32
+    if n == TWO32:
+        return nextU32(rng)                # one draw; full uint32 range
+
+    # Largest multiple of n that is <= 2^32.
+    # When n divides 2^32, limit == 2^32 (NOT reduced with u32).
+    # When n does not divide 2^32, limit == floor(2^32 / n) * n < 2^32.
+    limit = floor(TWO32 / n) * n           # integer; may equal TWO32
+
+    # FORBIDDEN (infinite loop when n | 2^32):
+    #   threshold = u32(floor(TWO32 / n) * n)   # becomes 0 for n=4, etc.
+
     loop:
-        u = nextU32(rng)
-        if u < threshold:
+        u = nextU32(rng)                   # u in 0 .. 2^32-1
+        if u < limit:                      # wide compare; if limit==TWO32, always true
             return u % n
 ```
 
-For Proposed `gen-001.v1` board generation, all `randBound` calls use `n` in `2 … boardSize^2` or catalogue sizes `3` / `4`, so the `n == 2^32` branch is unused but defined for completeness.
+Language notes:
+
+| Language | `limit` storage | Compare |
+| --- | --- | --- |
+| Dart | `BigInt` (or checked `int` that can hold `4294967296`) | `(BigInt.from(u) < limit)` then `(u % n)` |
+| TypeScript | `bigint` | `(BigInt(u) < limit)` then `(u % n)` |
+
+For Proposed `gen-001.v1`, production `randBound` calls use catalogue sizes `3`/`4` and cell-pool sizes up to `boardSize^2` (≤ 49 for Hard). The `n == 2^32` branch is unused there but remains defined.
+
+#### Proposed `randBound` self-check vectors (seed = 0)
+
+After `seed32(rng, 0)`, the first raw `nextU32` is `903765998`. Each row below starts from a **fresh** `seed32(rng, 0)` and performs a single `randBound(n)`.
+
+| n | `limit` | first `u` | accepted immediately? | `randBound` result | `nextU32` draws consumed |
+| ---: | ---: | ---: | --- | ---: | ---: |
+| 1 | 4294967296 | 903765998 | yes | 0 | 1 |
+| 2 | 4294967296 | 903765998 | yes | 0 | 1 |
+| 3 | 4294967295 | 903765998 | yes | 2 | 1 |
+| **4** | **4294967296** | **903765998** | **yes** | **2** | **1** |
+| 5 | 4294967295 | 903765998 | yes | 3 | 1 |
+| 24 | 4294967280 | 903765998 | yes | 14 | 1 |
+| 25 | 4294967275 | 903765998 | yes | 23 | 1 |
+| 32 | 4294967296 | 903765998 | yes | 14 | 1 |
+| 4294967296 | (full-range branch) | 903765998 | yes | 903765998 | 1 |
+
+**`n = 4` specifically:** because `4` divides `2^32`, `limit = 4294967296`. Every `uint32` satisfies `u < limit`, so the first draw is always accepted. Under seed `0`, that draw is `903765998` and `903765998 % 4 = 2`. The broken `u32(...)` threshold would have been `0` and would never accept.
+
+Successive `randBound(4)` on one seed-`0` stream (each call one draw): `2, 2, 3, 2, 1`.
+
+Rejection note: for `n = 3`, `limit = 4294967295`, so only `u = 4294967295` is rejected and forces a second `nextU32`. The seed-`0` first draw is not that value, so the table row still shows one draw.
+
+Verified with the same Python/Node BigInt PCG32 references used for the raw seed vectors below.
 
 #### Proposed PRNG self-check vectors (not generator fixtures)
 
@@ -184,7 +227,7 @@ After `seed32(rng, seed)`, the first 10 `nextU32` values:
 
 Future Dart/TypeScript PRNG units must match these tables exactly before any challenge fixture is trusted.
 
-**Owner must approve:** algorithm choice, constants, seed range/serialization, init protocol, `randBound`, and these self-check vectors.
+**Owner must approve:** algorithm choice, constants, seed range/serialization, init protocol, wide-`limit` `randBound` (not `u32`-narrowed), and these self-check vectors.
 
 ---
 
