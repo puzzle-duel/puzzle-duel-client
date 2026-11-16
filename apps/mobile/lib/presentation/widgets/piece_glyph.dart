@@ -126,53 +126,44 @@ final class PiecePainter extends CustomPainter {
             : math.max(1.8, size.shortestSide * 0.045),
     );
 
-    switch (piece.shape) {
-      case Shape.triangle:
-        // Larger readable mark: filled arrowhead + stroke, still contained.
-        final arrowStroke = triangleArrowStroke(size.shortestSide);
-        final glyph = triangleArrowGlyph(
-          shapeCenter: center,
-          radius: radius,
-          direction: piece.direction,
-          strokeWidth: arrowStroke,
-        );
-        canvas.drawPath(
-          glyph.filled,
-          Paint()
-            ..color = stroke
-            ..style = PaintingStyle.fill,
-        );
-        canvas.drawPath(
-          glyph.path,
-          Paint()
-            ..color = stroke
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = arrowStroke
-            ..strokeCap = StrokeCap.round
-            ..strokeJoin = StrokeJoin.round,
-        );
-      case Shape.circle:
-      case Shape.diamond:
-        final arrowStroke = math.max(2.4, size.shortestSide * 0.09);
-        final arrowPaint = Paint()
-          ..color = stroke
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = arrowStroke
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round;
-        final len = radius * 0.58;
-        canvas.drawPath(arrowPath(center, len, piece.direction), arrowPaint);
-        canvas.drawCircle(
-          tipOf(center, len, piece.direction),
-          1.6,
-          Paint()..color = stroke,
-        );
-    }
+    // Unified direction language across circle / diamond / triangle.
+    final arrowStroke = directionArrowStroke(size.shortestSide);
+    final glyph = directionGlyph(
+      shape: piece.shape,
+      shapeCenter: center,
+      radius: radius,
+      direction: piece.direction,
+      strokeWidth: arrowStroke,
+    );
+    canvas.drawPath(
+      glyph.filled,
+      Paint()
+        ..color = stroke
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      glyph.path,
+      Paint()
+        ..color = stroke
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = arrowStroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
   }
 
-  /// Triangle-only stroke: heavy enough at Hard 7×7, still leaves tip room.
-  static double triangleArrowStroke(double side) =>
+  /// Shared stroke scale for the direction family (Hard 7×7 readable).
+  static double directionArrowStroke(double side) =>
       math.max(2.4, side * 0.082);
+
+  /// Backward-compatible alias used by triangle-focused tests.
+  static double triangleArrowStroke(double side) => directionArrowStroke(side);
+
+  /// Visual balance point for the direction mark inside [shape].
+  static Offset glyphOrigin(Offset c, double r, Shape shape) => switch (shape) {
+    Shape.triangle => triangleCentroid(c, r),
+    Shape.circle || Shape.diamond => c,
+  };
 
   /// Equilateral-ish upright triangle matching [shapePath] for [Shape.triangle].
   static ({Offset apex, Offset bottomRight, Offset bottomLeft}) triangleVertices(
@@ -186,6 +177,18 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
+  static ({Offset north, Offset east, Offset south, Offset west}) diamondVertices(
+    Offset c,
+    double r,
+  ) {
+    return (
+      north: Offset(c.dx, c.dy - r),
+      east: Offset(c.dx + r, c.dy),
+      south: Offset(c.dx, c.dy + r),
+      west: Offset(c.dx - r, c.dy),
+    );
+  }
+
   /// Barycenter of the upright triangle (visual balance point for the arrow).
   static Offset triangleCentroid(Offset c, double r) {
     final v = triangleVertices(c, r);
@@ -195,16 +198,28 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
+  static bool pointInShape(Offset p, Offset c, double r, Shape shape) {
+    switch (shape) {
+      case Shape.circle:
+        final dx = p.dx - c.dx;
+        final dy = p.dy - c.dy;
+        return dx * dx + dy * dy <= r * r + 1e-6;
+      case Shape.diamond:
+        final dx = (p.dx - c.dx).abs() / r;
+        final dy = (p.dy - c.dy).abs() / r;
+        return dx + dy <= 1 + 1e-6;
+      case Shape.triangle:
+        return pointInTriangle(p, c, r);
+    }
+  }
+
   /// True when [p] lies inside or on the triangle defined by [shapePath].
   static bool pointInTriangle(Offset p, Offset c, double r) {
     final v = triangleVertices(c, r);
     return _barycentricInside(p, v.apex, v.bottomRight, v.bottomLeft);
   }
 
-  /// Chevron path + tip for triangle pieces, inset so stroke stays inside.
-  ///
-  /// Maximizes tip length / wing spread under [triangleArrowStrokeContained]
-  /// so marks stay large at Hard 7×7 while remaining balanced on the barycenter.
+  /// Unified filled-chevron direction mark for all piece shapes.
   static ({
     Path path,
     Path filled,
@@ -213,14 +228,14 @@ final class PiecePainter extends CustomPainter {
     Offset right,
     Offset origin,
   })
-  triangleArrowGlyph({
+  directionGlyph({
+    required Shape shape,
     required Offset shapeCenter,
     required double radius,
     required Direction direction,
     required double strokeWidth,
   }) {
-    final origin = triangleCentroid(shapeCenter, radius);
-    // Half-stroke + light pad — prefer size over excess margin.
+    final origin = glyphOrigin(shapeCenter, radius, shape);
     final edgeInset = strokeWidth * 0.5 + math.max(1.2, radius * 0.045);
 
     Offset unitFor(Direction d) => switch (d) {
@@ -231,19 +246,18 @@ final class PiecePainter extends CustomPainter {
     };
     final unit = unitFor(direction);
 
-    // Shared tip length from the tightest cardinal (balanced L/R/U/D).
     final tightestReach = Direction.values
         .map(
-          (d) => _rayDistanceToTriangleEdge(
+          (d) => _rayDistanceToShapeEdge(
             origin,
             unitFor(d),
             shapeCenter,
             radius,
+            shape,
           ),
         )
         .reduce(math.min);
 
-    // Maximize tip first, then keep a deep/wide filled wedge for glanceability.
     var tipLen = (tightestReach - edgeInset) * 0.98;
     tipLen = tipLen.clamp(radius * 0.3, radius * 0.52);
     var wingDepthFactor = 0.82;
@@ -262,6 +276,7 @@ final class PiecePainter extends CustomPainter {
       right = back - perp * wingSpread;
 
       if (_arrowPointsContained(
+        shape: shape,
         shapeCenter: shapeCenter,
         radius: radius,
         strokeWidth: strokeWidth,
@@ -272,7 +287,6 @@ final class PiecePainter extends CustomPainter {
       )) {
         break;
       }
-      // Prefer shrinking wings before surrendering tip length.
       if (wingSpreadFactor > 0.4) {
         wingSpreadFactor *= 0.94;
       } else if (wingDepthFactor > 0.65) {
@@ -302,21 +316,46 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
-  /// Samples the chevron polyline expanded by half [strokeWidth].
-  /// Every sample must remain inside the triangle (geometric safety).
-  static bool triangleArrowStrokeContained({
+  /// Triangle wrapper kept for existing geometry tests.
+  static ({
+    Path path,
+    Path filled,
+    Offset tip,
+    Offset left,
+    Offset right,
+    Offset origin,
+  })
+  triangleArrowGlyph({
     required Offset shapeCenter,
     required double radius,
     required Direction direction,
     required double strokeWidth,
   }) {
-    final glyph = triangleArrowGlyph(
+    return directionGlyph(
+      shape: Shape.triangle,
+      shapeCenter: shapeCenter,
+      radius: radius,
+      direction: direction,
+      strokeWidth: strokeWidth,
+    );
+  }
+
+  static bool directionArrowStrokeContained({
+    required Shape shape,
+    required Offset shapeCenter,
+    required double radius,
+    required Direction direction,
+    required double strokeWidth,
+  }) {
+    final glyph = directionGlyph(
+      shape: shape,
       shapeCenter: shapeCenter,
       radius: radius,
       direction: direction,
       strokeWidth: strokeWidth,
     );
     return _arrowPointsContained(
+      shape: shape,
       shapeCenter: shapeCenter,
       radius: radius,
       strokeWidth: strokeWidth,
@@ -327,7 +366,23 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
+  static bool triangleArrowStrokeContained({
+    required Offset shapeCenter,
+    required double radius,
+    required Direction direction,
+    required double strokeWidth,
+  }) {
+    return directionArrowStrokeContained(
+      shape: Shape.triangle,
+      shapeCenter: shapeCenter,
+      radius: radius,
+      direction: direction,
+      strokeWidth: strokeWidth,
+    );
+  }
+
   static bool _arrowPointsContained({
+    required Shape shape,
     required Offset shapeCenter,
     required double radius,
     required double strokeWidth,
@@ -344,13 +399,12 @@ final class PiecePainter extends CustomPainter {
       origin,
       ..._sampleSegment(left, tip, 10),
       ..._sampleSegment(right, tip, 10),
-      // Filled arrowhead interior samples.
       Offset.lerp(left, right, 0.5)!,
       Offset.lerp(Offset.lerp(left, right, 0.5)!, tip, 0.5)!,
     ];
     for (final p in centerline) {
-      if (!pointInTriangle(p, shapeCenter, radius)) return false;
-      if (_minDistanceToEdges(p, shapeCenter, radius) < half - 0.05) {
+      if (!pointInShape(p, shapeCenter, radius, shape)) return false;
+      if (_minDistanceToShapeEdges(p, shapeCenter, radius, shape) < half - 0.05) {
         return false;
       }
     }
@@ -359,7 +413,7 @@ final class PiecePainter extends CustomPainter {
       ..._sampleDisc(left, half, 12),
       ..._sampleDisc(right, half, 12),
     ]) {
-      if (!pointInTriangle(p, shapeCenter, radius)) return false;
+      if (!pointInShape(p, shapeCenter, radius, shape)) return false;
     }
     return true;
   }
@@ -376,11 +430,12 @@ final class PiecePainter extends CustomPainter {
       case Shape.circle:
         return Path()..addOval(Rect.fromCircle(center: c, radius: r));
       case Shape.diamond:
+        final v = diamondVertices(c, r);
         return Path()
-          ..moveTo(c.dx, c.dy - r)
-          ..lineTo(c.dx + r, c.dy)
-          ..lineTo(c.dx, c.dy + r)
-          ..lineTo(c.dx - r, c.dy)
+          ..moveTo(v.north.dx, v.north.dy)
+          ..lineTo(v.east.dx, v.east.dy)
+          ..lineTo(v.south.dx, v.south.dy)
+          ..lineTo(v.west.dx, v.west.dy)
           ..close();
       case Shape.triangle:
         final v = triangleVertices(c, r);
@@ -390,27 +445,6 @@ final class PiecePainter extends CustomPainter {
           ..lineTo(v.bottomLeft.dx, v.bottomLeft.dy)
           ..close();
     }
-  }
-
-  static Path arrowPath(Offset c, double len, Direction direction) {
-    final tip = tipOf(c, len, direction);
-    final wing = len * 0.48;
-    final left = switch (direction) {
-      Direction.up => Offset(tip.dx - wing, tip.dy + wing),
-      Direction.right => Offset(tip.dx - wing, tip.dy - wing),
-      Direction.down => Offset(tip.dx + wing, tip.dy - wing),
-      Direction.left => Offset(tip.dx + wing, tip.dy + wing),
-    };
-    final right = switch (direction) {
-      Direction.up => Offset(tip.dx + wing, tip.dy + wing),
-      Direction.right => Offset(tip.dx - wing, tip.dy + wing),
-      Direction.down => Offset(tip.dx - wing, tip.dy - wing),
-      Direction.left => Offset(tip.dx + wing, tip.dy - wing),
-    };
-    return Path()
-      ..moveTo(left.dx, left.dy)
-      ..lineTo(tip.dx, tip.dy)
-      ..lineTo(right.dx, right.dy);
   }
 
   static bool _barycentricInside(Offset p, Offset a, Offset b, Offset c) {
@@ -432,24 +466,60 @@ final class PiecePainter extends CustomPainter {
     return u >= -1e-6 && v >= -1e-6 && (u + v) <= 1 + 1e-6;
   }
 
-  static double _rayDistanceToTriangleEdge(
+  static double _rayDistanceToShapeEdge(
     Offset origin,
     Offset unit,
     Offset shapeCenter,
     double radius,
+    Shape shape,
   ) {
-    final v = triangleVertices(shapeCenter, radius);
-    final edges = [
-      (v.apex, v.bottomRight),
-      (v.bottomRight, v.bottomLeft),
-      (v.bottomLeft, v.apex),
-    ];
+    switch (shape) {
+      case Shape.circle:
+        // |origin + t*unit - center|^2 = radius^2
+        final ox = origin.dx - shapeCenter.dx;
+        final oy = origin.dy - shapeCenter.dy;
+        final a = unit.dx * unit.dx + unit.dy * unit.dy;
+        final b = 2 * (ox * unit.dx + oy * unit.dy);
+        final c = ox * ox + oy * oy - radius * radius;
+        final disc = b * b - 4 * a * c;
+        if (disc < 0 || a.abs() < 1e-9) return radius * 0.4;
+        final sqrtDisc = math.sqrt(disc);
+        final t1 = (-b - sqrtDisc) / (2 * a);
+        final t2 = (-b + sqrtDisc) / (2 * a);
+        final candidates = [t1, t2].where((t) => t > 1e-6);
+        return candidates.isEmpty
+            ? radius * 0.4
+            : candidates.reduce(math.min);
+      case Shape.diamond:
+        final v = diamondVertices(shapeCenter, radius);
+        return _rayDistanceToEdges(origin, unit, [
+          (v.north, v.east),
+          (v.east, v.south),
+          (v.south, v.west),
+          (v.west, v.north),
+        ], fallback: radius * 0.4);
+      case Shape.triangle:
+        final v = triangleVertices(shapeCenter, radius);
+        return _rayDistanceToEdges(origin, unit, [
+          (v.apex, v.bottomRight),
+          (v.bottomRight, v.bottomLeft),
+          (v.bottomLeft, v.apex),
+        ], fallback: radius * 0.4);
+    }
+  }
+
+  static double _rayDistanceToEdges(
+    Offset origin,
+    Offset unit,
+    List<(Offset, Offset)> edges, {
+    required double fallback,
+  }) {
     var best = double.infinity;
     for (final (a, b) in edges) {
       final hit = _raySegmentIntersection(origin, unit, a, b);
       if (hit != null && hit > 1e-6 && hit < best) best = hit;
     }
-    return best.isFinite ? best : radius * 0.4;
+    return best.isFinite ? best : fallback;
   }
 
   /// Ray origin+t*unit vs segment a→b; returns t > 0 or null.
@@ -473,15 +543,33 @@ final class PiecePainter extends CustomPainter {
     return null;
   }
 
-  static double _minDistanceToEdges(Offset p, Offset c, double r) {
-    final v = triangleVertices(c, r);
-    return math.min(
-      _distancePointToSegment(p, v.apex, v.bottomRight),
-      math.min(
-        _distancePointToSegment(p, v.bottomRight, v.bottomLeft),
-        _distancePointToSegment(p, v.bottomLeft, v.apex),
-      ),
-    );
+  static double _minDistanceToShapeEdges(
+    Offset p,
+    Offset c,
+    double r,
+    Shape shape,
+  ) {
+    switch (shape) {
+      case Shape.circle:
+        final dx = p.dx - c.dx;
+        final dy = p.dy - c.dy;
+        return r - math.sqrt(dx * dx + dy * dy);
+      case Shape.diamond:
+        final v = diamondVertices(c, r);
+        return [
+          _distancePointToSegment(p, v.north, v.east),
+          _distancePointToSegment(p, v.east, v.south),
+          _distancePointToSegment(p, v.south, v.west),
+          _distancePointToSegment(p, v.west, v.north),
+        ].reduce(math.min);
+      case Shape.triangle:
+        final v = triangleVertices(c, r);
+        return [
+          _distancePointToSegment(p, v.apex, v.bottomRight),
+          _distancePointToSegment(p, v.bottomRight, v.bottomLeft),
+          _distancePointToSegment(p, v.bottomLeft, v.apex),
+        ].reduce(math.min);
+    }
   }
 
   static double _distancePointToSegment(Offset p, Offset a, Offset b) {
