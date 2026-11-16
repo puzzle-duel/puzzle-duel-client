@@ -1,6 +1,6 @@
 # ADR-E01 — CORE-001.v3 natural terminal and offer tray
 
-Status: **Proposed** (not Accepted) — P0/P1 remediation revision
+Status: **Accepted** — owner-approved D1–D10 architecture (design acceptance only; implementation unverified)
 Date: 2026-11-17
 Jira: [PZD-39](https://puzzle-duel-app.atlassian.net/browse/PZD-39)
 Companions:
@@ -8,12 +8,12 @@ Companions:
 - [canonical-v3-test-vectors.md](../contracts/gameplay/v3/canonical-v3-test-vectors.md)
 - [FIXTURE-SPEC.md](../contracts/gameplay/v3/FIXTURE-SPEC.md)
 
-Owner approval of D1–D10 required before Dart/TypeScript implementation.
+Owner approved D1–D10 as documented in this ADR and its companion architecture review on 2026-11-17. This acceptance binds the v3 design only; Dart/TypeScript runtime implementation, fixture freeze, parity, release and deployment remain separately gated.
 Must not modify: `core-001.v1` / `core-001.v2`, `gen-001.v1`, PZD-38 Phase A.
 
 ## 1. Context
 
-Tournament T-10A requires successful natural completion when no legal placement remains, preserving earned score. `core-001.v2` fails closed on early board-full with empty stream. This ADR proposes separately versioned `core-001.v3`.
+Tournament T-10A requires successful natural completion when no legal placement remains, preserving earned score. `core-001.v2` fails closed on early board-full with empty stream. This ADR defines separately versioned `core-001.v3`.
 
 ## 2. Historical compatibility
 
@@ -209,4 +209,8 @@ See FIXTURE-SPEC. Prose ≠ PASS.
 
 ## 13–16. Migration, security, acceptance, decisions
 
-Pin v3 only after owner Accept + dual PASS + v1/v2 regression. Security: replay authority. Acceptance: D1–D10 owner approval then implementation stages. Decisions table in architecture review.
+Pin v3 on ranked manifests only after dual-engine parity PASS, historical v1/v2 regression and independent release verification; design acceptance alone is insufficient. Security: replay authority. Acceptance: D1–D10 design approval recorded on 2026-11-17; separate implementation/testing and release gates remain. Decisions table in architecture review.
+
+## Owner decision record — 2026-11-17
+
+The product owner explicitly approved **D1–D10 in their entirety** as defined in the paired revised ADR-E01 and `CORE-001-V3-ARCHITECTURE-REVIEW.md` at backend PR #14 (`91838d9`) and client PR #17 (`1dc16a4`). This decision makes **ADR-E01 Accepted for technical design**. It does **not** authorize merging PRs, implementing or releasing code, marking PZD-39 Done, or declaring Dart/TypeScript parity PASS. Expected v3 golden outputs remain pending freeze. Historical v1/v2 and `gen-001.v1` remain immutable.
