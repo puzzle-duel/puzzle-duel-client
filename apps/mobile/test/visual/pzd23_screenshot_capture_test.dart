@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
@@ -5,7 +7,15 @@ import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
+/// Local / macOS UAT evidence capture.
+///
+/// Skipped on CI: Linux rasterization diverges from checked-in macOS PNGs.
+/// Regenerate: `flutter test test/visual/pzd23_screenshot_capture_test.dart --update-goldens`
 const _captureKey = ValueKey('pzd23-visual-capture');
+
+bool get _skipOnCi =>
+    Platform.environment['CI'] == 'true' ||
+    Platform.environment['GITHUB_ACTIONS'] == 'true';
 
 Future<void> _pumpPhone(WidgetTester tester, GameSession session) async {
   tester.view.physicalSize = const Size(780, 1688);
@@ -36,7 +46,7 @@ void main() {
   testWidgets('capture home menu', (tester) async {
     await _pumpPhone(tester, GameSession());
     await _golden(tester, '01-home-menu');
-  });
+  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
 
   testWidgets('capture easy medium hard boards', (tester) async {
     for (final entry in [
@@ -49,7 +59,7 @@ void main() {
       await _pumpPhone(tester, session);
       await _golden(tester, entry.$2);
     }
-  });
+  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
 
   testWidgets('capture selected offer', (tester) async {
     final session = GameSession()
@@ -58,7 +68,7 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp(r'Offer slot 1,')));
     await tester.pump(const Duration(milliseconds: 160));
     await _golden(tester, '05-selected-piece');
-  });
+  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
 
   testWidgets('capture resolving and end overlay', (tester) async {
     final session = GameSession();
@@ -141,5 +151,5 @@ void main() {
           ? '08-completed-round'
           : '08-completed-round-fallback',
     );
-  });
+  }, skip: _skipOnCi ? 'CI rasterization differs from macOS UAT goldens' : false);
 }
