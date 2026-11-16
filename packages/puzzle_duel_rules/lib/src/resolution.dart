@@ -13,7 +13,8 @@ enum MoveSafety {
   cascadeBoundExceeded('cascade_bound_exceeded'),
   invalidShiftGeometry('invalid_shift_geometry'),
   invalidFinalState('invalid_final_state'),
-  scoreOverflow('score_overflow');
+  scoreOverflow('score_overflow'),
+  integerOverflow('integer_overflow');
 
   const MoveSafety(this.wire);
 
@@ -183,6 +184,7 @@ MoveResult applyMove(GameState state, Move move) {
         reason: switch (reason) {
           PlacementSafety.tapOutOfBounds => MoveSafety.tapOutOfBounds,
           PlacementSafety.offerUnavailable => MoveSafety.offerUnavailable,
+          PlacementSafety.integerOverflow => MoveSafety.integerOverflow,
         },
         state: state,
       );
