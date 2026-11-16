@@ -4,7 +4,7 @@ Pure Dart rules package for Puzzle Duel.
 
 Location: `packages/puzzle_duel_rules`. Named by [ADR-001](../../docs/adr/ADR-001-client-stack.md). It does not import Flutter, Flame, or `dart:ui`.
 
-Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18), [PZD-19](https://puzzle-duel-app.atlassian.net/browse/PZD-19), [PZD-20](https://puzzle-duel-app.atlassian.net/browse/PZD-20).
+Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](https://puzzle-duel-app.atlassian.net/browse/PZD-18), [PZD-19](https://puzzle-duel-app.atlassian.net/browse/PZD-19), [PZD-20](https://puzzle-duel-app.atlassian.net/browse/PZD-20), [PZD-21](https://puzzle-duel-app.atlassian.net/browse/PZD-21).
 
 ## Public API
 
@@ -28,8 +28,10 @@ Jira: [PZD-17](https://puzzle-duel-app.atlassian.net/browse/PZD-17), [PZD-18](ht
 | `applyMove` | Full CORE-001 resolution: placement, cascades, integer scoring, offer commit, termination. |
 | `MoveApplied` / `WaveResult` | Legal full-move outcome and per-wave clear/score/moved records. |
 | `MoveRejected` / `MoveUnsafe` | Gameplay rejection or internal fail-closed stop; input state unchanged. Includes `unresolved_pre_move_match` when a resume board already has a run. |
+| `generateChallenge` | Accepted `gen-001.v1` deterministic challenge builder (`core-001.v2` ranked output). |
+| `Pcg32` / `GeneratedChallenge` | Portable PRNG and outer challenge metadata + immutable `GameState`. |
 
-Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md), [`docs/engine/PZD-20-RESOLUTION.md`](../../docs/engine/PZD-20-RESOLUTION.md).
+Details: [`docs/engine/PZD-18-PLACEMENT.md`](../../docs/engine/PZD-18-PLACEMENT.md), [`docs/engine/PZD-19-MATCH-SHIFT.md`](../../docs/engine/PZD-19-MATCH-SHIFT.md), [`docs/engine/PZD-20-RESOLUTION.md`](../../docs/engine/PZD-20-RESOLUTION.md), [`docs/engine/PZD-21-GENERATOR.md`](../../docs/engine/PZD-21-GENERATOR.md).
 
 `core-001.v1` and `core-001.v2` are the only rulesets. Lists returned by a state are unmodifiable copies.
 

@@ -1,0 +1,41 @@
+[
+  {
+    "id": "seed-negative",
+    "expectCode": "invalid_config",
+    "seed": -1,
+    "profile": "easy"
+  },
+  {
+    "id": "seed-overflow",
+    "expectCode": "invalid_config",
+    "seed": 4294967296,
+    "profile": "easy"
+  },
+  {
+    "id": "unsupported-generator",
+    "expectCode": "invalid_config",
+    "seed": 0,
+    "profile": "easy",
+    "generatorVersion": "gen-999.v1"
+  },
+  {
+    "id": "unsupported-rules",
+    "expectCode": "invalid_config",
+    "seed": 0,
+    "profile": "easy",
+    "rulesVersion": "core-001.v1"
+  },
+  {
+    "id": "monster-profile",
+    "expectCode": "invalid_config",
+    "seed": 0,
+    "profile": "monster"
+  },
+  {
+    "id": "bad-obstacle-count",
+    "expectCode": "invalid_config",
+    "seed": 0,
+    "profile": "easy",
+    "obstacleCount": 99
+  }
+]

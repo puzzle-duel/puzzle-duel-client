@@ -1,0 +1,148 @@
+{
+  "generatorVersion": "gen-001.v1",
+  "rulesVersion": "core-001.v2",
+  "seed": 0,
+  "profile": "easy",
+  "config": {
+    "boardSize": 5,
+    "moveLimit": 15,
+    "obstacleCount": 1,
+    "occupiedCount": 6
+  },
+  "blocked": [
+    [
+      4,
+      3
+    ]
+  ],
+  "cells": [
+    [
+      {
+        "shape": "diamond",
+        "direction": "left"
+      },
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      {
+        "shape": "triangle",
+        "direction": "right"
+      },
+      {
+        "shape": "diamond",
+        "direction": "left"
+      },
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      null,
+      {
+        "shape": "circle",
+        "direction": "up"
+      },
+      null
+    ],
+    [
+      null,
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      null,
+      null,
+      null
+    ]
+  ],
+  "offers": [
+    {
+      "shape": "triangle",
+      "direction": "left"
+    },
+    {
+      "shape": "diamond",
+      "direction": "left"
+    },
+    {
+      "shape": "diamond",
+      "direction": "left"
+    }
+  ],
+  "futurePieces": [
+    {
+      "shape": "triangle",
+      "direction": "down"
+    },
+    {
+      "shape": "circle",
+      "direction": "right"
+    },
+    {
+      "shape": "diamond",
+      "direction": "right"
+    },
+    {
+      "shape": "diamond",
+      "direction": "left"
+    },
+    {
+      "shape": "diamond",
+      "direction": "up"
+    },
+    {
+      "shape": "diamond",
+      "direction": "right"
+    },
+    {
+      "shape": "diamond",
+      "direction": "right"
+    },
+    {
+      "shape": "diamond",
+      "direction": "up"
+    },
+    {
+      "shape": "triangle",
+      "direction": "left"
+    },
+    {
+      "shape": "triangle",
+      "direction": "down"
+    },
+    {
+      "shape": "triangle",
+      "direction": "right"
+    },
+    {
+      "shape": "diamond",
+      "direction": "down"
+    },
+    {
+      "shape": "circle",
+      "direction": "left"
+    },
+    {
+      "shape": "diamond",
+      "direction": "down"
+    }
+  ],
+  "turnsUsed": 0,
+  "score": 0,
+  "status": "in_progress"
+}

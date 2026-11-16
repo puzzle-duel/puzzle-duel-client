@@ -1,0 +1,198 @@
+{
+  "generatorVersion": "gen-001.v1",
+  "rulesVersion": "core-001.v2",
+  "seed": 0,
+  "profile": "hard",
+  "config": {
+    "boardSize": 7,
+    "moveLimit": 10,
+    "obstacleCount": 4,
+    "occupiedCount": 16
+  },
+  "blocked": [
+    [
+      0,
+      2
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      5,
+      0
+    ]
+  ],
+  "cells": [
+    [
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    [
+      null,
+      null,
+      {
+        "shape": "circle",
+        "direction": "down"
+      },
+      null,
+      null,
+      {
+        "shape": "triangle",
+        "direction": "left"
+      },
+      null
+    ],
+    [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      {
+        "shape": "diamond",
+        "direction": "left"
+      }
+    ],
+    [
+      null,
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "shape": "triangle",
+        "direction": "up"
+      },
+      null,
+      {
+        "shape": "triangle",
+        "direction": "left"
+      },
+      null,
+      null
+    ],
+    [
+      {
+        "shape": "circle",
+        "direction": "down"
+      },
+      null,
+      {
+        "shape": "triangle",
+        "direction": "down"
+      },
+      null,
+      null,
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "shape": "circle",
+        "direction": "down"
+      }
+    ],
+    [
+      null,
+      null,
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      null,
+      null,
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "shape": "diamond",
+        "direction": "left"
+      }
+    ],
+    [
+      null,
+      null,
+      null,
+      null,
+      null,
+      {
+        "shape": "triangle",
+        "direction": "up"
+      },
+      {
+        "shape": "triangle",
+        "direction": "right"
+      }
+    ]
+  ],
+  "offers": [
+    {
+      "shape": "diamond",
+      "direction": "left"
+    },
+    {
+      "shape": "triangle",
+      "direction": "down"
+    },
+    {
+      "shape": "diamond",
+      "direction": "up"
+    }
+  ],
+  "futurePieces": [
+    {
+      "shape": "triangle",
+      "direction": "up"
+    },
+    {
+      "shape": "circle",
+      "direction": "down"
+    },
+    {
+      "shape": "triangle",
+      "direction": "left"
+    },
+    {
+      "shape": "triangle",
+      "direction": "up"
+    },
+    {
+      "shape": "circle",
+      "direction": "right"
+    },
+    {
+      "shape": "circle",
+      "direction": "up"
+    },
+    {
+      "shape": "triangle",
+      "direction": "left"
+    },
+    {
+      "shape": "circle",
+      "direction": "up"
+    },
+    {
+      "shape": "circle",
+      "direction": "left"
+    }
+  ],
+  "turnsUsed": 0,
+  "score": 0,
+  "status": "in_progress"
+}
