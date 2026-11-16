@@ -9,6 +9,7 @@ environment:
   flutter: ">=3.50.0 <3.51.0"
 
 dependencies:
+  audioplayers: 6.5.1
   flame: 1.38.2
   flutter:
     sdk: flutter
@@ -23,3 +24,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/sfx/place.wav
+    - assets/sfx/reject.wav
+    - assets/sfx/clear.wav
+    - assets/sfx/cascade.wav
+    - assets/sfx/chain_complete.wav
+    - assets/sfx/round_end.wav
+

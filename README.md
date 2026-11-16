@@ -31,6 +31,9 @@ flutter run
 
 Startup is guest-first and offline-capable. Local generator output is **not** a ranked score.
 
+Playable board (PZD-23): choose Easy/Medium/Hard, select an offer, tap an empty cell. Animations present canonical `applyMove` results only.
+
 Documentation and architecture decisions land through pull requests. Do not deploy or merge without review.
 
-Bootstrap report: [docs/mobile/PZD-22-BOOTSTRAP.md](docs/mobile/PZD-22-BOOTSTRAP.md).
+- Bootstrap: [docs/mobile/PZD-22-BOOTSTRAP.md](docs/mobile/PZD-22-BOOTSTRAP.md)
+- Playable game: [docs/mobile/PZD-23-PLAYABLE-GAME.md](docs/mobile/PZD-23-PLAYABLE-GAME.md)

@@ -1,15 +1,15 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:puzzle_duel_mobile/application/challenge_session.dart';
-import 'package:puzzle_duel_mobile/presentation/widgets/flame_smoke_host.dart';
+import 'package:puzzle_duel_mobile/application/game_constants.dart';
+import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
+import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-/// Guest-first startup screen. No sign-in, network, or backend URL.
+/// Guest-first difficulty selection — premium arcade menu.
 final class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.session});
 
-  final ChallengeSession session;
-
-  static const _devSeed = 42;
+  final GameSession session;
 
   @override
   Widget build(BuildContext context) {
@@ -17,190 +17,173 @@ final class HomeScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: session,
       builder: (context, _) {
-        final snap = session.snapshot;
+        final view = session.view;
         return Scaffold(
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: constraints.maxHeight - 40,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Puzzle Duel',
-                          style: textTheme.headlineMedium,
-                          semanticsLabel: 'Puzzle Duel',
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          snap.ready
-                              ? 'Ready for local play. No network or sign-in required.'
-                              : 'Starting…',
-                          style: textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                          'Difficulty profiles',
-                          style: textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final profile in session.supportedProfiles)
-                              Semantics(
-                                button: true,
-                                label:
-                                    'Generate ${profile.wire} challenge with seed $_devSeed',
-                                child: FilledButton.tonal(
-                                  onPressed: () {
-                                    session.runGeneratorSmokeTest(
-                                      profile: profile,
-                                      seed: _devSeed,
-                                    );
-                                  },
-                                  child: Text(_profileLabel(profile)),
-                                ),
-                              ),
+          body: ArcadeBackdrop(
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(22, 28, 22, 28),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight - 56,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'PUZZLE DUEL',
+                            textAlign: TextAlign.center,
+                            style: textTheme.headlineMedium?.copyWith(
+                              letterSpacing: 2.2,
+                              fontWeight: FontWeight.w800,
+                              color: GameTokens.textPrimary,
+                            ),
+                            semanticsLabel: 'Puzzle Duel',
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Match shapes. Ride the cascade.',
+                            textAlign: TextAlign.center,
+                            style: textTheme.titleMedium?.copyWith(
+                              color: GameTokens.accent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Offline practice — no account required.',
+                            textAlign: TextAlign.center,
+                            style: textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 28),
+                          for (final profile in view.supportedProfiles) ...[
+                            _DifficultyCard(
+                              profile: profile,
+                              onPlay: () {
+                                session.startRound(
+                                  profile: profile,
+                                  seed: kUatChallengeSeed,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 14),
                           ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Development generator smoke test (seed $_devSeed). '
-                          'This is not a playable board.',
-                          style: textTheme.bodySmall,
-                        ),
-                        const SizedBox(height: 16),
-                        _ResultCard(snapshot: snap),
-                        const SizedBox(height: 24),
-                        Text(
-                          'Flame rendering probe',
-                          style: textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        const SizedBox(
-                          height: 96,
-                          child: FlameSmokeHost(),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Flame hosts a disposable smoke surface only. '
-                          'Canonical rules state stays in puzzle_duel_rules.',
-                          style: textTheme.bodySmall,
-                        ),
-                      ],
+                          if (view.generationFailure != null)
+                            Text(
+                              'Could not start: ${view.generationFailure!.wire}',
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: GameTokens.danger,
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Pick a piece from the tray, then tap an empty cell. '
+                            'Local score is practice only.',
+                            textAlign: TextAlign.center,
+                            style: textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         );
       },
     );
   }
+}
 
-  static String _profileLabel(DifficultyProfile profile) {
+final class _DifficultyCard extends StatelessWidget {
+  const _DifficultyCard({required this.profile, required this.onPlay});
+
+  final DifficultyProfile profile;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = GameTokens.difficultyAccent(profile);
+    final fill = GameTokens.difficultyCard(profile);
     final name = switch (profile) {
       DifficultyProfile.easy => 'Easy',
       DifficultyProfile.medium => 'Medium',
       DifficultyProfile.hard => 'Hard',
     };
-    return '$name ${profile.boardSize}×${profile.boardSize} '
-        '/ ${profile.moveLimit} moves';
-  }
-}
-
-final class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.snapshot});
-
-  final ChallengeSessionSnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (snapshot.hasFailure) {
-      return Semantics(
-        liveRegion: true,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.errorContainer,
-            borderRadius: BorderRadius.circular(12),
-          ),
+    return Semantics(
+      button: true,
+      label:
+          '$name, ${profile.boardSize} by ${profile.boardSize} board, '
+          '${profile.moveLimit} moves',
+      child: Material(
+        color: fill,
+        elevation: 2,
+        shadowColor: Colors.black54,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(GameTokens.radiusLg),
+          side: BorderSide(color: accent.withValues(alpha: 0.55), width: 1.4),
+        ),
+        child: InkWell(
+          onTap: onPlay,
+          borderRadius: BorderRadius.circular(GameTokens.radiusLg),
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Generator failure: ${snapshot.lastErrorMessage ?? 'unknown'}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onErrorContainer,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    final challenge = snapshot.lastChallenge;
-    if (challenge == null) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            'No challenge generated yet. Choose a profile above.',
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: DefaultTextStyle(
-          style: theme.textTheme.bodyMedium!.copyWith(
-            color: theme.colorScheme.onPrimaryContainer,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Generator OK',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.onPrimaryContainer,
+            padding: const EdgeInsets.fromLTRB(16, 16, 14, 16),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text('profile: ${challenge.profile.wire}'),
-              Text('seed: ${challenge.seed}'),
-              Text('generator: ${challenge.generatorVersion.id}'),
-              Text('rules: ${challenge.rulesVersion.id}'),
-              Text(
-                'board: ${challenge.state.boardSize}×${challenge.state.boardSize}',
-              ),
-              Text('moveLimit: ${challenge.state.moveLimit}'),
-              Text('blocked: ${challenge.state.blocked.length}'),
-              Text(
-                'score: ${challenge.state.score} '
-                '(local engine field; not a ranked result)',
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: GameTokens.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${profile.boardSize}×${profile.boardSize} board',
+                        style: const TextStyle(
+                          color: GameTokens.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        '${profile.moveLimit} moves',
+                        style: const TextStyle(color: GameTokens.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: GameTokens.bgDeep,
+                    minimumSize: const Size(72, 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onPlay,
+                  child: const Text('Play'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
