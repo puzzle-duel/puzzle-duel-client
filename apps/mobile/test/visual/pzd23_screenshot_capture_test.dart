@@ -79,17 +79,14 @@ void main() {
         ..startRound(profile: DifficultyProfile.easy, seed: seed);
       final state = probe.view.canonicalState!;
       for (var offer = 0; offer < 3 && !found; offer++) {
-        if (state.offers[offer] == null) continue;
+        if (!state.offers[offer].isSelectable) continue;
         for (var r = 0; r < state.boardSize && !found; r++) {
           for (var c = 0; c < state.boardSize && !found; c++) {
             final tap = Coordinate(row: r, column: c);
             if (state.blocked.contains(tap) || state.cells[r][c] != null) {
               continue;
             }
-            final result = applyMove(
-              state,
-              Move(offerIndex: offer, tap: tap),
-            );
+            final result = applyMove(state, Move(offerIndex: offer, tap: tap));
             if (result is MoveApplied && result.waves.isNotEmpty) {
               found = true;
               session.startRound(profile: DifficultyProfile.easy, seed: seed);
@@ -127,7 +124,7 @@ void main() {
       final state = session.view.canonicalState!;
       var moved = false;
       for (var offer = 0; offer < 3 && !moved; offer++) {
-        if (state.offers[offer] == null) continue;
+        if (!state.offers[offer].isSelectable) continue;
         session.selectOffer(offer);
         for (var r = 0; r < state.boardSize && !moved; r++) {
           for (var c = 0; c < state.boardSize && !moved; c++) {

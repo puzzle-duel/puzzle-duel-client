@@ -103,7 +103,7 @@ void main() {
     );
     await pumpGame(tester, session);
     for (var i = 1; i <= 3; i++) {
-      if (session.view.canonicalState!.offers[i - 1] == null) continue;
+      if (!session.view.canonicalState!.offers[i - 1].isSelectable) continue;
       final offer = find.bySemanticsLabel(RegExp('Offer slot $i,'));
       await tester.tap(offer);
       await tester.pump();
@@ -195,7 +195,7 @@ void main() {
       final state = session.view.canonicalState!;
       var moved = false;
       for (var offer = 0; offer < 3 && !moved; offer++) {
-        if (state.offers[offer] == null) continue;
+        if (!state.offers[offer].isSelectable) continue;
         session.selectOffer(offer);
         for (var r = 0; r < state.boardSize && !moved; r++) {
           for (var c = 0; c < state.boardSize && !moved; c++) {

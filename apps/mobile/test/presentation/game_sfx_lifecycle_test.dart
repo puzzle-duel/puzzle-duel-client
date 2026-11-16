@@ -8,15 +8,13 @@ import 'package:puzzle_duel_mobile/presentation/game/board/puzzle_board_game.dar
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 ({AnimationScript script, MoveApplied applied}) _scriptWithWaves() {
-  final generated =
-      generateChallenge(
-            ChallengeGenerationConfig.profile(DifficultyProfile.easy),
-            kUatChallengeSeed,
-          )
-          as GeneratedChallenge;
+  final generated = generateChallenge(
+    ChallengeGenerationConfig.profile(DifficultyProfile.easy),
+    kUatChallengeSeed,
+  ) as GeneratedChallenge;
 
   for (var offer = 0; offer < 3; offer++) {
-    if (generated.state.offers[offer] == null) continue;
+    if (!generated.state.offers[offer].isSelectable) continue;
     for (var r = 0; r < generated.state.boardSize; r++) {
       for (var c = 0; c < generated.state.boardSize; c++) {
         final tap = Coordinate(row: r, column: c);
@@ -33,7 +31,7 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
               resolutionId: 11,
               preState: generated.state,
               applied: result,
-              placedPiece: generated.state.offers[offer]!,
+              placedPiece: generated.state.offers[offer].pieceOrNull!,
             ),
             applied: result,
           );
@@ -45,7 +43,7 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
   // Fall back: synthesize a script from the first legal MoveApplied and inject
   // explicit wave numbers via sfxEventsForWaves unit coverage separately.
   for (var offer = 0; offer < 3; offer++) {
-    if (generated.state.offers[offer] == null) continue;
+    if (!generated.state.offers[offer].isSelectable) continue;
     for (var r = 0; r < generated.state.boardSize; r++) {
       for (var c = 0; c < generated.state.boardSize; c++) {
         final tap = Coordinate(row: r, column: c);
@@ -62,7 +60,7 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
               resolutionId: 11,
               preState: generated.state,
               applied: result,
-              placedPiece: generated.state.offers[offer]!,
+              placedPiece: generated.state.offers[offer].pieceOrNull!,
             ),
             applied: result,
           );
@@ -220,9 +218,7 @@ void main() {
       );
 
       final pair = _scriptWithWaves();
-      final expected = sfxEventsForWaves(
-        pair.applied.waves.map((w) => w.wave),
-      );
+      final expected = sfxEventsForWaves(pair.applied.waves.map((w) => w.wave));
 
       game.playScript(pair.script, reducedMotion: true);
       await tester.pump();
@@ -322,17 +318,15 @@ void main() {
         onResolutionComplete: ({required generation, required resolutionId}) {},
         onSfx: events.add,
       );
-      final generated =
-          generateChallenge(
-                ChallengeGenerationConfig.profile(DifficultyProfile.easy),
-                kUatChallengeSeed,
-              )
-              as GeneratedChallenge;
+      final generated = generateChallenge(
+        ChallengeGenerationConfig.profile(DifficultyProfile.easy),
+        kUatChallengeSeed,
+      ) as GeneratedChallenge;
       MoveApplied? applied;
       Piece? placed;
       outer:
       for (var offer = 0; offer < 3; offer++) {
-        if (generated.state.offers[offer] == null) continue;
+        if (!generated.state.offers[offer].isSelectable) continue;
         for (var r = 0; r < generated.state.boardSize; r++) {
           for (var c = 0; c < generated.state.boardSize; c++) {
             final tap = Coordinate(row: r, column: c);
@@ -344,7 +338,7 @@ void main() {
             );
             if (result is MoveApplied) {
               applied = result;
-              placed = generated.state.offers[offer];
+              placed = generated.state.offers[offer].pieceOrNull;
               break outer;
             }
           }
@@ -360,7 +354,9 @@ void main() {
       game.playScript(script, reducedMotion: true);
       await tester.pump();
       expect(
-        events.where((e) => e == GameSfxEvent.clear || e == GameSfxEvent.cascade),
+        events.where(
+          (e) => e == GameSfxEvent.clear || e == GameSfxEvent.cascade,
+        ),
         hasLength(applied.waves.length),
       );
       if (applied.waves.isEmpty) {

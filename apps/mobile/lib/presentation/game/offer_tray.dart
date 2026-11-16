@@ -13,7 +13,10 @@ final class OfferTray extends StatelessWidget {
     required this.onSelect,
   });
 
-  final List<Piece?> offers;
+  /// Versioned tray slots (`OfferLive` / `OfferEmpty` / `OfferSpent`).
+  ///
+  /// UI treats non-selectable slots (historical v2 null / v3 spent) as empty.
+  final List<OfferSlot> offers;
   final int? selectedIndex;
   final bool enabled;
   final ValueChanged<int> onSelect;
@@ -47,9 +50,9 @@ final class OfferTray extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 5),
                     child: _OfferSlot(
                       index: i,
-                      piece: offers[i],
+                      piece: offers[i].pieceOrNull,
                       selected: selectedIndex == i,
-                      enabled: enabled && offers[i] != null,
+                      enabled: enabled && offers[i].isSelectable,
                       onSelect: onSelect,
                     ),
                   ),
