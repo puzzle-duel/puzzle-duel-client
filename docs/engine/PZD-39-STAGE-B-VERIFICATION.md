@@ -1,14 +1,15 @@
 # PZD-39 — Stage B verification report (CORE-001.v3 Dart)
 
 **Gate outcome:** READY FOR FINAL INDEPENDENT REVIEW  
-**Verified HEAD:** `00a26a0f75da3539d1b6aa61b50d6ca4cfba29dc`  
+**Sign-off HEAD (this report included):** `21527200ddf524a12da4791fc52511f22bc71588`  
+**Engine implementation HEAD:** `00a26a0f75da3539d1b6aa61b50d6ca4cfba29dc`  
 **Branch:** `feature/PZD-39-core001v3-dart-engine`  
 **Draft PR:** https://github.com/puzzle-duel/puzzle-duel-client/pull/18  
 **PR base:** `docs/core-001-v3-ruleset-design` @ `a09866b888e92dad8b69ff1f6b55b9e89252cda1`  
-**Evidence UTC:** 2026-11-16T22:43:37Z  
+**Evidence UTC:** 2026-11-16T22:43:37Z (engine gate at `00a26a0`); package format/analyze/test re-confirmed at `2152720`  
 **Working tree at verification:** clean (no uncommitted changes)
 
-This report attributes all PASS evidence to the HEAD above. It does **not** claim TypeScript parity, tournament readiness, or GitHub Actions CI PASS.
+Engine code did not change between `00a26a0` and `2152720` (documentation-only follow-up). Package `dart test` was re-run on `2152720`: **140 PASS / 0 FAIL / 0 SKIP**. This report does **not** claim TypeScript parity, tournament readiness, or GitHub Actions CI PASS.
 
 ---
 
@@ -159,6 +160,6 @@ Covered by Stage B tests + source review at HEAD `00a26a0`:
 
 ## 10. Sign-off statement
 
-Against HEAD `00a26a0f75da3539d1b6aa61b50d6ca4cfba29dc`, mandatory Stage B Dart format/analyze/test, historical v1/v2 byte+behavior checks, generator regression, and independent canonical vectors all **PASS** with **0 FAIL / 0 SKIP**. No unresolved P0/P1.
+Against engine HEAD `00a26a0` and sign-off HEAD `2152720` (docs-only delta), mandatory Stage B Dart format/analyze/test, historical v1/v2 byte+behavior checks, generator regression, and independent canonical vectors all **PASS** with **0 FAIL / 0 SKIP**. No unresolved P0/P1.
 
 **STAGE B — READY FOR FINAL INDEPENDENT REVIEW.**
