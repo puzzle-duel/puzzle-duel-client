@@ -392,24 +392,6 @@ final class PiecePainter extends CustomPainter {
     return null;
   }
 
-  static Offset _insetToward(
-    Offset point,
-    Offset origin,
-    Offset shapeCenter,
-    double radius,
-    double inset,
-  ) {
-    var p = point;
-    for (var i = 0; i < 8; i++) {
-      if (_minDistanceToEdges(p, shapeCenter, radius) >= inset &&
-          pointInTriangle(p, shapeCenter, radius)) {
-        return p;
-      }
-      p = Offset.lerp(p, origin, 0.18)!;
-    }
-    return origin;
-  }
-
   static double _minDistanceToEdges(Offset p, Offset c, double r) {
     final v = triangleVertices(c, r);
     return math.min(
