@@ -1,12 +1,13 @@
 # PZD-39 — Stage B mobile compatibility gate
 
-**Gate outcome:** **STAGE B — BLOCKED** (Flutter 3.50 toolchain unavailable)  
-**Reviewed tip before this change:** `23b65534fa872c502391605b003bc615b9c4b97c`  
+**Gate outcome:** **STAGE B — INTEGRATION VERIFIED**  
+**Verified HEAD:** `03be6724611fbe0e8142b50c86d5f33d3363970e`  
 **PR:** https://github.com/puzzle-duel/puzzle-duel-client/pull/18  
 **Base:** `docs/core-001-v3-ruleset-design`  
-**Independent review comment:** [#6931837055](https://github.com/puzzle-duel/puzzle-duel-client/pull/18#issuecomment-6931837055)
+**Evidence UTC:** 2026-11-17T03:27:28Z  
+**Prior review comment:** [#6931837055](https://github.com/puzzle-duel/puzzle-duel-client/pull/18#issuecomment-6931837055)
 
-This gate separates **source-level API compatibility** from **Flutter compilation/tests** and **iOS simulator build**.
+Working tree at verification: clean (documentation update committed after this evidence).
 
 ---
 
@@ -14,149 +15,124 @@ This gate separates **source-level API compatibility** from **Flutter compilatio
 
 | Worktree | Branch / HEAD | Preserved |
 | --- | --- | --- |
-| Stage B (this work) | `feature/PZD-39-core001v3-dart-engine` | Yes — only tree modified |
+| Stage B (this work) | `feature/PZD-39-core001v3-dart-engine` @ `03be672` | Yes |
 | Client PZD-22 | `feature/PZD-22-flutter-app-bootstrap` | Yes (untouched) |
 | Client PZD-23 | detached + staged visuals | Yes (untouched) |
 | Client design | `docs/core-001-v3-ruleset-design` @ `a09866b` | Yes |
 | Backend Phase A | `feature/PZD-38-trusted-ingress` | Yes |
 | Backend design | `docs/core-001-v3-ruleset-design` @ `727e1b4` | Yes |
 
-Stage B working tree was clean at start. No reset/clean/stash/force-push.
+Host Homebrew Flutter left at **3.47.8**. No brew upgrade, no PATH rewrite, no force-push.
 
 ---
 
-## 2. Public API change
+## 2. Flutter / Dart SDK (isolated)
 
-| Before | After |
+| Item | Value |
 | --- | --- |
-| `List<Piece?> offers` | `List<OfferSlot> offers` |
-
-JSON wire for v1/v2 remains piece objects / JSON `null`. Dart **type** surface changed for all versions.
+| Install strategy | Official `flutter/flutter` git tag `3.50.0` shallow clone |
+| Framework revision | `ab2912035e` (matches tag) |
+| Reproducible location | `$HOME/Developer/flutter-sdks/flutter-3.50.0` (outside git worktrees; **not committed**) |
+| Executable | `$HOME/Developer/flutter-sdks/flutter-3.50.0/bin/flutter` |
+| Flutter | **3.50.0** |
+| Dart (bundled) | **3.14.0** |
+| Host brew Flutter | Still **3.47.8** / Dart **3.13.7** (unchanged) |
+| Pure Dart package SDK | Worktree `.dart-sdk/bin/dart` **3.14.0** (gitignored) |
 
 ---
 
-## 3. Consumer inventory (Stage B tree)
+## 3. Public API migration (already on HEAD)
 
-### Production (compile-time break before fix)
+`GameState.offers`: `List<Piece?>` → `List<OfferSlot>`.
 
-| File | Lines | Old assumption | Classification (pre-fix) |
-| --- | ---: | --- | --- |
-| `apps/mobile/lib/application/game_session.dart` | 166–188 | `offers[i] == null`, `Piece?` assignment | **Compile-time incompatible** |
-| `apps/mobile/lib/presentation/game/offer_tray.dart` | 16, 50–52 | `List<Piece?>` | **Compile-time incompatible** |
-| `apps/mobile/lib/presentation/game/game_screen.dart` | 60 | `offers ?? [null,null,null]` | **Compile-time incompatible** |
+Stage B `apps/mobile` consumers use:
 
-### Tests (compile-time break before fix)
+- `OfferSlot.isSelectable` for selection gating
+- `OfferSlot.pieceOrNull` for live piece extraction
 
-| File | Lines | Issue |
+Historical v1/v2 JSON wire unchanged (`OfferEmpty` → JSON `null`).
+
+---
+
+## 4. Mobile evidence (Flutter 3.50.0)
+
+| Check | Exit | Result |
 | --- | ---: | --- |
-| `apps/mobile/test/application/game_session_test.dart` | 22, 252, 275 | null / `Piece?` |
-| `apps/mobile/test/application/animation_script_test.dart` | 21, 33 | null / `Piece?` |
-| `apps/mobile/test/presentation/game_sfx_lifecycle_test.dart` | 19, 36, 48, 65, 335, 347 | null / `!` as `Piece` |
-| `apps/mobile/test/app_smoke_test.dart` | 106, 198 | null checks |
-| `apps/mobile/test/visual/pzd23_screenshot_capture_test.dart` | 82, 130 | null checks |
+| `flutter pub get` | 0 | Got dependencies; **no lockfile/git changes** |
+| `flutter analyze` | 0 | **No issues found** |
+| `flutter test` | 0 | **180 PASS / 0 FAIL / 0 SKIP** |
+| `flutter build ios --simulator --no-codesign` | 0 | **Built** `build/ios/iphonesimulator/Runner.app` |
 
-### Compatible / N/A
+### iOS build notes
 
-| Area | Notes |
-| --- | --- |
-| Board cells `List<List<Piece?>>` | Unchanged |
-| `PieceGlyph` / painters | Take `Piece`, not offers |
-| `packages/puzzle_duel_rules` internals + its tests | Already migrated |
-| Historical v1/v2 **JSON** fixtures | Byte-identical; not Dart-type consumers |
+- Xcode **27.0** (27A266a); arm64 host.
+- First attempt failed on stale generated `ios/.symlinks/plugins/audioplayers_darwin` (“File exists”). Cleared **generated** `ios/.symlinks` only (not tracked) and rebuilt successfully.
+- CocoaPods warning: recommended ≥1.16.2; host has 1.14.2 — build still succeeded.
+- Simulator compile is integration evidence, **not** visual/device UAT. Screenshot tests in the suite are not claimed as approved visual UAT.
 
 ---
 
-## 4. Remediation (minimal, Stage B–owned)
+## 5. Pure Dart re-verification (same HEAD)
 
-Migrated mobile callers to version-aware OfferSlot accessors:
+From `packages/puzzle_duel_rules` with `.dart-sdk/bin/dart` 3.14.0:
 
-- Selectability: `OfferSlot.isSelectable` (rejects `OfferEmpty` and `OfferSpent`)
-- Live piece: `OfferSlot.pieceOrNull`
-- `OfferTray` now takes `List<OfferSlot>`; empty UI for non-selectable slots
-- Default empty tray: `[OfferEmpty(), OfferEmpty(), OfferEmpty()]`
-
-**Historical semantics preserved:** v2 terminal null still serializes as JSON `null` via `OfferEmpty`; UI still shows “—” and blocks selection. v3 spent cannot be selected as a live piece.
-
-No ADR-E01 rule changes. PZD-22 / PZD-23 worktrees not modified.
-
----
-
-## 5. Flutter SDK / executed checks
-
-| Item | Result |
-| --- | --- |
-| Required | Flutter **3.50.0** / Dart **3.14.0** (ADR-001 / pubspec `flutter: ">=3.50.0 <3.51.0"`) |
-| Host Flutter | **3.47.8** / Dart **3.13.7** (`/opt/homebrew/bin/flutter`) |
-| Flutter 3.50 install on machine | **Not found** (search of common paths) |
-| Download/upgrade | **Not performed** (requires explicit approval) |
-
-```text
-cd apps/mobile
-flutter pub get
-→ FAILED: puzzle_duel_mobile requires SDK ^3.14.0; current Dart is 3.13.7
-  Suggestion: Try using the Flutter SDK version: 3.50.0
-```
-
-| Check | Status |
-| --- | --- |
-| `flutter pub get` (Accepted 3.50) | **NOT_RUN** (SDK missing) |
-| `flutter analyze` | **NOT_RUN** |
-| `flutter test` | **NOT_RUN** |
-| iOS simulator build | **NOT_RUN** |
-
----
-
-## 6. Pure Dart regression (still mandatory)
-
-Portable `.dart-sdk/bin/dart` **3.14.0**, package `packages/puzzle_duel_rules`:
-
-| Check | Exit | Totals |
+| Check | Exit | Result |
 | --- | ---: | --- |
 | `dart format --set-exit-if-changed .` | 0 | clean |
 | `dart analyze` | 0 | No issues found |
 | `dart test` | 0 | **140 PASS / 0 FAIL / 0 SKIP** |
 
----
+### Historical regression
 
-## 7. Historical v1/v2 semantics (source-level)
-
-| Concern | Result |
+| Check | Result |
 | --- | --- |
-| v1/v2 JSON wire | Unchanged (`OfferLive` → piece object; `OfferEmpty` → `null`) |
-| Mobile selection of empty/spent | Blocked via `isSelectable` |
-| No silent v3 dispatch for generated challenges | Generator still pins `core-001.v2` |
-| Score / turns / board cells | Unchanged APIs |
-
-Executable Flutter UI proof of the above: **NOT_RUN** until Flutter 3.50 is available.
+| v1 Python / Node checkers | PASS (exit 0) |
+| v2 Python / Node checkers | PASS (exit 0) |
+| v1 CHECKSUMS | **27/27 OK** |
+| v2 CHECKSUMS | **8/8 OK** |
+| Independent Python CV-01…09 | **fail=0** |
 
 ---
 
-## 8. Findings
+## 6. Defects
 
 | Sev | Item | Status |
 | --- | --- | --- |
-| P1 | `List<Piece?>` → `List<OfferSlot>` broke mobile compile | **Fixed in Stage B apps/mobile** (pending Flutter 3.50 verify) |
-| P0 | None identified beyond that compile break | — |
-| Env | Flutter 3.50.0 not installed | **Blocks** analyze/test/simulator |
+| P1 | OfferSlot mobile type break | Fixed earlier on this branch; verified under Flutter 3.50 |
+| Env | Flutter 3.50 missing | Resolved via isolated SDK install |
+| P2 | CocoaPods host version <1.16.2 | Nonblocking warning |
+| P2 | Package README still v1/v2-oriented | Open (docs polish) |
+
+No unresolved P0/P1.
 
 ---
 
-## 9. Final decision
+## 7. Final decision
 
-**STAGE B — BLOCKED**
+**STAGE B — INTEGRATION VERIFIED**
 
-Reason: mandatory Flutter quality gates for Accepted Flutter 3.50.0 could not be executed on this machine. Source-level P1 consumer migration is implemented in the Stage B branch, and pure Dart package tests remain green, but **INTEGRATION VERIFIED** is not claimed without:
+Mandatory gates on HEAD `03be672`:
 
-1. Install/use Flutter 3.50.0 + Dart 3.14.0  
-2. `cd apps/mobile && flutter pub get && flutter analyze && flutter test`  
-3. Optional: iOS simulator compile in Stage B only (do not touch PZD-23)
+- Flutter 3.50.0 / Dart 3.14.0 verified  
+- `flutter pub get` / `analyze` / `test` PASS  
+- iOS simulator build PASS  
+- Pure Dart package PASS  
+- Historical fixtures + CV digests PASS  
+- Unrelated worktrees preserved  
 
 ---
 
-## 10. NOT_RUN
+## 8. NOT_RUN / remaining
 
-- Flutter 3.50 `pub get` / `analyze` / `test`
-- iOS simulator build
-- Device UAT
-- TypeScript Stage C / dual-engine Stage D
-- Merge / deploy
+- TypeScript Stage C engine  
+- Stage D dual-engine golden freeze / full GameState hash freeze  
+- Tournament / PZD-38 ranked integration  
+- Device UAT / approved visual golden UAT  
+- GitHub Actions CI PASS claim without inspecting Actions logs  
+- Merge / deploy / marking PZD-39 Done  
+
+### Stage C prerequisites
+
+1. Port Dart CORE-001.v3 contract to pure TypeScript replay.  
+2. Shared freeze protocol for boards/scores/hashes.  
+3. Keep client hash non-authoritative for ranking.
