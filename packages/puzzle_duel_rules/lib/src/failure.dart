@@ -27,7 +27,12 @@ enum ValidationCode {
   inconsistentStatus('inconsistent_status'),
   unresolvedInitialMatch('unresolved_initial_match'),
   malformedMove('malformed_move'),
-  illegalOfferIndex('illegal_offer_index');
+  illegalOfferIndex('illegal_offer_index'),
+  malformedOfferSlot('malformed_offer_slot'),
+  inconsistentTerminalReason('inconsistent_terminal_reason'),
+  spentWithFuturePieces('spent_with_future_pieces'),
+  noLegalInitialPlacement('no_legal_initial_placement'),
+  integerOutOfRange('integer_out_of_range');
 
   const ValidationCode(this.wire);
 

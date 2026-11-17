@@ -2,7 +2,8 @@ part of '../puzzle_duel_rules.dart';
 
 enum RulesVersion {
   core001V1('core-001.v1'),
-  core001V2('core-001.v2');
+  core001V2('core-001.v2'),
+  core001V3('core-001.v3');
 
   const RulesVersion(this.id);
 
@@ -65,6 +66,108 @@ enum GameStatus {
     }
     return null;
   }
+}
+
+/// Successful v3 terminal reasons only (ADR-E01). Integrity failures are not
+/// stored here.
+enum TerminalReason {
+  moveLimitReached('move_limit_reached'),
+  noLegalMoves('no_legal_moves');
+
+  const TerminalReason(this.wire);
+
+  final String wire;
+
+  static TerminalReason? tryParse(Object? value) {
+    for (final reason in values) {
+      if (reason.wire == value) return reason;
+    }
+    return null;
+  }
+}
+
+/// Versioned offer tray slot.
+///
+/// v1/v2 wire: live piece object or JSON `null` ([OfferEmpty]).
+/// v3 wire: tagged `{kind:piece|spent}` — never bare null.
+sealed class OfferSlot {
+  const OfferSlot();
+
+  bool get isSelectable;
+  Piece? get pieceOrNull;
+
+  Object? toJsonFor(RulesVersion version);
+}
+
+/// Selectable piece offer.
+final class OfferLive extends OfferSlot {
+  const OfferLive(this.piece);
+
+  final Piece piece;
+
+  @override
+  bool get isSelectable => true;
+
+  @override
+  Piece? get pieceOrNull => piece;
+
+  @override
+  Object? toJsonFor(RulesVersion version) {
+    if (version == RulesVersion.core001V3) {
+      return {
+        'kind': 'piece',
+        'shape': piece.shape.wire,
+        'direction': piece.direction.wire,
+      };
+    }
+    return piece.toJson();
+  }
+
+  @override
+  bool operator ==(Object other) => other is OfferLive && other.piece == piece;
+
+  @override
+  int get hashCode => piece.hashCode;
+}
+
+/// v2 terminal/empty null slot (JSON `null`). Not used on v3.
+final class OfferEmpty extends OfferSlot {
+  const OfferEmpty();
+
+  @override
+  bool get isSelectable => false;
+
+  @override
+  Piece? get pieceOrNull => null;
+
+  @override
+  Object? toJsonFor(RulesVersion version) => null;
+
+  @override
+  bool operator ==(Object other) => other is OfferEmpty;
+
+  @override
+  int get hashCode => 0;
+}
+
+/// v3 spent slot with no replacement.
+final class OfferSpent extends OfferSlot {
+  const OfferSpent();
+
+  @override
+  bool get isSelectable => false;
+
+  @override
+  Piece? get pieceOrNull => null;
+
+  @override
+  Object? toJsonFor(RulesVersion version) => {'kind': 'spent'};
+
+  @override
+  bool operator ==(Object other) => other is OfferSpent;
+
+  @override
+  int get hashCode => 1;
 }
 
 /// Zero-based `[row, column]`. Row 0 is the top row.
@@ -194,14 +297,15 @@ final class GameState {
     required this.moveLimit,
     required List<Coordinate> blocked,
     required List<List<Piece?>> cells,
-    required List<Piece?> offers,
+    required List<OfferSlot> offers,
     required List<Piece> futurePieces,
     required this.turnsUsed,
     required this.score,
     required this.status,
+    this.terminalReason,
   }) : blocked = List<Coordinate>.unmodifiable(blocked),
        cells = _freezeCells(cells),
-       offers = List<Piece?>.unmodifiable(offers),
+       offers = List<OfferSlot>.unmodifiable(offers),
        futurePieces = List<Piece>.unmodifiable(futurePieces);
 
   final RulesVersion rulesVersion;
@@ -209,28 +313,37 @@ final class GameState {
   final int moveLimit;
   final List<Coordinate> blocked;
   final List<List<Piece?>> cells;
-  final List<Piece?> offers;
+  final List<OfferSlot> offers;
   final List<Piece> futurePieces;
   final int turnsUsed;
   final int score;
   final GameStatus status;
 
+  /// v3 only; always null for v1/v2.
+  final TerminalReason? terminalReason;
+
   bool get hasOrthogonalRun => _orthogonalRun(cells);
 
-  Map<String, Object?> toJson() => {
-    'rulesVersion': rulesVersion.id,
-    'boardSize': boardSize,
-    'moveLimit': moveLimit,
-    'blocked': [for (final cell in blocked) cell.toJson()],
-    'cells': [
-      for (final row in cells) [for (final cell in row) cell?.toJson()],
-    ],
-    'offers': [for (final offer in offers) offer?.toJson()],
-    'futurePieces': [for (final piece in futurePieces) piece.toJson()],
-    'turnsUsed': turnsUsed,
-    'score': score,
-    'status': status.wire,
-  };
+  Map<String, Object?> toJson() {
+    final json = <String, Object?>{
+      'rulesVersion': rulesVersion.id,
+      'boardSize': boardSize,
+      'moveLimit': moveLimit,
+      'blocked': [for (final cell in blocked) cell.toJson()],
+      'cells': [
+        for (final row in cells) [for (final cell in row) cell?.toJson()],
+      ],
+      'offers': [for (final offer in offers) offer.toJsonFor(rulesVersion)],
+      'futurePieces': [for (final piece in futurePieces) piece.toJson()],
+      'turnsUsed': turnsUsed,
+      'score': score,
+      'status': status.wire,
+    };
+    if (rulesVersion == RulesVersion.core001V3) {
+      json['terminalReason'] = terminalReason?.wire;
+    }
+    return json;
+  }
 
   @override
   bool operator ==(Object other) {
@@ -241,9 +354,10 @@ final class GameState {
         other.turnsUsed == turnsUsed &&
         other.score == score &&
         other.status == status &&
+        other.terminalReason == terminalReason &&
         _sameCoordinates(other.blocked, blocked) &&
         _sameCells(other.cells, cells) &&
-        _sameOffers(other.offers, offers) &&
+        _sameOfferSlots(other.offers, offers) &&
         _samePieces(other.futurePieces, futurePieces);
   }
 
@@ -259,6 +373,7 @@ final class GameState {
     turnsUsed,
     score,
     status,
+    terminalReason,
   );
 }
 
@@ -328,7 +443,7 @@ bool _samePieces(List<Piece> left, List<Piece> right) {
   return true;
 }
 
-bool _sameOffers(List<Piece?> left, List<Piece?> right) {
+bool _sameOfferSlots(List<OfferSlot> left, List<OfferSlot> right) {
   if (left.length != right.length) return false;
   for (var index = 0; index < left.length; index++) {
     if (left[index] != right[index]) return false;

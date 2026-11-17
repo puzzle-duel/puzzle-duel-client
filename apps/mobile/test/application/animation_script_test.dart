@@ -18,7 +18,7 @@ void main() {
       Piece? placed;
       outer:
       for (var offer = 0; offer < 3; offer++) {
-        if (generated.state.offers[offer] == null) continue;
+        if (!generated.state.offers[offer].isSelectable) continue;
         for (var r = 0; r < generated.state.boardSize; r++) {
           for (var c = 0; c < generated.state.boardSize; c++) {
             final tap = Coordinate(row: r, column: c);
@@ -30,7 +30,7 @@ void main() {
             );
             if (result is MoveApplied) {
               applied = result;
-              placed = generated.state.offers[offer];
+              placed = generated.state.offers[offer].pieceOrNull;
               break outer;
             }
           }

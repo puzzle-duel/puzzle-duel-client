@@ -65,7 +65,7 @@ void main() {
         expect(state.score, 0);
         expect(state.status, GameStatus.inProgress);
         expect(state.offers, hasLength(3));
-        expect(state.offers, everyElement(isNotNull));
+        expect(state.offers, everyElement(isA<OfferLive>()));
         expect(state.futurePieces, hasLength(profile.moveLimit - 1));
         expect(state.hasOrthogonalRun, isFalse);
         _assertBlockedSortedUnique(state);

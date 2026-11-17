@@ -164,7 +164,8 @@ final class GameSession extends ChangeNotifier {
     if (!view.acceptsInput) return;
     if (index < 0 || index > 2) return;
     final offers = _canonical!.offers;
-    if (offers[index] == null) return;
+    // OfferEmpty (v2 null) and OfferSpent (v3) are not selectable.
+    if (!offers[index].isSelectable) return;
     _selectedOffer = index;
     _clearFeedback();
     notifyListeners();
@@ -184,7 +185,7 @@ final class GameSession extends ChangeNotifier {
     if (_canonical!.status == GameStatus.ended) return false;
 
     final preState = _canonical!;
-    final placedPiece = preState.offers[selected];
+    final placedPiece = preState.offers[selected].pieceOrNull;
     if (placedPiece == null) {
       _feedbackKind = MoveFeedbackKind.unsafe;
       _feedbackCode = MoveSafety.offerUnavailable.wire;
