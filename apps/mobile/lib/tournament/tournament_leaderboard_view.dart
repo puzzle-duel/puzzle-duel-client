@@ -232,26 +232,28 @@ final class _PeriodRow extends StatelessWidget {
     final older = weekly && index >= 0 && index + 1 < weeks.length ? weeks[index + 1] : null;
     final newer = weekly && index > 0 ? weeks[index - 1] : null;
     final finalWeek = controller.weeklyFinal;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: GameTokens.surface.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+    return SizedBox(
+      key: const Key('period-row'),
+      height: 72,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: GameTokens.surface.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+        ),
         child: Row(
           children: [
-            if (weekly)
-              IconButton(
+            _PeriodStep(
+              visible: weekly,
+              button: IconButton(
                 key: const Key('week-older'),
                 tooltip: copy.previousWeek,
                 onPressed: older == null ? null : () => controller.openWeekly(week: older),
                 icon: const Icon(Icons.chevron_left),
-              )
-            else
-              const SizedBox(width: 12),
+              ),
+            ),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
                     period,
@@ -259,30 +261,49 @@ final class _PeriodRow extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, height: 1.15),
                   ),
                   Text(
                     finalWeek ? copy.finalLabel : copy.provisional,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: finalWeek ? GameTokens.success : GameTokens.triangleFill,
                       fontWeight: FontWeight.w800,
+                      height: 1.15,
                     ),
                   ),
                 ],
               ),
             ),
-            if (weekly)
-              IconButton(
+            _PeriodStep(
+              visible: weekly,
+              button: IconButton(
                 key: const Key('week-newer'),
                 tooltip: copy.newerWeek,
                 onPressed: newer == null ? null : () => controller.openWeekly(week: newer),
                 icon: const Icon(Icons.chevron_right),
-              )
-            else
-              const SizedBox(width: 12),
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Reserves the arrow slot in both periods so Daily stays the same height.
+final class _PeriodStep extends StatelessWidget {
+  const _PeriodStep({required this.visible, required this.button});
+
+  final bool visible;
+  final Widget button;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 48,
+      child: visible ? button : const SizedBox.shrink(),
     );
   }
 }

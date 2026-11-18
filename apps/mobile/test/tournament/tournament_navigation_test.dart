@@ -106,9 +106,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('board-weekly')), findsOneWidget);
     expect(find.text('Provisional'), findsOneWidget);
+    final weeklyPeriod = tester.getRect(find.byKey(const Key('period-row')));
+    final weeklyRank = tester.getTopLeft(find.byKey(const Key('self-rank')));
     await tester.tap(find.byKey(const Key('board-daily')));
     await tester.pumpAndSettle();
     expect(find.text('18 November 2026'), findsOneWidget);
+    final dailyPeriod = tester.getRect(find.byKey(const Key('period-row')));
+    final dailyRank = tester.getTopLeft(find.byKey(const Key('self-rank')));
+    expect(dailyPeriod.height, weeklyPeriod.height);
+    expect(dailyPeriod.top, weeklyPeriod.top);
+    expect(dailyRank.dy, weeklyRank.dy);
 
     await tester.tap(find.byKey(const Key('nav-back')));
     await tester.pumpAndSettle();

@@ -378,7 +378,7 @@ final class _HomeScreen extends StatelessWidget {
                 action: primary,
                 onAction: phase == DayPhase.completed ? controller.openResults : controller.resume,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 32),
               _HomeActions(controller: controller),
             ],
           ),
