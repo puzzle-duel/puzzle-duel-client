@@ -53,6 +53,7 @@ final class OfferTray extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 5),
                     child: _OfferSlot(
+                      key: ValueKey('offer-slot-$i'),
                       index: i,
                       piece: offers[i].pieceOrNull,
                       selected: selectedIndex == i,
@@ -72,6 +73,7 @@ final class OfferTray extends StatelessWidget {
 
 final class _OfferSlot extends StatelessWidget {
   const _OfferSlot({
+    super.key,
     required this.index,
     required this.piece,
     required this.selected,

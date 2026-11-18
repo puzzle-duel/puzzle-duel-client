@@ -163,7 +163,10 @@ final class TournamentController extends ChangeNotifier {
 
   Future<void> openDaily() => _openLeaderboard(weekly: false);
 
-  Future<void> openWeekly([String? week]) => _openLeaderboard(weekly: true, week: week);
+  /// [fromHome] selects WEEKLY / ALL and the server's current week, which is
+  /// the first week in the canonical visible-week list.
+  Future<void> openWeekly({String? week, bool fromHome = false}) =>
+      _openLeaderboard(weekly: true, week: week, fromHome: fromHome);
 
   Future<void> setCategory(String next) async {
     category = next;
@@ -321,7 +324,9 @@ final class TournamentController extends ChangeNotifier {
     required bool weekly,
     String? week,
     bool preserveReturn = false,
+    bool fromHome = false,
   }) async {
+    if (fromHome) category = 'ALL';
     final opened = preserveReturn
         ? TournamentRoute(
             place: weekly ? TournamentPlace.weekly : TournamentPlace.daily,
@@ -337,6 +342,7 @@ final class TournamentController extends ChangeNotifier {
       ];
       weekStart ??= weeks.isEmpty ? null : weeks.first;
     }
+    if (weekly && fromHome && weeks.isNotEmpty) weekStart = weeks.first;
     final selectedWeek = week ?? weekStart;
     if (weekly) weekStart = selectedWeek;
     if (weekly && (selectedWeek == null || selectedWeek.isEmpty)) {

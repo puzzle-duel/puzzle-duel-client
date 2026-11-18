@@ -1,0 +1,155 @@
+{
+  "ordinal": 2,
+  "label": "E2",
+  "challengeId": "uat-e2",
+  "profile": "easy",
+  "seed": 1,
+  "generatorVersion": "gen-001.v1",
+  "sourceRulesVersion": "core-001.v2",
+  "projection": "Offers from gen-001.v1 are wrapped as core-001.v3 piece slots. The generator algorithm is unchanged.",
+  "initialState": {
+    "rulesVersion": "core-001.v3",
+    "boardSize": 5,
+    "moveLimit": 15,
+    "blocked": [
+      [
+        3,
+        4
+      ]
+    ],
+    "cells": [
+      [
+        {
+          "shape": "diamond",
+          "direction": "left"
+        },
+        {
+          "shape": "diamond",
+          "direction": "right"
+        },
+        null,
+        null,
+        {
+          "shape": "circle",
+          "direction": "down"
+        }
+      ],
+      [
+        {
+          "shape": "circle",
+          "direction": "left"
+        },
+        null,
+        {
+          "shape": "diamond",
+          "direction": "left"
+        },
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        {
+          "shape": "triangle",
+          "direction": "right"
+        },
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    ],
+    "offers": [
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "right"
+      },
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "up"
+      }
+    ],
+    "futurePieces": [
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "shape": "triangle",
+        "direction": "down"
+      },
+      {
+        "shape": "triangle",
+        "direction": "left"
+      },
+      {
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "shape": "circle",
+        "direction": "down"
+      },
+      {
+        "shape": "triangle",
+        "direction": "down"
+      },
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      {
+        "shape": "diamond",
+        "direction": "up"
+      },
+      {
+        "shape": "triangle",
+        "direction": "up"
+      },
+      {
+        "shape": "diamond",
+        "direction": "right"
+      },
+      {
+        "shape": "circle",
+        "direction": "left"
+      },
+      {
+        "shape": "triangle",
+        "direction": "left"
+      },
+      {
+        "shape": "circle",
+        "direction": "down"
+      }
+    ],
+    "turnsUsed": 0,
+    "score": 0,
+    "status": "in_progress",
+    "terminalReason": null
+  }
+}

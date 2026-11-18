@@ -187,4 +187,89 @@ void main() {
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
     expect(find.text('Bugünün mücadelesini oyna'), findsOneWidget);
   });
+
+  testWidgets('home opens the current weekly board in All', (tester) async {
+    final directory = Directory.systemTemp.createTempSync('pzd42-week');
+    final paths = <String>[];
+    final api = ScriptedUatApi((method, path, body) async {
+      paths.add(path);
+      if (method == 'POST' && path.endsWith('/session')) {
+        return const UatHttpResult(201, {'sessionSecret': 'secret'});
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(200, {
+          'seriesId': '44444444-4444-4444-8444-444444444444',
+          'status': 'COMPLETED',
+          'original': false,
+        });
+      }
+      if (path.endsWith('/board')) {
+        return const UatHttpResult(200, {
+          'ordinal': 6,
+          'ordinalLabel': 'H1',
+          'seriesScore': 10,
+          'awaitAdvance': false,
+          'resultsPublished': true,
+          'state': {'turnsUsed': 1, 'moveLimit': 1, 'boardSize': 5},
+        });
+      }
+      if (path.endsWith('/results')) {
+        return const UatHttpResult(200, {'all': 10, 'easy': 10, 'medium': 0, 'hard': 0});
+      }
+      if (path.endsWith('/weeks')) {
+        return const UatHttpResult(200, {
+          'weeks': ['2026-11-16', '2026-11-09'],
+        });
+      }
+      if (path.contains('/leaderboards/')) {
+        return const UatHttpResult(200, {
+          'state': 'PROVISIONAL',
+          'period': '2026-11-18',
+          'rows': [],
+        });
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      TournamentUatApp(
+        config: const UatConfig(
+          baseUrl: 'http://127.0.0.1',
+          bearer: 'Bearer test',
+          playerLabel: 'week',
+        ),
+        api: api,
+        stateDirectory: directory,
+        haptics: const SilentTournamentHaptics(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.byKey(const Key('weekly-leaderboard')), 120);
+    await tester.tap(find.byKey(const Key('weekly-leaderboard')));
+    await tester.pumpAndSettle();
+    expect(paths.last, contains('weekStart=2026-11-16'));
+    expect(paths.last, contains('category=ALL'));
+
+    await tester.tap(find.text('Hard'));
+    await tester.pumpAndSettle();
+    expect(paths.last, contains('category=HARD'));
+    await tester.tap(find.text('2026-11-09'));
+    await tester.pumpAndSettle();
+    expect(paths.last, contains('weekStart=2026-11-09'));
+
+    await tester.tap(find.byKey(const Key('nav-back')));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.byKey(const Key('weekly-leaderboard')), 120);
+    await tester.tap(find.byKey(const Key('weekly-leaderboard')));
+    await tester.pumpAndSettle();
+    expect(paths.last, contains('weekStart=2026-11-16'));
+    expect(paths.last, contains('category=ALL'));
+    expect(find.text('2026-11-16'), findsOneWidget);
+  });
 }
