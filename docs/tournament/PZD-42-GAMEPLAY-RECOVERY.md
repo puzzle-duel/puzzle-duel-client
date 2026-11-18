@@ -102,6 +102,16 @@ Expect:
 10. Player B uses the same command with `PZD_UAT_BEARER_B` and `PZD_UAT_PLAYER="Player B"`. A second device remains `WRITER_NOT_AUTHORIZED`.
 11. This phone session needs a new `pzd_uat` database. An existing claim from earlier today still has the old boards.
 
-Physical iPhone audio, haptics, the stable board frame, and this visual redesign are NOT_RUN. Widget tests cover the frame at 390×844, the completed-day loop, Practice isolation, Settings persistence, and Home at 320, 390, and 430 points, including Turkish copy and a larger text scale.
+## Portrait only
+
+The phone build is portrait upright. `main` calls `SystemChrome.setPreferredOrientations` with `portraitUp` after the binding is ready and before `runApp`. iPhone and iPad `Info.plist` arrays list only `UIInterfaceOrientationPortrait`. The Xcode target is universal (`TARGETED_DEVICE_FAMILY` 1 and 2). The Android activity sets `screenOrientation="portrait"`, and the application is `appCategory="game"`.
+
+That Flutter call does not override a window the system has already decided to resize.
+
+iPadOS offers Split View and Slide Over only when an app declares all four orientations. This app does not, so those modes are not offered. Stage Manager can still change the window size of a portrait-only app. The interface stays portrait, but the available area can change, and the board follows that area. `SystemChrome` cannot stop that resize.
+
+Android 16 (API 36, this app's target) ignores `screenOrientation` on screens at least 600dp wide, except phones and apps marked as games. The game category is what keeps the portrait lock on large Android screens. Desktop windowing can still override orientation. The temporary `PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY` opt-out is not used: Android documents that it does not lock large-screen orientation, and API 37 removes it. A physical rotation check is still required.
+
+Physical iPhone audio, haptics, the stable board frame, this visual redesign, and the portrait lock are NOT_RUN. Widget tests cover the frame at 390×844, the completed-day loop, Practice isolation, Settings persistence, and Home at 320, 390, and 430 points, including Turkish copy and a larger text scale.
 
 Rendered review images, not device photos, are in `docs/tournament/uat-evidence/pzd42-visual/`. Open `index.html` for the contact sheet. Those images use labeled test fixtures. The running app does not invent players or scores. Linux CI skips the golden comparison because its pixels differ from these macOS captures. A physical-iPhone visual UAT is still required before this screen set can pass.
