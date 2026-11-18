@@ -166,6 +166,18 @@ final class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records a server rejection without applying a local move or score.
+  void showServerRejection(String code) {
+    _authoritativeBusy = false;
+    authoritativeOutcomeUnknown = false;
+    _feedbackKind = MoveFeedbackKind.rejected;
+    _feedbackCode = code;
+    if (_canonical != null && _canonical!.status != GameStatus.ended) {
+      _phase = GameScreenPhase.playing;
+    }
+    notifyListeners();
+  }
+
   /// Starts a new in-memory round from the accepted generator.
   bool startRound({
     required DifficultyProfile profile,

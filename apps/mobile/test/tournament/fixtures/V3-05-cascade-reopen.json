@@ -1,0 +1,268 @@
+{
+  "id": "V3-05",
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v3",
+  "summary": "Cascade reopens; remains in_progress",
+  "oracleVersion": "stage-d-python-stdlib-1",
+  "initialState": {
+    "rulesVersion": "core-001.v3",
+    "boardSize": 3,
+    "moveLimit": 5,
+    "blocked": [],
+    "cells": [
+      [
+        {
+          "shape": "circle",
+          "direction": "up"
+        },
+        {
+          "shape": "circle",
+          "direction": "up"
+        },
+        null
+      ],
+      [
+        {
+          "shape": "diamond",
+          "direction": "down"
+        },
+        {
+          "shape": "triangle",
+          "direction": "left"
+        },
+        {
+          "shape": "diamond",
+          "direction": "up"
+        }
+      ],
+      [
+        {
+          "shape": "triangle",
+          "direction": "right"
+        },
+        {
+          "shape": "diamond",
+          "direction": "left"
+        },
+        {
+          "shape": "triangle",
+          "direction": "down"
+        }
+      ]
+    ],
+    "offers": [
+      {
+        "kind": "piece",
+        "shape": "circle",
+        "direction": "left"
+      },
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "kind": "piece",
+        "shape": "triangle",
+        "direction": "up"
+      }
+    ],
+    "futurePieces": [
+      {
+        "shape": "diamond",
+        "direction": "right"
+      }
+    ],
+    "turnsUsed": 0,
+    "score": 0,
+    "status": "in_progress",
+    "terminalReason": null
+  },
+  "moves": [
+    {
+      "offerIndex": 0,
+      "tap": [
+        0,
+        2
+      ]
+    }
+  ],
+  "requireInitial": true,
+  "expected": {
+    "ok": true,
+    "finalState": {
+      "rulesVersion": "core-001.v3",
+      "boardSize": 3,
+      "moveLimit": 5,
+      "blocked": [],
+      "cells": [
+        [
+          null,
+          null,
+          {
+            "shape": "diamond",
+            "direction": "up"
+          }
+        ],
+        [
+          {
+            "shape": "diamond",
+            "direction": "down"
+          },
+          {
+            "shape": "triangle",
+            "direction": "left"
+          },
+          null
+        ],
+        [
+          {
+            "shape": "triangle",
+            "direction": "right"
+          },
+          {
+            "shape": "diamond",
+            "direction": "left"
+          },
+          {
+            "shape": "triangle",
+            "direction": "down"
+          }
+        ]
+      ],
+      "offers": [
+        {
+          "kind": "piece",
+          "shape": "diamond",
+          "direction": "right"
+        },
+        {
+          "kind": "piece",
+          "shape": "diamond",
+          "direction": "down"
+        },
+        {
+          "kind": "piece",
+          "shape": "triangle",
+          "direction": "up"
+        }
+      ],
+      "futurePieces": [],
+      "turnsUsed": 1,
+      "score": 300,
+      "status": "in_progress",
+      "terminalReason": null
+    },
+    "stateHash": "9fbc659c47b35f3ec26133e807bdb855ad0125860c16f30a2fce8ae3d36578fb",
+    "canonicalJson": "{\"blocked\":[],\"boardSize\":3,\"cells\":[[null,null,{\"direction\":\"up\",\"shape\":\"diamond\"}],[{\"direction\":\"down\",\"shape\":\"diamond\"},{\"direction\":\"left\",\"shape\":\"triangle\"},null],[{\"direction\":\"right\",\"shape\":\"triangle\"},{\"direction\":\"left\",\"shape\":\"diamond\"},{\"direction\":\"down\",\"shape\":\"triangle\"}]],\"futurePieces\":[],\"moveLimit\":5,\"offers\":[{\"direction\":\"right\",\"kind\":\"piece\",\"shape\":\"diamond\"},{\"direction\":\"down\",\"kind\":\"piece\",\"shape\":\"diamond\"},{\"direction\":\"up\",\"kind\":\"piece\",\"shape\":\"triangle\"}],\"rulesVersion\":\"core-001.v3\",\"score\":300,\"status\":\"in_progress\",\"terminalReason\":null,\"turnsUsed\":1}",
+    "applied": [
+      {
+        "landing": [
+          0,
+          2
+        ],
+        "turnsUsed": 1,
+        "scoreDelta": 300,
+        "waves": [
+          {
+            "wave": 1,
+            "cleared": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                2
+              ]
+            ],
+            "scoreDelta": 300,
+            "moved": [
+              {
+                "sourceIndex": 5,
+                "from": [
+                  1,
+                  2
+                ],
+                "to": [
+                  0,
+                  2
+                ],
+                "shape": "diamond",
+                "direction": "up"
+              }
+            ]
+          }
+        ],
+        "finalState": {
+          "rulesVersion": "core-001.v3",
+          "boardSize": 3,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              null,
+              null,
+              {
+                "shape": "diamond",
+                "direction": "up"
+              }
+            ],
+            [
+              {
+                "shape": "diamond",
+                "direction": "down"
+              },
+              {
+                "shape": "triangle",
+                "direction": "left"
+              },
+              null
+            ],
+            [
+              {
+                "shape": "triangle",
+                "direction": "right"
+              },
+              {
+                "shape": "diamond",
+                "direction": "left"
+              },
+              {
+                "shape": "triangle",
+                "direction": "down"
+              }
+            ]
+          ],
+          "offers": [
+            {
+              "kind": "piece",
+              "shape": "diamond",
+              "direction": "right"
+            },
+            {
+              "kind": "piece",
+              "shape": "diamond",
+              "direction": "down"
+            },
+            {
+              "kind": "piece",
+              "shape": "triangle",
+              "direction": "up"
+            }
+          ],
+          "futurePieces": [],
+          "turnsUsed": 1,
+          "score": 300,
+          "status": "in_progress",
+          "terminalReason": null
+        },
+        "stateHash": "9fbc659c47b35f3ec26133e807bdb855ad0125860c16f30a2fce8ae3d36578fb"
+      }
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "id": "V3-02",
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v3",
+  "summary": "Single-wave clear scoreDelta=300",
+  "oracleVersion": "stage-d-python-stdlib-1",
+  "initialState": {
+    "rulesVersion": "core-001.v3",
+    "boardSize": 3,
+    "moveLimit": 5,
+    "blocked": [],
+    "cells": [
+      [
+        {
+          "shape": "circle",
+          "direction": "up"
+        },
+        {
+          "shape": "circle",
+          "direction": "up"
+        },
+        null
+      ],
+      [
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null
+      ]
+    ],
+    "offers": [
+      {
+        "kind": "piece",
+        "shape": "circle",
+        "direction": "left"
+      },
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "kind": "piece",
+        "shape": "triangle",
+        "direction": "up"
+      }
+    ],
+    "futurePieces": [
+      {
+        "shape": "diamond",
+        "direction": "right"
+      }
+    ],
+    "turnsUsed": 0,
+    "score": 0,
+    "status": "in_progress",
+    "terminalReason": null
+  },
+  "moves": [
+    {
+      "offerIndex": 0,
+      "tap": [
+        0,
+        2
+      ]
+    }
+  ],
+  "requireInitial": true,
+  "expected": {
+    "ok": true,
+    "finalState": {
+      "rulesVersion": "core-001.v3",
+      "boardSize": 3,
+      "moveLimit": 5,
+      "blocked": [],
+      "cells": [
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ],
+      "offers": [
+        {
+          "kind": "piece",
+          "shape": "diamond",
+          "direction": "right"
+        },
+        {
+          "kind": "piece",
+          "shape": "diamond",
+          "direction": "down"
+        },
+        {
+          "kind": "piece",
+          "shape": "triangle",
+          "direction": "up"
+        }
+      ],
+      "futurePieces": [],
+      "turnsUsed": 1,
+      "score": 300,
+      "status": "in_progress",
+      "terminalReason": null
+    },
+    "stateHash": "8a92ec70374e5d0bc2749b1ce522d5e15fb0d4c1a0ab31eb0e88df16a9314d24",
+    "canonicalJson": "{\"blocked\":[],\"boardSize\":3,\"cells\":[[null,null,null],[null,null,null],[null,null,null]],\"futurePieces\":[],\"moveLimit\":5,\"offers\":[{\"direction\":\"right\",\"kind\":\"piece\",\"shape\":\"diamond\"},{\"direction\":\"down\",\"kind\":\"piece\",\"shape\":\"diamond\"},{\"direction\":\"up\",\"kind\":\"piece\",\"shape\":\"triangle\"}],\"rulesVersion\":\"core-001.v3\",\"score\":300,\"status\":\"in_progress\",\"terminalReason\":null,\"turnsUsed\":1}",
+    "applied": [
+      {
+        "landing": [
+          0,
+          2
+        ],
+        "turnsUsed": 1,
+        "scoreDelta": 300,
+        "waves": [
+          {
+            "wave": 1,
+            "cleared": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                2
+              ]
+            ],
+            "scoreDelta": 300,
+            "moved": []
+          }
+        ],
+        "finalState": {
+          "rulesVersion": "core-001.v3",
+          "boardSize": 3,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {
+              "kind": "piece",
+              "shape": "diamond",
+              "direction": "right"
+            },
+            {
+              "kind": "piece",
+              "shape": "diamond",
+              "direction": "down"
+            },
+            {
+              "kind": "piece",
+              "shape": "triangle",
+              "direction": "up"
+            }
+          ],
+          "futurePieces": [],
+          "turnsUsed": 1,
+          "score": 300,
+          "status": "in_progress",
+          "terminalReason": null
+        },
+        "stateHash": "8a92ec70374e5d0bc2749b1ce522d5e15fb0d4c1a0ab31eb0e88df16a9314d24"
+      }
+    ]
+  }
+}

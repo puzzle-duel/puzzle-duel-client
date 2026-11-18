@@ -37,6 +37,7 @@ abstract final class MoveFeedbackCopy {
     'occupied_tap': 'That slot is taken!',
     'blocked_tap': 'That tile is blocked.',
     'select_offer_first': 'Pick a piece first.',
+    'outcome_unknown': 'That move was not confirmed.',
     // Alias kept for older/debug wording; never shown raw.
     'no_offer_selected': 'Pick a piece first.',
     'offer_unavailable': 'That piece isn’t available.',
