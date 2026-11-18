@@ -35,11 +35,37 @@ final class TournamentCopy {
   String get tagline => pick('Match shapes. Clear lines.', 'Şekilleri eşleştir. Satırları temizle.');
   String get dailyChallenge => pick('Daily challenge', 'Günlük mücadele');
   String get sixGames => pick('Six games', 'Altı oyun');
-  String get playToday => pick("Play today's challenge", 'Bugünün mücadelesini oyna');
+  String get playToday => pick("Play today's tournament", 'Bugünün turnuvasını oyna');
+  String get continueTournament => pick('Continue tournament', 'Turnuvaya devam et');
   String get resume => pick('Resume tournament', 'Turnuvaya devam et');
+  String get readyHeadline => pick('Today’s tournament is open', 'Bugünün turnuvası açık');
+  String get progressHeadline => pick('Tournament in progress', 'Turnuva sürüyor');
+  String get completedHeadline => pick("Today's tournament completed", 'Bugünün turnuvası tamamlandı');
+  String get weeklyRankings => pick('Weekly rankings', 'Haftalık sıralama');
+  String get practiceLevels => pick('Easy · Medium · Hard', 'Kolay · Orta · Zor');
+  String get yourRank => pick('YOUR RANK', 'SENİN SIRAN');
+  String get rankCaption => pick('Verified rank', 'Doğrulanmış sıra');
+  String get settingsTitle => pick('Settings', 'Ayarlar');
+  String get profile => pick('Profile', 'Profil');
+  String get profileLater => pick(
+    'Player profile arrives in a later update.',
+    'Oyuncu profili sonraki güncellemede gelecek.',
+  );
+  String get soundBody => pick('Sounds for placements, clears, and results.', 'Yerleştirme, temizleme ve sonuç sesleri.');
+  String get hapticsBody => pick('Vibration for selections and results.', 'Seçim ve sonuç titreşimi.');
+  String get showMore => pick('Show more verified scores', 'Daha fazla doğrulanmış puan');
+  String get serverRanks => pick('Ranks and scores come from the server.', 'Sıra ve puan sunucudan gelir.');
+  String get oneVerified => pick('One verified score on this board.', 'Bu tabloda bir doğrulanmış puan var.');
+  String get personalBest => pick('Personal best on this device', 'Bu cihazdaki en iyi sonuç');
+  String get bestOnDevice => pick('Best on this device', 'Bu cihazdaki en iyi');
+  String get stageComplete => pick('Stage complete', 'Aşama tamam');
+  String get previousWeek => pick('Previous week', 'Önceki hafta');
+  String get newerWeek => pick('Later week', 'Sonraki hafta');
   String get continueNext => pick('Continue', 'Devam');
   String get viewResults => pick('View results', 'Sonuçları gör');
-  String get returnHome => pick('Return home', 'Ana sayfaya dön');
+  String get returnHome => pick('Return Home', 'Ana sayfaya dön');
+  String get homeAction => pick('Home', 'Ana sayfa');
+  String get viewLeaderboard => pick('View Leaderboard', 'Sıralamayı gör');
   String get seeGames => pick("Today's games", 'Bugünün oyunları');
   String get dailyBoard => pick('Daily leaderboard', 'Günlük sıralama');
   String get weeklyBoard => pick('Weekly leaderboard', 'Haftalık sıralama');
@@ -82,17 +108,17 @@ final class TournamentCopy {
   String get retrySame => pick('Retry the same move', 'Aynı hamleyi yeniden dene');
   String get idle => pick('Time to move', 'Hamle süresi');
   String get leaderboard => pick('Leaderboard', 'Sıralama');
-  String get practice => pick('Practice', 'Antrenman');
-  String get practiceTitle => pick('Practice', 'Antrenman');
+  String get practice => pick('Practice', 'Pratik Yap');
+  String get practiceTitle => pick('Practice', 'Pratik Yap');
   String get practiceBlurb => pick(
     'Unlimited puzzles. Not ranked and not part of today’s tournament.',
     'Sınırsız bulmaca. Sıralamaya girmez ve bugünün turnuvasına yazılmaz.',
   );
   String get chooseDifficulty => pick('Choose a difficulty', 'Zorluk seç');
-  String get newPuzzle => pick('New puzzle', 'Yeni bulmaca');
-  String get samePuzzle => pick('Replay', 'Aynı bulmaca');
-  String get changeDifficulty => pick('Change difficulty', 'Zorluğu değiştir');
-  String get practiceDone => pick('Practice complete', 'Antrenman bitti');
+  String get newPuzzle => pick('New Puzzle', 'Yeni bulmaca');
+  String get samePuzzle => pick('Replay Same Puzzle', 'Aynı bulmacayı tekrarla');
+  String get changeDifficulty => pick('Change Difficulty', 'Zorluğu değiştir');
+  String get practiceDone => pick('Practice complete', 'Pratik tamamlandı');
   String get practiceLocal => pick(
     'Saved on this device only. This is not a verified rank.',
     'Yalnızca bu cihazda durur. Doğrulanmış bir sıralama değildir.',
@@ -127,9 +153,10 @@ final class TournamentCopy {
   String get emptyBoard => pick('No verified scores on this board yet.', 'Bu tabloda henüz doğrulanmış puan yok.');
   String get notOnPage => pick('Your rank is not on this page.', 'Sıralaman bu sayfada değil.');
   String get provisional => pick('Provisional', 'Geçici');
-  String get finalLabel => pick('Final', 'Kesin');
+  String get finalLabel => pick('Final', 'Kesinleşti');
   String get tryAgain => pick('Try again', 'Yeniden dene');
   String get loading => pick('Loading the tournament…', 'Turnuva yükleniyor…');
+  String get boardLoading => pick('Loading verified scores…', 'Doğrulanmış puanlar yükleniyor…');
   String get reference => pick('Reference', 'Referans');
   String get unauthorized => 'Unauthorized. Issue a new UAT bearer and relaunch.';
   String get timedOut => pick('The server timed out.', 'Sunucu zaman aşımına uğradı.');
@@ -200,6 +227,86 @@ final class TournamentCopy {
       _ => category,
     };
   }
+
+  String groupedScore(int value) {
+    final raw = value.abs().toString();
+    final buffer = StringBuffer(value < 0 ? '-' : '');
+    for (var index = 0; index < raw.length; index++) {
+      if (index > 0 && (raw.length - index) % 3 == 0) buffer.write(isTurkish ? '.' : ',');
+      buffer.write(raw[index]);
+    }
+    return buffer.toString();
+  }
+
+  String weekRange(String start) => _formatRange(start, isTurkish);
+
+  String dayLabel(String day) => _formatDay(day, isTurkish);
+}
+
+const _englishMonths = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const _turkishMonths = [
+  'Ocak',
+  'Şubat',
+  'Mart',
+  'Nisan',
+  'Mayıs',
+  'Haziran',
+  'Temmuz',
+  'Ağustos',
+  'Eylül',
+  'Ekim',
+  'Kasım',
+  'Aralık',
+];
+
+DateTime? _utcDay(String value) {
+  final parts = value.split('-');
+  if (parts.length != 3) return null;
+  final year = int.tryParse(parts[0]);
+  final month = int.tryParse(parts[1]);
+  final day = int.tryParse(parts[2]);
+  if (year == null || month == null || day == null) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  final parsed = DateTime.utc(year, month, day);
+  if (parsed.year != year || parsed.month != month || parsed.day != day) return null;
+  return parsed;
+}
+
+String _monthName(int month, bool turkish) {
+  return (turkish ? _turkishMonths : _englishMonths)[month - 1];
+}
+
+String _formatDay(String value, bool turkish) {
+  final day = _utcDay(value);
+  if (day == null) return value;
+  return '${day.day} ${_monthName(day.month, turkish)} ${day.year}';
+}
+
+String _formatRange(String start, bool turkish) {
+  final first = _utcDay(start);
+  if (first == null) return start;
+  final last = first.add(const Duration(days: 6));
+  if (first.month == last.month && first.year == last.year) {
+    return '${first.day}–${last.day} ${_monthName(first.month, turkish)} ${first.year}';
+  }
+  if (first.year == last.year) {
+    return '${first.day} ${_monthName(first.month, turkish)}–${last.day} ${_monthName(last.month, turkish)} ${first.year}';
+  }
+  return '${_formatDay(start, turkish)}–${last.day} ${_monthName(last.month, turkish)} ${last.year}';
 }
 
 final class TournamentCopyDelegate extends LocalizationsDelegate<TournamentCopy> {

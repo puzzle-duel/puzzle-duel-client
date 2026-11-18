@@ -62,6 +62,15 @@ final class PracticeStore {
     return issued;
   }
 
+  int? bestScore(String difficulty) {
+    final scores = [
+      for (final record in load())
+        if (record.difficulty == difficulty) record.score,
+    ];
+    if (scores.isEmpty) return null;
+    return scores.reduce((best, score) => score > best ? score : best);
+  }
+
   void append(PracticeRecord record) {
     final all = load();
     all.add(record);

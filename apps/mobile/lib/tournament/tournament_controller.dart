@@ -127,6 +127,7 @@ final class TournamentController extends ChangeNotifier {
   Map<String, Object?> board = const {};
   Map<String, Object?> results = const {};
   Map<String, Object?> leaderboard = const {};
+  String? nextCursor;
   String? seriesId;
   String category = 'ALL';
   String? weekStart;
@@ -444,16 +445,53 @@ final class TournamentController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final path = weekly
-        ? '/v1/tournament/leaderboards/weekly?weekStart=$selectedWeek&category=$category&pageSize=50'
-        : '/v1/tournament/leaderboards/daily?date=${_today()}&category=$category&pageSize=50';
+    final path = _leaderboardPath(weekly: weekly, week: selectedWeek);
     final response = await api.get(path);
     if (!_accepted(response, const {200})) return;
     leaderboard = response.map;
+    nextCursor = _cursor(response.map['nextCursor']);
     weeklyFinal = response.map['state'] == 'FINAL';
     route = opened;
     errorCode = null;
     notifyListeners();
+  }
+
+  /// Appends the next server page. It does not invent rows.
+  Future<void> loadMoreLeaderboard() async {
+    final cursor = nextCursor;
+    if (cursor == null || busy) return;
+    final weekly = route.place == TournamentPlace.weekly;
+    busy = true;
+    notifyListeners();
+    final response = await api.get(_leaderboardPath(weekly: weekly, week: weekStart, cursor: cursor));
+    if (!_accepted(response, const {200})) return;
+    final existing = leaderboard['rows'];
+    final more = response.map['rows'];
+    leaderboard = {
+      ...response.map,
+      'rows': [
+        if (existing is List) ...existing,
+        if (more is List) ...more,
+      ],
+    };
+    nextCursor = _cursor(response.map['nextCursor']);
+    weeklyFinal = response.map['state'] == 'FINAL';
+    busy = false;
+    notifyListeners();
+  }
+
+  String _leaderboardPath({required bool weekly, String? week, String? cursor}) {
+    final base = weekly
+        ? '/v1/tournament/leaderboards/weekly?weekStart=$week&category=$category&pageSize=50'
+        : '/v1/tournament/leaderboards/daily?date=${_today()}&category=$category&pageSize=50';
+    if (cursor == null || cursor.isEmpty) return base;
+    return '$base&cursor=${Uri.encodeQueryComponent(cursor)}';
+  }
+
+  String? _cursor(Object? value) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty || text == 'null') return null;
+    return text;
   }
 
   Future<void> _loadResults() async {

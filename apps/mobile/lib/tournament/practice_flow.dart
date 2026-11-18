@@ -37,6 +37,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
   bool _review = false;
   bool _replayed = false;
   GameState? _finished;
+  int? _deviceBest;
   int _seenResolution = 0;
   MoveFeedbackKind? _seenFeedback;
 
@@ -107,8 +108,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         completedAt: when,
       ),
     );
+    final best = _store.bestScore(profile.wire);
     GameSfxScope.maybeOf(context)?.play(GameSfxEvent.roundEnd);
     widget.haptics.completed();
+    if (mounted) setState(() => _deviceBest = best);
   }
 
   Future<void> _changeDifficulty() async {
@@ -176,7 +179,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       builder: (context, _) {
         final state = _session.view.canonicalState;
         if (_review && _finished != null && _profile != null) {
-          return _PracticeResult(
+          return PracticeResultView(
             copy: copy,
             state: _finished!,
             profile: _profile!,
@@ -188,6 +191,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
               _seed = null;
             }),
             onHome: () => Navigator.pop(context),
+            deviceBest: _deviceBest,
           );
         }
         if (state != null && state.status == GameStatus.ended) {
@@ -196,7 +200,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
               if (mounted) _maybeRecord();
             });
           }
-          return _PracticeResult(
+          return PracticeResultView(
             copy: copy,
             state: state,
             profile: _profile!,
@@ -207,6 +211,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
               _seed = null;
             }),
             onHome: () => Navigator.pop(context),
+            deviceBest: _deviceBest,
           );
         }
         if (state == null || _profile == null) {
@@ -415,8 +420,9 @@ final class _PracticePlay extends StatelessWidget {
   }
 }
 
-final class _PracticeResult extends StatelessWidget {
-  const _PracticeResult({
+final class PracticeResultView extends StatelessWidget {
+  const PracticeResultView({
+    super.key,
     required this.copy,
     required this.state,
     required this.profile,
@@ -424,6 +430,7 @@ final class _PracticeResult extends StatelessWidget {
     required this.onNew,
     required this.onDifficulty,
     required this.onHome,
+    this.deviceBest,
   });
 
   final TournamentCopy copy;
@@ -433,38 +440,50 @@ final class _PracticeResult extends StatelessWidget {
   final VoidCallback onNew;
   final VoidCallback onDifficulty;
   final VoidCallback onHome;
+  final int? deviceBest;
 
   @override
   Widget build(BuildContext context) {
+    final tone = GameTokens.difficultyAccent(profile);
+    final best = deviceBest;
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             children: [
               Text(copy.practiceDone, style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: 8),
-              Text(copy.difficultyOf(profile == DifficultyProfile.easy
-                  ? 'E1'
-                  : profile == DifficultyProfile.medium
-                  ? 'M1'
-                  : 'H1')),
+              const SizedBox(height: 6),
               Text(
-                '${state.score}',
-                key: const Key('practice-result-score'),
-                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.w800, color: GameTokens.scoreGlow),
+                '${copy.difficultyOf(profile == DifficultyProfile.easy ? 'E1' : profile == DifficultyProfile.medium ? 'M1' : 'H1')} · ${copy.budgetLine(state.boardSize, state.moveLimit)}',
+                style: TextStyle(color: tone, fontWeight: FontWeight.w700),
               ),
+              const SizedBox(height: 12),
+              Text(
+                copy.groupedScore(state.score),
+                key: const Key('practice-result-score'),
+                style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w800, color: GameTokens.scoreGlow, height: 1),
+              ),
+              const SizedBox(height: 8),
               Text(copy.finishReason(state.terminalReason?.wire)),
+              if (best != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  state.score >= best
+                      ? copy.personalBest
+                      : '${copy.bestOnDevice} ${copy.groupedScore(best)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
               const SizedBox(height: 8),
-              Text(copy.practiceLocal),
-              const SizedBox(height: 18),
-              FilledButton(key: const Key('practice-replay'), onPressed: onReplay, child: Text(copy.samePuzzle)),
-              const SizedBox(height: 8),
-              FilledButton.tonal(key: const Key('practice-new'), onPressed: onNew, child: Text(copy.newPuzzle)),
-              const SizedBox(height: 8),
-              OutlinedButton(onPressed: onDifficulty, child: Text(copy.changeDifficulty)),
-              const SizedBox(height: 8),
-              OutlinedButton(key: const Key('practice-home'), onPressed: onHome, child: Text(copy.returnHome)),
+              Text(copy.practiceLocal, style: const TextStyle(color: GameTokens.textSecondary)),
+              const SizedBox(height: 22),
+              FilledButton(key: const Key('practice-new'), onPressed: onNew, child: Text(copy.newPuzzle)),
+              const SizedBox(height: 10),
+              OutlinedButton(key: const Key('practice-replay'), onPressed: onReplay, child: Text(copy.samePuzzle)),
+              const SizedBox(height: 4),
+              TextButton(onPressed: onDifficulty, child: Text(copy.changeDifficulty)),
+              TextButton(key: const Key('practice-home'), onPressed: onHome, child: Text(copy.homeAction)),
             ],
           ),
         ),

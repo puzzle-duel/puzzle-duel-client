@@ -12,7 +12,7 @@ Manual iPhone UAT is still not passed. This note records the audit, the navigati
 | P1 | Home, transitions, results, and leaderboards were debug layouts. Back sat at the bottom. | The first UAT slice only proved the HTTP path. | Home, overview, play, transition, results, and both leaderboards use the existing arcade tokens. Back is top-left. |
 | P1 | Idle time was shown as if it were the puzzle clock. | The payload field is the server idle deadline. | The HUD labels it "Time to move" and shows moves remaining from the authoritative state. |
 | P0 | Every accepted move shifted the board. | Pending text, notices, and the score banner were inserted above an `Expanded` board, so its square constraint changed. | The play column keeps a fixed HUD, a 44px feedback slot, a square board viewport, and a 152px offer tray. |
-| P0 | Tournament play was silent and had no distinct haptics. | The host forced `SilentGameSfx`, and haptics were only a generic platform call. | The device build uses the existing wav assets. Haptics are event-specific. Both have persisted on/off switches. |
+| P0 | Tournament play was silent and had no distinct haptics. | The host forced `SilentGameSfx`, and haptics were only a generic platform call. | The device build uses the existing wav assets. Haptics are event-specific. Sound and haptics live on the Settings screen and persist. |
 | P0 | A finished daily tournament left no way to play again. | Practice was not a product path. | Home always offers Practice. It uses the canonical generator locally and never posts a claim, command, or ranked score. |
 | P0 | Leaderboard entry was two peer buttons and ALL was the last chip. | Daily and Weekly were separate Home actions. | Home has one Leaderboard action. It opens Weekly / All on the server's current week. Daily is a tab. |
 | P0 | E1–H1 reused 2×2, 3×3 and 5×5 contract fixtures, including two duplicated boards. | The UAT manifest was pinned to engine-test fixtures instead of the approved profiles. | New claims use six distinct `gen-001.v1` boards projected into `core-001.v3`: Easy 5×5/15, Medium 6×6/12, Hard 7×7/10. The generator algorithm is unchanged. A claim already stored for today keeps its old digest. |
@@ -36,7 +36,7 @@ Placement preview uses `canPlaceAt` and is drawn only after a piece is selected.
 
 A line clear is not animated from a local prediction. After the server accepts a move, a positive score banner is the difference of the two server series scores. A zero difference shows no banner. The device build plays the existing wav assets only after that acceptance: `place.wav` for a selection or a non-scoring placement, `clear.wav` when the server score increases, `reject.wav` for a rejected command, `round_end.wav` when a game ends, and `chain_complete.wav` when the six-game result opens. Rapid repeats are debounced by the existing player. Widget tests keep a silent sink. No music track was added.
 
-Haptics are separate from mute. Selection uses a selection click, an accepted placement a light impact, a rejection a heavy impact, a scoring clear a medium impact, and game or tournament completion a heavy impact. Medium and heavy completion cues are skipped when the platform reduce-motion setting is on. Sound and haptics switches are stored in `pzd-settings.json` beside the UAT session file.
+Haptics are separate from mute. Selection uses a selection click, an accepted placement a light impact, a rejection a heavy impact, a scoring clear a medium impact, and game or tournament completion a heavy impact. Medium and heavy completion cues are skipped when the platform reduce-motion setting is on. Sound and haptics switches are stored in `pzd-settings.json` beside the UAT session file. Home no longer shows those switches. The gear opens Settings, which has only those two rows, and Back returns Home. The profile icon is reserved for PZD-43 and does not open a profile.
 
 ## Stable play frame
 
@@ -50,9 +50,19 @@ A finished session appends one local record: session id, difficulty, rules versi
 
 The files live in the same directory as the UAT session file. The device entry currently uses the temporary directory. iOS can purge it, uninstall deletes it, and it does not move to another phone. A durable player profile remains PZD-43 and needs an authenticated profile API. This build does not add that UI or that API.
 
+## Home and Settings
+
+Home is a branded header, a profile icon reserved for PZD-43, a settings gear, one daily-tournament hero, and two equal action cards. The hero uses the claim and board payload for status, the six-stage progression, the verified total when the day is published, and one primary action: play, continue, or view results. Leaderboard and Practice are the only other actions. Sound and haptics are not on Home.
+
 ## Leaderboard
 
-Opening Leaderboard from Home or Results selects Weekly, All, and `weeks.first` from `GET /v1/tournament/leaderboards/weeks`. That first value is the backend's current canonical week, not a Monday computed on the phone. Weekly and Daily are the top tabs. All, Easy, Medium, and Hard are the category chips. Changing week keeps the category. Back returns to the screen that opened the board. The self card shows the server rank and score, or a plain unranked sentence when `self` is absent. Rows use the server rank and score. Other players are labeled "Player" because the payload has no display name. Empty, provisional, and final states stay server-owned.
+Opening Leaderboard from Home selects Weekly, All, and `weeks.first` from `GET /v1/tournament/leaderboards/weeks`. That first value is the backend's current canonical week, not a Monday computed on the phone. Opening it again from Home resets Weekly / All. Opening it from Results does the same reset and Back returns to Results. Weekly and Daily are the segmented control. Previous and next week stay on Weekly and keep the category. All, Easy, Medium, and Hard filter that period, with All first.
+
+The personal card shows `self.rank` and `self.score` from the selected board. It does not infer a rank from a row index or a local score. A missing `self` says the player is unranked. While the first page is still loading, that card and the list say the scores are loading instead of looking empty. Ranks 1, 2, and 3 use gold, silver, and bronze. A podium is drawn only when the payload has at least three rows. One verified row stays one row.
+
+The authenticated leaderboard does not return a display name or a public player id. The current player's row says "You" / "Sen". Every other row says "Player" / "Oyuncu". No username is invented and no identity endpoint was added. Week labels are formatted from the server UTC date, for example `16–22 November 2026`. Provisional and Final stay the server `state`. Practice records never enter this board. A further page is requested only when the response includes `nextCursor`.
+
+A leaderboard request that fails authentication or the writer check still opens the existing recovery screen. That path was not replaced with a second error panel.
 
 ## Navigation
 
@@ -80,16 +90,18 @@ Replace the LAN address if `ipconfig getifaddr en0` has changed. `127.0.0.1` on 
 
 Expect:
 
-1. Home shows the daily card, Practice, one Leaderboard action, and Sound / Haptics switches. It does not jump to Results. Practice remains after the day is complete.
+1. Home shows the branded header, the daily hero, Practice, and one Leaderboard action. Sound and haptics are on the gear screen and survive leaving the app. Home does not jump to Results. Practice remains after the day is complete.
 2. E1–E3 are 5×5 with 15 moves, M1–M2 are 6×6 with 12, and H1 is 7×7 with 10. The board does not jump when a move is sent, accepted, rejected, or scored. A +0 placement shows no score banner.
 3. With sound on, selection, placement, rejection, a scoring clear, game completion, and the six-game result are audible from the iPhone speaker. Haptics match those events and stop when the switch is off. This has not been confirmed on a phone yet.
 4. Leaderboard from Home opens Weekly / All on the current server week. Daily is a tab. Back returns Home. From Results, Back returns to Results.
 5. Practice asks for Easy, Medium, or Hard, can be replayed or replaced, and does not change the daily claim or the ranked board.
 6. A rejected tap stays on the board and does not add a local score.
 7. After each of E1–M2, the transition shows that game's server score, the series total, and Continue.
-8. After H1, Results shows the verified total, Easy / Medium / Hard, the On-Time state, Return Home, Leaderboard, and Practice.
+8. After H1, Results shows the verified total, the six stage scores, Easy / Medium / Hard, the On-Time state, View Leaderboard, Practice, and Return Home.
 9. Leaving a ranked game or an in-progress practice game asks first. Home can resume the same ranked series.
 10. Player B uses the same command with `PZD_UAT_BEARER_B` and `PZD_UAT_PLAYER="Player B"`. A second device remains `WRITER_NOT_AUTHORIZED`.
 11. This phone session needs a new `pzd_uat` database. An existing claim from earlier today still has the old boards.
 
-Physical iPhone audio, haptics, and the stable board frame are NOT_RUN. Widget tests cover the frame at 390×844, the completed-day loop, Practice isolation, and Home at 320, 390, and 430 points, including Turkish copy and a larger text scale.
+Physical iPhone audio, haptics, the stable board frame, and this visual redesign are NOT_RUN. Widget tests cover the frame at 390×844, the completed-day loop, Practice isolation, Settings persistence, and Home at 320, 390, and 430 points, including Turkish copy and a larger text scale.
+
+Rendered review images, not device photos, are in `docs/tournament/uat-evidence/pzd42-visual/`. Open `index.html` for the contact sheet. Those images use labeled test fixtures. The running app does not invent players or scores. Linux CI skips the golden comparison because its pixels differ from these macOS captures. A physical-iPhone visual UAT is still required before this screen set can pass.

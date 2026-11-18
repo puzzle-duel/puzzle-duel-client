@@ -12,6 +12,8 @@ import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
@@ -172,7 +174,7 @@ final class _TournamentShell extends StatelessWidget {
       TournamentPlace.playing => _PlayScreen(controller: controller),
       TournamentPlace.transition => _TransitionScreen(controller: controller),
       TournamentPlace.results => _ResultsScreen(controller: controller),
-      TournamentPlace.daily || TournamentPlace.weekly => _LeaderboardScreen(controller: controller),
+      TournamentPlace.daily || TournamentPlace.weekly => TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
       TournamentPlace.home => _HomeScreen(controller: controller),
@@ -213,6 +215,28 @@ final class _PlayFeedback extends StatelessWidget {
     }
     return const SizedBox.shrink();
   }
+}
+
+void _openSettings(BuildContext context, TournamentController controller) {
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (context) => TournamentSettingsScreen(controller: controller),
+    ),
+  );
+}
+
+void _showProfileHold(BuildContext context) {
+  final copy = TournamentCopy.of(context);
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(copy.profile),
+      content: Text(copy.profileLater),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(copy.back)),
+      ],
+    ),
+  );
 }
 
 void _openPractice(BuildContext context, TournamentController controller) {
@@ -289,30 +313,60 @@ final class _HomeScreen extends StatelessWidget {
         : null;
     final primary = switch (phase) {
       DayPhase.completed => copy.viewResults,
-      DayPhase.betweenGames => copy.continueNext,
-      DayPhase.inProgress => copy.resume,
+      DayPhase.betweenGames || DayPhase.inProgress => copy.continueTournament,
       _ => copy.playToday,
+    };
+    final headline = switch (phase) {
+      DayPhase.completed => copy.completedHeadline,
+      DayPhase.inProgress || DayPhase.betweenGames => copy.progressHeadline,
+      _ => copy.readyHeadline,
     };
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             children: [
-              Text(
-                copy.appTitle.toUpperCase(),
-                key: const Key('home-title'),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  letterSpacing: 2.4,
-                  fontWeight: FontWeight.w800,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          copy.appTitle.toUpperCase(),
+                          key: const Key('home-title'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            letterSpacing: 1.6,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          copy.tagline,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: GameTokens.accent),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('profile'),
+                    tooltip: copy.profile,
+                    onPressed: () => _showProfileHold(context),
+                    icon: const Icon(Icons.person_rounded),
+                  ),
+                  IconButton(
+                    key: const Key('settings'),
+                    tooltip: copy.settingsTitle,
+                    onPressed: () => _openSettings(context, controller),
+                    icon: const Icon(Icons.settings_rounded),
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              Text(copy.tagline, textAlign: TextAlign.center, style: TextStyle(color: GameTokens.accent)),
-              const SizedBox(height: 4),
-              Text(controller.config.playerLabel, textAlign: TextAlign.center),
-              const SizedBox(height: 22),
+              const SizedBox(height: 12),
               _DailyCard(
                 copy: copy,
                 day: day,
@@ -320,45 +374,128 @@ final class _HomeScreen extends StatelessWidget {
                 scoreLabel: scoreLabel,
                 phase: phase,
                 badge: badge,
+                headline: headline,
+                action: primary,
+                onAction: phase == DayPhase.completed ? controller.openResults : controller.resume,
               ),
-              const SizedBox(height: 18),
-              FilledButton(
-                key: const Key('primary-action'),
-                onPressed: phase == DayPhase.completed ? controller.openResults : controller.resume,
-                child: Text(primary),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton(onPressed: controller.showOverview, child: Text(copy.seeGames)),
-              const SizedBox(height: 18),
-              Text(copy.practiceTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 6),
-              Text(copy.practiceBlurb),
-              const SizedBox(height: 10),
-              FilledButton.tonal(
-                key: const Key('practice'),
-                onPressed: () => _openPractice(context, controller),
-                child: Text(copy.practice),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton(
-                key: const Key('leaderboard'),
-                onPressed: () => controller.openWeekly(fromHome: true),
-                child: Text(copy.leaderboard),
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(copy.soundSetting),
-                value: controller.settings.sound,
-                onChanged: controller.setSound,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(copy.hapticsSetting),
-                value: controller.settings.haptics,
-                onChanged: controller.setHaptics,
-              ),
+              const SizedBox(height: 16),
+              _HomeActions(controller: controller),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _HomeActions extends StatelessWidget {
+  const _HomeActions({required this.controller});
+
+  final TournamentController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = TournamentCopy.of(context);
+    final scale = MediaQuery.textScalerOf(context).scale(1);
+    final stacked = MediaQuery.sizeOf(context).width < 360 || scale > 1.25;
+    final leaderboard = _ActionCard(
+      cardKey: const Key('leaderboard'),
+      icon: Icons.emoji_events_rounded,
+      iconColor: GameTokens.scoreGlow,
+      title: copy.leaderboard,
+      subtitle: copy.weeklyRankings,
+      onTap: () => controller.openWeekly(fromHome: true),
+    );
+    final practice = _ActionCard(
+      cardKey: const Key('practice'),
+      icon: Icons.sports_esports_rounded,
+      iconColor: GameTokens.diamondFill,
+      title: copy.practice,
+      subtitle: copy.practiceLevels,
+      onTap: () => _openPractice(context, controller),
+    );
+    if (stacked) {
+      return Column(
+        children: [
+          leaderboard,
+          const SizedBox(height: 12),
+          practice,
+        ],
+      );
+    }
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: leaderboard),
+          const SizedBox(width: 12),
+          Expanded(child: practice),
+        ],
+      ),
+    );
+  }
+}
+
+final class _ActionCard extends StatelessWidget {
+  const _ActionCard({
+    required this.cardKey,
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final Key cardKey;
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$title. $subtitle',
+      child: Material(
+        color: GameTokens.surface.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(GameTokens.radiusLg),
+        child: InkWell(
+          key: cardKey,
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(GameTokens.radiusLg),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(GameTokens.radiusLg),
+              border: Border.all(color: iconColor.withValues(alpha: 0.7)),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 136),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, color: iconColor, size: 32),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: GameTokens.textPrimary),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: GameTokens.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -374,6 +511,9 @@ final class _DailyCard extends StatelessWidget {
     required this.scoreLabel,
     required this.phase,
     required this.badge,
+    required this.headline,
+    required this.action,
+    required this.onAction,
   });
 
   final TournamentCopy copy;
@@ -382,41 +522,62 @@ final class _DailyCard extends StatelessWidget {
   final String scoreLabel;
   final DayPhase phase;
   final String? badge;
+  final String headline;
+  final String action;
+  final VoidCallback onAction;
 
   @override
   Widget build(BuildContext context) {
     final label = day?.label ?? 'E1';
-    final tone = _tone(label);
+    final tone = phase == DayPhase.completed ? GameTokens.success : _tone(label);
     final body = switch (phase) {
       DayPhase.completed => copy.completedBody,
       DayPhase.ready when day?.original == false => copy.alreadyClaimed,
+      DayPhase.inProgress || DayPhase.betweenGames => label,
       _ => copy.readyBody,
     };
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: GameTokens.surface.withValues(alpha: 0.94),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            tone.withValues(alpha: 0.22),
+            GameTokens.surface.withValues(alpha: 0.96),
+          ],
+        ),
         borderRadius: BorderRadius.circular(GameTokens.radiusLg),
-        border: Border.all(color: tone.withValues(alpha: 0.8), width: 1.4),
+        border: Border.all(color: tone.withValues(alpha: 0.85), width: 1.4),
+        boxShadow: [
+          BoxShadow(
+            color: tone.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(copy.dailyChallenge, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+            Text(
+              copy.dailyChallenge.toUpperCase(),
+              style: TextStyle(color: tone, fontWeight: FontWeight.w800, letterSpacing: 1.1),
+            ),
             const SizedBox(height: 8),
-            Text(label, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text(body),
+            Text(headline, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 14),
-            _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal),
+            _Pips(completed: day?.completedGames ?? 0, current: phase == DayPhase.completed ? null : day?.ordinal),
             const SizedBox(height: 14),
             Text(scoreLabel, style: const TextStyle(color: GameTokens.textMuted)),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(
-                score == null ? '—' : '$score',
+                score == null ? '—' : copy.groupedScore(score!),
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(
                   color: GameTokens.scoreGlow,
                   fontWeight: FontWeight.w800,
@@ -426,14 +587,22 @@ final class _DailyCard extends StatelessWidget {
             if (badge != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(badge!, style: const TextStyle(fontWeight: FontWeight.w700)),
+                child: Text(badge!, style: TextStyle(fontWeight: FontWeight.w800, color: tone)),
               ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const Key('primary-action'),
+                onPressed: onAction,
+                child: Text(action, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
-
 }
 
 final class _OverviewScreen extends StatelessWidget {
@@ -494,12 +663,13 @@ final class _GameRow extends StatelessWidget {
     final tone = _tone(label);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: current ? tone.withValues(alpha: 0.16) : GameTokens.surface,
+      child: Material(
+        color: current ? tone.withValues(alpha: 0.16) : GameTokens.surface,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-          border: Border.all(color: current ? tone : GameTokens.border),
+          side: BorderSide(color: current ? tone : GameTokens.border),
         ),
+        clipBehavior: Clip.antiAlias,
         child: ListTile(
           leading: CircleAvatar(
             backgroundColor: tone.withValues(alpha: 0.2),
@@ -676,25 +846,38 @@ final class _TransitionScreen extends StatelessWidget {
     final next = nextOrdinalLabel(day?.ordinal);
     final tone = _tone(day?.label);
     return _Page(
-      title: copy.finishedTitle,
+      title: copy.stageComplete,
       onBack: () => _confirmLeave(context, controller),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
           Text(
             day?.label ?? '',
             style: Theme.of(context).textTheme.displaySmall?.copyWith(color: tone, fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(copy.finishReason(day?.terminalReason)),
-          const SizedBox(height: 18),
-          _ScoreLine(label: copy.gameScore, value: day?.gameScore),
-          _ScoreLine(label: copy.totalScore, value: day?.seriesScore),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          _ScoreHero(label: copy.gameScore, value: day?.gameScore, copy: copy),
+          const SizedBox(height: 10),
+          _ScoreHero(label: copy.totalScore, value: day?.seriesScore, copy: copy, compact: true),
+          const SizedBox(height: 16),
           _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal),
           if (next != null) ...[
             const SizedBox(height: 16),
-            Text('${copy.nextGame}  $next  ${copy.difficultyOf(next)}'),
+            Material(
+              color: GameTokens.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+                side: BorderSide(color: _tone(next).withValues(alpha: 0.8)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                leading: Icon(Icons.flag_rounded, color: _tone(next)),
+                title: Text('${copy.nextGame}  $next'),
+                subtitle: Text(copy.difficultyOf(next)),
+              ),
+            ),
           ],
           if (controller.noticeCode != null)
             Padding(
@@ -725,18 +908,21 @@ final class _ResultsScreen extends StatelessWidget {
     final total = tournamentInt(results['all']);
     final games = results['games'];
     final published = total != null;
+    final onTime = results['onTimeAwarded'] == true;
     return _Page(
       title: copy.resultsTitle,
       onBack: controller.showHome,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
+          const Icon(Icons.emoji_events_rounded, color: GameTokens.scoreGlow, size: 36),
+          const SizedBox(height: 8),
           Text(copy.verifiedScore, style: const TextStyle(color: GameTokens.textMuted)),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
-              published ? '$total' : '—',
+              published ? copy.groupedScore(total) : '—',
               key: const Key('results-score'),
               style: Theme.of(context).textTheme.displayLarge?.copyWith(
                 color: GameTokens.scoreGlow,
@@ -745,35 +931,52 @@ final class _ResultsScreen extends StatelessWidget {
             ),
           ),
           if (!published)
-            Text(
-              copy.resultsPending,
-              style: const TextStyle(color: GameTokens.danger),
-            ),
+            Text(copy.resultsPending, style: const TextStyle(color: GameTokens.danger)),
           if (controller.resultsError != null)
-            Text('${copy.reference}: ${controller.resultsError}', style: const TextStyle(color: GameTokens.textMuted)),
+            Text(copy.forError(controller.resultsError), style: const TextStyle(color: GameTokens.textMuted)),
           const SizedBox(height: 8),
-          Text(results['onTimeAwarded'] == true ? copy.onTime : copy.onTimeMissing),
-          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: (onTime ? GameTokens.success : GameTokens.textMuted).withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text(
+                  onTime ? copy.onTime : copy.onTimeMissing,
+                  style: TextStyle(fontWeight: FontWeight.w800, color: onTime ? GameTokens.success : GameTokens.textSecondary),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
           _Pips(completed: published ? 6 : controller.day?.completedGames ?? 0, current: null),
+          const SizedBox(height: 12),
+          if (games is List)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final item in games)
+                  if (item is Map)
+                    _StageChip(
+                      label: item['label']?.toString() ?? '',
+                      value: tournamentInt(item['score']),
+                      copy: copy,
+                    ),
+              ],
+            ),
           const SizedBox(height: 12),
           _ScoreLine(label: copy.easy, value: tournamentInt(results['easy'])),
           _ScoreLine(label: copy.medium, value: tournamentInt(results['medium'])),
           _ScoreLine(label: copy.hard, value: tournamentInt(results['hard'])),
-          _ScoreLine(label: copy.all, value: total),
-          if (games is List) ...[
-            const SizedBox(height: 8),
-            for (final item in games)
-              if (item is Map)
-                _ScoreLine(
-                  label: item['label']?.toString() ?? '',
-                  value: tournamentInt(item['score']),
-                ),
-          ],
           const SizedBox(height: 18),
           FilledButton(
             key: const Key('leaderboard'),
             onPressed: () => controller.openWeekly(fromHome: true),
-            child: Text(copy.leaderboard),
+            child: Text(copy.viewLeaderboard),
           ),
           const SizedBox(height: 10),
           OutlinedButton(
@@ -781,8 +984,8 @@ final class _ResultsScreen extends StatelessWidget {
             onPressed: () => _openPractice(context, controller),
             child: Text(copy.practice),
           ),
-          const SizedBox(height: 10),
-          OutlinedButton(
+          const SizedBox(height: 4),
+          TextButton(
             key: const Key('return-home'),
             onPressed: controller.showHome,
             child: Text(copy.returnHome),
@@ -793,128 +996,6 @@ final class _ResultsScreen extends StatelessWidget {
   }
 }
 
-final class _LeaderboardScreen extends StatelessWidget {
-  const _LeaderboardScreen({required this.controller});
-
-  final TournamentController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final copy = TournamentCopy.of(context);
-    final weekly = controller.route.place == TournamentPlace.weekly;
-    final rows = controller.leaderboard['rows'];
-    final list = rows is List ? rows : const [];
-    final self = controller.leaderboard['self'];
-    final title = weekly
-        ? '${copy.weeklyBoard}  ${controller.weekStart ?? ''}'
-        : '${copy.dailyBoard}  ${controller.leaderboard['period'] ?? ''}';
-    return _Page(
-      title: title,
-      onBack: controller.back,
-      child: Column(
-        children: [
-          if (weekly)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                controller.weeklyFinal ? copy.finalLabel : copy.provisional,
-                style: TextStyle(
-                  color: controller.weeklyFinal ? GameTokens.success : GameTokens.triangleFill,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          Row(
-            children: [
-              Expanded(
-                child: ChoiceChip(
-                  key: const Key('board-weekly'),
-                  label: Text(copy.weeklyTab),
-                  selected: weekly,
-                  onSelected: (_) => controller.openWeekly(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ChoiceChip(
-                  key: const Key('board-daily'),
-                  label: Text(copy.dailyTab),
-                  selected: !weekly,
-                  onSelected: (_) => controller.openDaily(),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final category in ['ALL', 'EASY', 'MEDIUM', 'HARD'])
-                ChoiceChip(
-                  label: Text(copy.categoryLabel(category)),
-                  selected: controller.category == category,
-                  onSelected: (_) => controller.setCategory(category),
-                ),
-            ],
-          ),
-          if (weekly)
-            SizedBox(
-              height: 48,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final week in controller.weeks)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(
-                        label: Text(week),
-                        selected: controller.weekStart == week,
-                        onSelected: (_) => controller.openWeekly(week: week),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          Padding(
-            key: const Key('self-rank'),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: self is Map
-                ? Text(
-                    '${copy.you}  ${copy.rankLabel(self['rank'])}  ${self['score']}',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22),
-                  )
-                : Text(copy.unranked, style: const TextStyle(fontWeight: FontWeight.w800)),
-          ),
-          Expanded(
-            child: list.isEmpty
-                ? Center(child: Text(copy.emptyBoard))
-                : ListView.builder(
-                    itemCount: list.length,
-                    itemBuilder: (context, index) {
-                      final row = list[index];
-                      if (row is! Map) return const SizedBox.shrink();
-                      final mine = row['self'] == true;
-                      return ListTile(
-                        tileColor: mine ? GameTokens.accent.withValues(alpha: 0.14) : null,
-                        leading: Text(
-                          '${row['rank']}',
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-                        ),
-                        title: Text(mine ? copy.you : copy.verifiedPlayer),
-                        subtitle: row['onTimeAwarded'] == true ? Text(copy.onTime) : null,
-                        trailing: Text(
-                          '${row['score']}',
-                          style: const TextStyle(color: GameTokens.scoreGlow, fontWeight: FontWeight.w800),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 final class _RecoveryScreen extends StatelessWidget {
   const _RecoveryScreen({required this.controller});
@@ -1039,6 +1120,78 @@ final class _Pips extends StatelessWidget {
   }
 }
 
+final class _ScoreHero extends StatelessWidget {
+  const _ScoreHero({required this.label, required this.value, required this.copy, this.compact = false});
+
+  final String label;
+  final int? value;
+  final TournamentCopy copy;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: GameTokens.surface,
+        borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+        border: Border.all(color: GameTokens.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(child: Text(label, style: const TextStyle(color: GameTokens.textSecondary))),
+            Text(
+              value == null ? '—' : copy.groupedScore(value!),
+              style: TextStyle(
+                color: GameTokens.scoreGlow,
+                fontWeight: FontWeight.w800,
+                fontSize: compact ? 22 : 32,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _StageChip extends StatelessWidget {
+  const _StageChip({required this.label, required this.value, required this.copy});
+
+  final String label;
+  final int? value;
+  final TournamentCopy copy;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = _tone(label);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+        border: Border.all(color: tone.withValues(alpha: 0.7)),
+      ),
+      child: SizedBox(
+        width: 96,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+              Text(
+                value == null ? '—' : copy.groupedScore(value!),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 final class _ScoreLine extends StatelessWidget {
   const _ScoreLine({required this.label, required this.value});
 
@@ -1047,13 +1200,14 @@ final class _ScoreLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = TournamentCopy.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Expanded(child: Text(label)),
           Text(
-            value == null ? '—' : '$value',
+            value == null ? '—' : copy.groupedScore(value!),
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ],

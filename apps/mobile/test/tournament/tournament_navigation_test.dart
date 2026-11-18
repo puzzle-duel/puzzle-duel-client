@@ -108,7 +108,7 @@ void main() {
     expect(find.text('Provisional'), findsOneWidget);
     await tester.tap(find.byKey(const Key('board-daily')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Daily leaderboard'), findsOneWidget);
+    expect(find.text('18 November 2026'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('nav-back')));
     await tester.pumpAndSettle();
@@ -183,13 +183,13 @@ void main() {
 
     await pumpAt(const Size(320, 568), locale: const Locale('en'), scaler: const TextScaler.linear(1.6));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
-    expect(find.text("Play today's challenge"), findsOneWidget);
+    expect(find.text("Play today's tournament"), findsOneWidget);
     await pumpAt(const Size(390, 844), locale: const Locale('en'));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
     expect(tester.takeException(), isNull);
     await pumpAt(const Size(430, 932), locale: const Locale('tr'), scaler: const TextScaler.linear(1.3));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
-    expect(find.text('Bugünün mücadelesini oyna'), findsOneWidget);
+    expect(find.text('Bugünün turnuvasını oyna'), findsOneWidget);
   });
 
   testWidgets('home opens the current weekly board in All', (tester) async {
@@ -266,7 +266,7 @@ void main() {
     await tester.tap(find.text('Hard'));
     await tester.pumpAndSettle();
     expect(paths.last, contains('category=HARD'));
-    await tester.tap(find.text('2026-11-09'));
+    await tester.tap(find.byKey(const Key('week-older')));
     await tester.pumpAndSettle();
     expect(paths.last, contains('weekStart=2026-11-09'));
     expect(paths.last, contains('category=HARD'));
@@ -278,6 +278,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(paths.last, contains('weekStart=2026-11-16'));
     expect(paths.last, contains('category=ALL'));
-    expect(find.text('2026-11-16'), findsOneWidget);
+    expect(find.text('16–22 November 2026'), findsOneWidget);
   });
 }

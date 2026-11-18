@@ -59,7 +59,7 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-back')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text("Play today's challenge"), findsOneWidget);
+    expect(find.text("Play today's tournament"), findsOneWidget);
     expect(api.claimPosts, 1);
     expect(api.commandBodies, isEmpty);
   });
@@ -180,7 +180,7 @@ void main() {
     await tester.tap(find.text('Go to Home'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text("Play today's challenge"), findsOneWidget);
+    expect(find.text("Play today's tournament"), findsOneWidget);
     expect(api.claimPosts, 1);
     expect(api.commandBodies, isEmpty);
   });
