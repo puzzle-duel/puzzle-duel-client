@@ -26,10 +26,13 @@ class UatApi {
         request.headers.set('x-pzd-session-secret', secret);
       }
       if (body == null) {
-        request.headers.set(HttpHeaders.contentLengthHeader, '0');
+        // Unknown length becomes Transfer-Encoding: chunked, which readBody rejects.
+        request.contentLength = 0;
       } else {
+        final bytes = utf8.encode(jsonEncode(body));
         request.headers.contentType = ContentType.json;
-        request.add(utf8.encode(jsonEncode(body)));
+        request.contentLength = bytes.length;
+        request.add(bytes);
       }
       final response = await request.close().timeout(const Duration(seconds: 12));
       final text = await utf8.decodeStream(response);
