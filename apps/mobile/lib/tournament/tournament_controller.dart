@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
+import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
+import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -25,19 +27,42 @@ abstract class TournamentHaptics {
   void selection();
   void accepted();
   void rejected();
+  void cleared();
+  void completed();
 }
 
 final class DeviceTournamentHaptics implements TournamentHaptics {
-  const DeviceTournamentHaptics();
+  DeviceTournamentHaptics({this.enabled = _yes, this.successAllowed = _yes});
+
+  static bool _yes() => true;
+
+  final bool Function() enabled;
+  final bool Function() successAllowed;
 
   @override
-  void selection() => HapticFeedback.selectionClick();
+  void selection() {
+    if (enabled()) HapticFeedback.selectionClick();
+  }
 
   @override
-  void accepted() => HapticFeedback.lightImpact();
+  void accepted() {
+    if (enabled()) HapticFeedback.lightImpact();
+  }
 
   @override
-  void rejected() => HapticFeedback.mediumImpact();
+  void rejected() {
+    if (enabled()) HapticFeedback.heavyImpact();
+  }
+
+  @override
+  void cleared() {
+    if (enabled() && successAllowed()) HapticFeedback.mediumImpact();
+  }
+
+  @override
+  void completed() {
+    if (enabled() && successAllowed()) HapticFeedback.heavyImpact();
+  }
 }
 
 final class SilentTournamentHaptics implements TournamentHaptics {
@@ -51,6 +76,26 @@ final class SilentTournamentHaptics implements TournamentHaptics {
 
   @override
   void rejected() {}
+
+  @override
+  void cleared() {}
+
+  @override
+  void completed() {}
+}
+
+final class _QuietSfx extends GameSfx {
+  @override
+  bool muted = true;
+
+  @override
+  bool get isPrepared => true;
+
+  @override
+  Future<void> prepare() async {}
+
+  @override
+  void play(GameSfxEvent event) {}
 }
 
 final class TournamentController extends ChangeNotifier {
@@ -59,8 +104,12 @@ final class TournamentController extends ChangeNotifier {
     UatApi? api,
     Directory? stateDirectory,
     TournamentHaptics? haptics,
+    GameSfx? sfx,
+    LocalSettings? settings,
   }) : api = api ?? UatApi(baseUrl: config.baseUrl, bearer: config.bearer),
-       haptics = haptics ?? const DeviceTournamentHaptics(),
+       haptics = haptics ?? DeviceTournamentHaptics(),
+       sfx = sfx ?? _QuietSfx(),
+       settings = settings ?? LocalSettings.load(stateDirectory ?? Directory.systemTemp),
        _stateFile = File(
          '${(stateDirectory ?? Directory.systemTemp).path}/pzd-uat-${config.playerLabel}.json',
        );
@@ -68,6 +117,8 @@ final class TournamentController extends ChangeNotifier {
   final UatConfig config;
   final UatApi api;
   final TournamentHaptics haptics;
+  final GameSfx sfx;
+  final LocalSettings settings;
   final File _stateFile;
   final GameSession session = GameSession();
 
@@ -102,6 +153,7 @@ final class TournamentController extends ChangeNotifier {
   Object? get pendingCommand => _pending;
 
   Future<void> start() async {
+    sfx.muted = !settings.sound;
     session.onAuthoritativeTap = _submitTap;
     await _restoreSession();
     if (errorCode != null) return;
@@ -159,6 +211,28 @@ final class TournamentController extends ChangeNotifier {
     route = const TournamentRoute(place: TournamentPlace.results);
     errorCode = null;
     notifyListeners();
+  }
+
+  void setSound(bool value) {
+    settings.sound = value;
+    settings.save();
+    sfx.muted = !value;
+    notifyListeners();
+  }
+
+  void setHaptics(bool value) {
+    settings.haptics = value;
+    settings.save();
+    notifyListeners();
+  }
+
+  void noteSelection() {
+    sfx.play(GameSfxEvent.place);
+    _haptic((feel) => feel.selection());
+  }
+
+  void _haptic(void Function(TournamentHaptics feel) call) {
+    if (settings.haptics) call(haptics);
   }
 
   Future<void> openDaily() => _openLeaderboard(weekly: false);
@@ -265,19 +339,36 @@ final class TournamentController extends ChangeNotifier {
       session.clearAuthoritativeUnknown();
       if (response.status == 200) {
         final ok = await _reload(reveal: true, followGameplay: true);
-        if (ok &&
-            fromPlay &&
-            route.place == TournamentPlace.playing &&
-            before != null &&
-            day?.seriesScore != null) {
-          scoreDelta = day!.seriesScore! - before;
+        if (!ok) return;
+        final delta = fromPlay && before != null && day?.seriesScore != null
+            ? day!.seriesScore! - before
+            : 0;
+        scoreDelta = delta > 0 && route.place == TournamentPlace.playing ? delta : null;
+        if (route.place == TournamentPlace.results) {
+          sfx.play(GameSfxEvent.chainComplete);
+          _haptic((feel) => feel.completed());
+        } else if (route.place == TournamentPlace.transition) {
+          if (delta > 0) {
+            sfx.play(GameSfxEvent.clear);
+            _haptic((feel) => feel.cleared());
+          }
+          sfx.play(GameSfxEvent.roundEnd);
+          _haptic((feel) => feel.completed());
+        } else if (fromPlay) {
+          if (delta > 0) {
+            sfx.play(GameSfxEvent.clear);
+            _haptic((feel) => feel.cleared());
+          } else {
+            sfx.play(GameSfxEvent.place);
+            _haptic((feel) => feel.accepted());
+          }
         }
-        if (ok) haptics.accepted();
         return;
       }
+      sfx.play(GameSfxEvent.reject);
       if (response.error == 'WRITER_NOT_AUTHORIZED' || response.status == 401) {
         _fail(response.status == 401 ? 'UNAUTHENTICATED' : response.error);
-        haptics.rejected();
+        _haptic((feel) => feel.rejected());
         return;
       }
       final ok = await _reload(reveal: true, followGameplay: false);
@@ -285,7 +376,7 @@ final class TournamentController extends ChangeNotifier {
       if (ok && route.place == TournamentPlace.playing) {
         session.showServerRejection(response.error);
       }
-      haptics.rejected();
+      _haptic((feel) => feel.rejected());
     } finally {
       moveInFlight = false;
       notifyListeners();

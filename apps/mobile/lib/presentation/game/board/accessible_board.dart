@@ -284,10 +284,20 @@ final class _CellSemantics extends StatelessWidget {
               ? DecoratedBox(
                   key: ValueKey('board-legal-$row-$column'),
                   decoration: BoxDecoration(
-                    color: GameTokens.accent.withValues(alpha: 0.34),
-                    border: Border.all(color: GameTokens.accent, width: 2),
+                    border: Border.all(
+                      color: GameTokens.accent.withValues(alpha: 0.85),
+                      width: 1.2,
+                    ),
                   ),
-                  child: const SizedBox.expand(),
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: GameTokens.accent.withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const SizedBox(width: 7, height: 7),
+                    ),
+                  ),
                 )
               : const SizedBox.expand(),
         ),

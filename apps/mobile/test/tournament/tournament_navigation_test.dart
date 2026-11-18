@@ -102,7 +102,11 @@ void main() {
     expect(find.byKey(const Key('results-score')), findsOneWidget);
     expect(api.claimPosts, 1);
 
-    await tester.tap(find.byKey(const Key('daily-leaderboard')));
+    await tester.tap(find.byKey(const Key('leaderboard')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('board-weekly')), findsOneWidget);
+    expect(find.text('Provisional'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('board-daily')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Daily leaderboard'), findsOneWidget);
 
@@ -116,8 +120,8 @@ void main() {
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(api.claimPosts, 1);
 
-    await tester.scrollUntilVisible(find.byKey(const Key('weekly-leaderboard')), 120);
-    await tester.tap(find.byKey(const Key('weekly-leaderboard')));
+    await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
+    await tester.tap(find.byKey(const Key('leaderboard')));
     await tester.pumpAndSettle();
     expect(find.text('Provisional'), findsOneWidget);
     await tester.tap(find.byKey(const Key('nav-back')));
@@ -250,11 +254,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.byKey(const Key('weekly-leaderboard')), 120);
-    await tester.tap(find.byKey(const Key('weekly-leaderboard')));
+    await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
+    await tester.tap(find.byKey(const Key('leaderboard')));
     await tester.pumpAndSettle();
     expect(paths.last, contains('weekStart=2026-11-16'));
     expect(paths.last, contains('category=ALL'));
+    expect(find.textContaining('no verified rank'), findsOneWidget);
+    expect(find.text('Player'), findsNothing);
+    expect(find.textContaining('No verified scores'), findsOneWidget);
 
     await tester.tap(find.text('Hard'));
     await tester.pumpAndSettle();
@@ -262,11 +269,12 @@ void main() {
     await tester.tap(find.text('2026-11-09'));
     await tester.pumpAndSettle();
     expect(paths.last, contains('weekStart=2026-11-09'));
+    expect(paths.last, contains('category=HARD'));
 
     await tester.tap(find.byKey(const Key('nav-back')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.byKey(const Key('weekly-leaderboard')), 120);
-    await tester.tap(find.byKey(const Key('weekly-leaderboard')));
+    await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
+    await tester.tap(find.byKey(const Key('leaderboard')));
     await tester.pumpAndSettle();
     expect(paths.last, contains('weekStart=2026-11-16'));
     expect(paths.last, contains('category=ALL'));

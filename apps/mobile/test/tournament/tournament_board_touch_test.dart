@@ -122,7 +122,11 @@ void main() {
       final move = sent['move']! as Map;
       expect(move['offerIndex'], 0);
       expect(move['tap'], [legal.row, legal.column]);
-      expect(find.text('+${state.score}'), findsOneWidget);
+      if (state.score > 0) {
+        expect(find.text('+${state.score}'), findsOneWidget);
+      } else {
+        expect(find.byKey(const Key('score-delta')), findsNothing);
+      }
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

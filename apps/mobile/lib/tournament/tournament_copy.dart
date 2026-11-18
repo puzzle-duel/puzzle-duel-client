@@ -80,7 +80,33 @@ final class TournamentCopy {
     'Sonuç bilinmiyor. Yalnızca bu hamleyi yeniden dene.',
   );
   String get retrySame => pick('Retry the same move', 'Aynı hamleyi yeniden dene');
-  String get idle => pick('Idle', 'Boşta');
+  String get idle => pick('Time to move', 'Hamle süresi');
+  String get leaderboard => pick('Leaderboard', 'Sıralama');
+  String get practice => pick('Practice', 'Antrenman');
+  String get practiceTitle => pick('Practice', 'Antrenman');
+  String get practiceBlurb => pick(
+    'Unlimited puzzles. Not ranked and not part of today’s tournament.',
+    'Sınırsız bulmaca. Sıralamaya girmez ve bugünün turnuvasına yazılmaz.',
+  );
+  String get chooseDifficulty => pick('Choose a difficulty', 'Zorluk seç');
+  String get newPuzzle => pick('New puzzle', 'Yeni bulmaca');
+  String get samePuzzle => pick('Replay', 'Aynı bulmaca');
+  String get changeDifficulty => pick('Change difficulty', 'Zorluğu değiştir');
+  String get practiceDone => pick('Practice complete', 'Antrenman bitti');
+  String get practiceLocal => pick(
+    'Saved on this device only. This is not a verified rank.',
+    'Yalnızca bu cihazda durur. Doğrulanmış bir sıralama değildir.',
+  );
+  String get unranked => pick('You have no verified rank on this board.', 'Bu tabloda doğrulanmış sıran yok.');
+  String get weeklyTab => pick('Weekly', 'Haftalık');
+  String get dailyTab => pick('Daily', 'Günlük');
+  String get soundSetting => pick('Sound', 'Ses');
+  String get hapticsSetting => pick('Haptics', 'Titreşim');
+  String get verifiedPlayer => pick('Player', 'Oyuncu');
+  String budgetLine(int size, int moves) => pick(
+    '$size×$size board, $moves moves',
+    '$size×$size tahta, $moves hamle',
+  );
   String get gameScore => pick('Game score', 'Oyun puanı');
   String get totalScore => pick('Total', 'Toplam');
   String get nextGame => pick('Next', 'Sonraki');
