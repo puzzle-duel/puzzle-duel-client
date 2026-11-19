@@ -7,7 +7,6 @@ import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
-import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -43,10 +42,6 @@ Future<void> _golden(WidgetTester tester, String name) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  setUpAll(() async {
-    await PremiumShapeAtlas.ensureLoaded();
-  });
 
   testWidgets('uat 5x5 6x6 7x7 boards', (tester) async {
     for (final entry in [

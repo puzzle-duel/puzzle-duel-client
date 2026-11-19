@@ -1,1 +1,11 @@
 .dart-sdk/
+
+# Local visual debug / failure dumps (never commit)
+apps/mobile/test/visual/failures/
+
+# Extraction scratch (if regenerated locally)
+docs/features/pzd-47/uat/previews/
+apps/mobile/assets/branding/canonical/
+
+# Local git worktrees (never commit)
+.worktrees/

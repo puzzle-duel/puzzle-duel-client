@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
-import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -37,10 +36,6 @@ Widget _glyph(Piece piece, double size) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  setUpAll(() async {
-    await PremiumShapeAtlas.ensureLoaded();
-  });
 
   group('direction glyph geometry — all shapes', () {
     for (final shape in Shape.values) {

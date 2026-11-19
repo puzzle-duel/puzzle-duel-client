@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
-import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -28,17 +27,12 @@ Widget _matrixCell(Piece piece, double size) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(() async {
-    await PremiumShapeAtlas.ensureLoaded();
-  });
-
   test('canonical materials version and source hash are pinned', () {
-    expect(PremiumShapeMaterials.version, 'pzd47-canonical-clipped-sprite-v4');
+    expect(PremiumShapeMaterials.version, 'pzd47-canonical-shapes-v1');
     expect(
       PremiumShapeMaterials.sourceSha256,
       '32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b',
     );
-    expect(PremiumShapeAtlas.isLoaded, isTrue);
   });
 
   test('diamond silhouette is 45° (axis vertices), never axis-aligned square', () {

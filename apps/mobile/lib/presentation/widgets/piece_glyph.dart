@@ -1,17 +1,16 @@
 import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
-import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Canonical premium piece glyph (PZD-47).
 ///
-/// Board and tray share [PiecePainter], which draws the same full-piece
-/// sprites extracted from the app icon ([PremiumShapeAtlas]). Direction is
-/// applied by rotating the whole sprite so the icon object stays identical
-/// (flattened raster has no separable chevron layer).
+/// Board and tray share [PiecePainter], which consumes
+/// [PremiumShapeMaterials] so gameplay pieces match the approved app-icon
+/// shapes. Direction comes from gameplay state and is independent of the
+/// diamond's 45° body rotation.
 final class PieceGlyph extends StatelessWidget {
   const PieceGlyph({
     super.key,
@@ -92,9 +91,9 @@ final class PiecePainter extends CustomPainter {
     final path = shapePath(center, radius, piece.shape);
     final side = size.shortestSide;
     final shape = piece.shape;
-    final atlas = PremiumShapeAtlas.isLoaded ? PremiumShapeAtlas.instance : null;
 
-    // Soft contact shadow without MaskFilter.blur (avoids iOS first-frame hitch).
+    // Soft lift / contact shadow without MaskFilter.blur (avoids first-frame
+    // blur shader compilation hitch on iOS during early interactions).
     canvas.drawPath(
       path.shift(Offset(side * 0.028, side * 0.055)),
       Paint()
@@ -103,12 +102,80 @@ final class PiecePainter extends CustomPainter {
         )
         ..style = PaintingStyle.fill,
     );
+    canvas.drawPath(
+      path.shift(Offset(side * 0.012, side * 0.024)),
+      Paint()
+        ..color = Colors.black.withValues(alpha: selected ? 0.22 : 0.14)
+        ..style = PaintingStyle.fill,
+    );
 
-    if (atlas != null) {
-      _paintCanonicalRaster(canvas, size, center, radius, side, shape, atlas);
-    } else {
-      _paintProceduralFallback(canvas, center, radius, side, shape);
-    }
+    final bounds = Rect.fromCircle(center: center, radius: radius);
+    final bodyShader = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
+        fill,
+        PremiumShapeMaterials.mid(shape).withValues(alpha: fill.a),
+        deep,
+      ],
+      stops: const [0.0, 0.28, 0.62, 1.0],
+    ).createShader(bounds);
+
+    // Outer bevel shell (slightly deeper).
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
+            deep,
+          ],
+        ).createShader(bounds)
+        ..style = PaintingStyle.fill,
+    );
+
+    // Raised face — inset silhouette matching icon extrusion depth.
+    final face = shapePath(center, radius * 0.86, shape);
+    canvas.drawPath(
+      face,
+      Paint()
+        ..shader = bodyShader
+        ..style = PaintingStyle.fill,
+    );
+
+    // Specular highlight (top-left light), clipped to body — no blur.
+    canvas.save();
+    canvas.clipPath(path);
+    final highlightCenter = center.translate(-radius * 0.28, -radius * 0.34);
+    final highlightRect = Rect.fromCenter(
+      center: highlightCenter,
+      width: radius * 1.15,
+      height: radius * 0.72,
+    );
+    canvas.drawOval(
+      highlightRect,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.85 * fill.a),
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.22 * fill.a),
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.45, 1.0],
+        ).createShader(highlightRect),
+    );
+    // Bright rim catch-light along the upper-left silhouette.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.34 * fill.a)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.4, side * 0.038),
+    );
+    canvas.restore();
 
     if (selected) {
       canvas.drawPath(
@@ -119,71 +186,8 @@ final class PiecePainter extends CustomPainter {
           ..strokeWidth = math.max(2.6, side * 0.065),
       );
     }
-  }
 
-  /// Draws clipped icon-quadrant sprites (same attachment pixels as the app icon).
-  ///
-  /// Direction rotates the whole sprite relative to icon-native orientation
-  /// (circle/triangle UP, diamond LEFT). Flattened raster has no separable
-  /// chevron layer — see AC03_DELTA_AND_CANONICAL_FIX.md.
-  void _paintCanonicalRaster(
-    Canvas canvas,
-    Size size,
-    Offset center,
-    double radius,
-    double side,
-    Shape shape,
-    PremiumShapeAtlas atlas,
-  ) {
-    final desiredTurns = switch (piece.direction) {
-      Direction.up => 0,
-      Direction.right => 1,
-      Direction.down => 2,
-      Direction.left => 3,
-    };
-    final deltaTurns =
-        (desiredTurns - PremiumShapeAtlas.nativeTurnsFromUp(shape)) % 4;
-    final body = atlas.bodyFor(shape);
-    final paint = Paint()
-      ..filterQuality = FilterQuality.medium
-      ..isAntiAlias = true
-      ..color = Color.fromRGBO(255, 255, 255, fill.a);
-    final dstSide = radius * 2.15;
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    final origin = glyphOrigin(Offset.zero, radius, shape);
-    canvas.translate(origin.dx, origin.dy);
-    if (deltaTurns != 0) {
-      canvas.rotate(deltaTurns * math.pi / 2);
-    }
-    canvas.drawImageRect(
-      body,
-      Rect.fromLTWH(0, 0, body.width.toDouble(), body.height.toDouble()),
-      Rect.fromCenter(center: Offset.zero, width: dstSide, height: dstSide),
-      paint,
-    );
-    canvas.restore();
-  }
-
-  /// Used only if atlas is not loaded yet (should be rare; tests preload).
-  void _paintProceduralFallback(
-    Canvas canvas,
-    Offset center,
-    double radius,
-    double side,
-    Shape shape,
-  ) {
-    final path = shapePath(center, radius, shape);
-    final bounds = Rect.fromCircle(center: center, radius: radius);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [fill, deep],
-        ).createShader(bounds),
-    );
+    // Direction glyph is composited independently of diamond body rotation.
     final arrowStroke = directionArrowStroke(side);
     final glyph = directionGlyph(
       shape: shape,
@@ -193,7 +197,19 @@ final class PiecePainter extends CustomPainter {
       strokeWidth: arrowStroke,
     );
     final inset = PremiumShapeMaterials.directionInset.withValues(alpha: fill.a);
-    canvas.drawPath(glyph.filled, Paint()..color = inset);
+    // Engraved depth: slight offset shadow then solid cutout.
+    canvas.drawPath(
+      glyph.filled.shift(Offset(0, side * 0.012)),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.35 * fill.a)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      glyph.filled,
+      Paint()
+        ..color = inset
+        ..style = PaintingStyle.fill,
+    );
     canvas.drawPath(
       glyph.path,
       Paint()
