@@ -188,6 +188,16 @@ void main() {
   testWidgets('network restore refreshes tournament without blocking practice', (
     tester,
   ) async {
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher
+        .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+      disableAnimations: true,
+      reduceMotion: true,
+    );
+    addTearDown(() {
+      TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+          .clearAccessibilityFeaturesTestValue();
+    });
     final directory = Directory.systemTemp.createTempSync('pzd43-restore-net');
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
@@ -223,21 +233,35 @@ void main() {
     });
     await _pumpUntilPractice(tester, api, directory);
     expect(find.byKey(const Key('tournament-status')), findsOneWidget);
+    expect(
+      find.text('No connection. You can keep practicing.'),
+      findsOneWidget,
+    );
     online = true;
     await tester.tap(find.byKey(const Key('tournament-retry')));
-    for (var i = 0; i < 40; i++) {
-      if (find.byKey(const Key('primary-action')).evaluate().isNotEmpty) {
+    await tester.pump();
+    // primary-action exists offline too (retry CTA) — wait for notice clear.
+    for (var i = 0; i < 80; i++) {
+      if (find
+          .text('No connection. You can keep practicing.')
+          .evaluate()
+          .isEmpty) {
         break;
       }
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byKey(const Key('practice')), findsOneWidget);
-    expect(find.byKey(const Key('primary-action')), findsOneWidget);
-    // Success banner may remain briefly (~2.5s) then fade; wait it out.
-    for (var i = 0; i < 80; i++) {
-      if (find.byKey(const Key('tournament-status')).evaluate().isEmpty) break;
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    expect(
+      find.text('No connection. You can keep practicing.'),
+      findsNothing,
+    );
+    expect(
+      find.text('Tournament info updated.'),
+      findsOneWidget,
+    );
+    // Reduced-motion success banner dismisses after the hold without layout shift.
+    await tester.pump(const Duration(milliseconds: 2600));
+    await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);
   });
 

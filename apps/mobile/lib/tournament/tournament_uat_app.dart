@@ -447,71 +447,85 @@ final class _HomeScreen extends StatelessWidget {
       backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Row(
+              ListView(
+                key: const Key('home-scroll'),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          copy.appTitle.toUpperCase(),
-                          key: const Key('home-title'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                letterSpacing: 1.6,
-                                fontWeight: FontWeight.w800,
-                              ),
+                  Row(
+                    key: const Key('home-header-row'),
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              copy.appTitle.toUpperCase(),
+                              key: const Key('home-title'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(
+                                    letterSpacing: 1.6,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            Text(
+                              copy.tagline,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: GameTokens.accent),
+                            ),
+                          ],
                         ),
-                        Text(
-                          copy.tagline,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: GameTokens.accent),
-                        ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        key: const Key('profile'),
+                        tooltip: copy.profile,
+                        onPressed: () => _openProfile(context, controller),
+                        icon: const Icon(Icons.person_rounded),
+                      ),
+                      IconButton(
+                        key: const Key('settings'),
+                        tooltip: copy.settingsTitle,
+                        onPressed: () => _openSettings(context, controller),
+                        icon: const Icon(Icons.settings_rounded),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    key: const Key('profile'),
-                    tooltip: copy.profile,
-                    onPressed: () => _openProfile(context, controller),
-                    icon: const Icon(Icons.person_rounded),
+                  const SizedBox(height: 12),
+                  _DailyCard(
+                    key: const Key('home-daily-card'),
+                    copy: copy,
+                    day: day,
+                    score: score,
+                    scoreLabel: scoreLabel,
+                    phase: phase,
+                    badge: badge,
+                    headline: headline,
+                    action: primary,
+                    onAction: onPrimary,
                   ),
-                  IconButton(
-                    key: const Key('settings'),
-                    tooltip: copy.settingsTitle,
-                    onPressed: () => _openSettings(context, controller),
-                    icon: const Icon(Icons.settings_rounded),
-                  ),
+                  const SizedBox(height: 32),
+                  _HomeActions(controller: controller),
                 ],
               ),
-              _TournamentStatusHost(
-                key: const Key('tournament-status-host'),
-                controller: controller,
-                copy: copy,
-                stale: stale,
-                notice: notice,
-                syncing: syncing,
+              // Floating status: does not participate in ListView layout.
+              Positioned(
+                top: 0,
+                left: 16,
+                right: 16,
+                child: _TournamentStatusHost(
+                  key: const Key('tournament-status-host'),
+                  controller: controller,
+                  copy: copy,
+                  stale: stale,
+                  notice: notice,
+                  syncing: syncing,
+                ),
               ),
-              const SizedBox(height: 12),
-              _DailyCard(
-                copy: copy,
-                day: day,
-                score: score,
-                scoreLabel: scoreLabel,
-                phase: phase,
-                badge: badge,
-                headline: headline,
-                action: primary,
-                onAction: onPrimary,
-              ),
-              const SizedBox(height: 32),
-              _HomeActions(controller: controller),
             ],
           ),
         ),
@@ -544,13 +558,21 @@ final class _TournamentStatusHost extends StatefulWidget {
 
 final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     with SingleTickerProviderStateMixin {
-  static const _fadeIn = Duration(milliseconds: 220);
+  static const _slideIn = Duration(milliseconds: 240);
   static const _hold = Duration(milliseconds: 2500);
-  static const _fadeOut = Duration(milliseconds: 300);
+  static const _slideOut = Duration(milliseconds: 280);
 
-  late final AnimationController _opacity = AnimationController(
+  late final AnimationController _motion = AnimationController(
     vsync: this,
-    duration: _fadeIn,
+    duration: _slideIn,
+  );
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, -1.15),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _motion, curve: Curves.easeOutCubic));
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _motion,
+    curve: Curves.easeOut,
   );
   Timer? _dismiss;
   _StatusTone? _tone;
@@ -576,8 +598,6 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
   @override
   void didUpdateWidget(covariant _TournamentStatusHost oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Refresh may resolve in one frame (degraded→ready) without a painted
-    // syncing intermediate, so also treat notice-clear + ready as success.
     final finishedSync =
         (_wasSyncing && !widget.syncing && widget.notice == null) ||
         (oldWidget.notice != null &&
@@ -591,19 +611,30 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
   @override
   void dispose() {
     _dismiss?.cancel();
-    _opacity.dispose();
+    _motion.dispose();
     super.dispose();
   }
 
-  void _apply({required bool fromSyncEdge}) {
+  bool get _reduceMotion {
     final media = MediaQuery.maybeOf(context);
-    final reduceMotion =
-        media?.disableAnimations == true ||
+    return media?.disableAnimations == true ||
         WidgetsBinding
             .instance
             .platformDispatcher
             .accessibilityFeatures
             .reduceMotion;
+  }
+
+  void _clearBanner() {
+    setState(() {
+      _tone = null;
+      _text = null;
+      _showRetry = false;
+    });
+  }
+
+  void _apply({required bool fromSyncEdge}) {
+    final reduceMotion = _reduceMotion;
     final notice = widget.notice;
     _StatusTone? nextTone;
     String? nextText;
@@ -639,21 +670,13 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     if (nextTone == null || nextText == null) {
       if (_text != null) {
         if (reduceMotion) {
-          setState(() {
-            _tone = null;
-            _text = null;
-            _showRetry = false;
-          });
-          _opacity.value = 0;
+          _motion.value = 0;
+          _clearBanner();
         } else {
-          _opacity.duration = _fadeOut;
-          _opacity.reverse().whenComplete(() {
+          _motion.duration = _slideOut;
+          _motion.reverse().whenComplete(() {
             if (!mounted) return;
-            setState(() {
-              _tone = null;
-              _text = null;
-              _showRetry = false;
-            });
+            _clearBanner();
           });
         }
       }
@@ -667,33 +690,26 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
       _showRetry = nextRetry;
     });
     if (reduceMotion) {
-      _opacity.value = 1;
+      _motion.value = 1;
     } else if (changed) {
-      _opacity.duration = _fadeIn;
-      _opacity.forward(from: 0);
-    } else if (_opacity.value < 1) {
-      _opacity.forward();
+      _motion.duration = _slideIn;
+      _motion.forward(from: 0);
+    } else if (_motion.value < 1) {
+      _motion.forward();
     }
 
     if (nextTone == _StatusTone.success) {
       _dismiss = Timer(_hold, () {
         if (!mounted || _tone != _StatusTone.success) return;
         if (reduceMotion) {
-          setState(() {
-            _tone = null;
-            _text = null;
-            _showRetry = false;
-          });
+          _motion.value = 0;
+          _clearBanner();
           return;
         }
-        _opacity.duration = _fadeOut;
-        _opacity.reverse().whenComplete(() {
+        _motion.duration = _slideOut;
+        _motion.reverse().whenComplete(() {
           if (!mounted || _tone != _StatusTone.success) return;
-          setState(() {
-            _tone = null;
-            _text = null;
-            _showRetry = false;
-          });
+          _clearBanner();
         });
       });
     }
@@ -703,20 +719,22 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
   Widget build(BuildContext context) {
     final text = _text;
     if (text == null) return const SizedBox.shrink();
-    final live = _tone == _StatusTone.persistent ||
-        _tone == _StatusTone.syncing;
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
+    final live =
+        _tone == _StatusTone.persistent || _tone == _StatusTone.syncing;
+    return SlideTransition(
+      position: _slide,
       child: FadeTransition(
-        opacity: _opacity,
-        child: Semantics(
-          liveRegion: live,
-          container: true,
-          label: text,
-          child: Material(
-            key: const Key('tournament-status'),
-            color: GameTokens.surface.withValues(alpha: 0.96),
-            borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+        opacity: _fade,
+        child: Material(
+          key: const Key('tournament-status'),
+          elevation: 8,
+          shadowColor: Colors.black54,
+          color: GameTokens.surface.withValues(alpha: 0.97),
+          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+          child: Semantics(
+            liveRegion: live,
+            container: true,
+            label: text,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
               child: Row(
@@ -861,6 +879,7 @@ final class _ActionCard extends StatelessWidget {
 
 final class _DailyCard extends StatelessWidget {
   const _DailyCard({
+    super.key,
     required this.copy,
     required this.day,
     required this.score,

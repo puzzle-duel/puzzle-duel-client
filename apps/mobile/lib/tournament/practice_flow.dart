@@ -24,6 +24,8 @@ final class PracticeFlow extends StatefulWidget {
 }
 
 final class _PracticeFlowState extends State<PracticeFlow> {
+  static const _completionBeat = Duration(milliseconds: 420);
+
   final GameSession _session = GameSession();
   late PracticeStore _store = widget.controller.practiceStore();
   DifficultyProfile? _profile;
@@ -31,10 +33,13 @@ final class _PracticeFlowState extends State<PracticeFlow> {
   bool _recorded = false;
   bool _review = false;
   bool _replayed = false;
+  bool _revealResults = false;
+  bool _awaitingReveal = false;
   GameState? _finished;
   int? _deviceBest;
   int _seenResolution = 0;
   MoveFeedbackKind? _seenFeedback;
+  Timer? _resultHold;
 
   @override
   void initState() {
@@ -42,7 +47,18 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     _session.addListener(_onSession);
   }
 
+  bool get _reduceMotion {
+    final mq = MediaQuery.maybeOf(context);
+    return (mq?.disableAnimations ?? false) ||
+        WidgetsBinding
+            .instance
+            .platformDispatcher
+            .accessibilityFeatures
+            .reduceMotion;
+  }
+
   void _onSession() {
+    if (!mounted) return;
     final view = _session.view;
     final script = view.activeScript;
     if (script != null && script.resolutionId != _seenResolution) {
@@ -59,14 +75,31 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       GameSfxScope.maybeOf(context)?.play(GameSfxEvent.reject);
     }
     _seenFeedback = view.feedbackKind;
-    // Ended rounds need a State rebuild outside the play ListenableBuilder.
-    if (view.canonicalState?.status == GameStatus.ended) {
-      setState(() {});
+
+    // Stay on the board through terminal resolution; reveal results only after
+    // the session reaches [GameScreenPhase.ended] (animation complete).
+    if (view.phase == GameScreenPhase.ended &&
+        !_revealResults &&
+        !_awaitingReveal) {
+      _awaitingReveal = true;
+      unawaited(_maybeRecord());
+      if (_reduceMotion) {
+        setState(() => _revealResults = true);
+        return;
+      }
+      _resultHold?.cancel();
+      _resultHold = Timer(_completionBeat, () {
+        if (!mounted || _session.view.phase != GameScreenPhase.ended) {
+          return;
+        }
+        setState(() => _revealResults = true);
+      });
     }
   }
 
   @override
   void dispose() {
+    _resultHold?.cancel();
     _session.removeListener(_onSession);
     _session.dispose();
     super.dispose();
@@ -77,6 +110,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     int? seed,
     bool replay = false,
   }) async {
+    _resultHold?.cancel();
     _store = widget.controller.practiceStore();
     final issued = seed ?? await _store.nextSeed();
     final started = _session.startRound(profile: profile, seed: issued);
@@ -87,6 +121,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       _recorded = false;
       _review = false;
       _replayed = replay;
+      _revealResults = false;
+      _awaitingReveal = false;
+      // Keep prior finished snapshot across replay so Back can return to results.
+      if (!replay) _finished = null;
     });
   }
 
@@ -128,6 +166,21 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     setState(() => _deviceBest = best);
   }
 
+  void _openDifficultyPicker() {
+    _resultHold?.cancel();
+    _session.returnToMenu();
+    setState(() {
+      _profile = null;
+      _seed = null;
+      _review = false;
+      _revealResults = false;
+      _awaitingReveal = false;
+      // Keep _recorded / _deviceBest / last finished snapshot identity-safe;
+      // menu phase prevents stale ended boards from reopening results.
+      _finished = null;
+    });
+  }
+
   Future<void> _changeDifficulty() async {
     final state = _session.view.canonicalState;
     final inProgress =
@@ -155,10 +208,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       );
       if (leave != true || !mounted) return;
     }
-    setState(() {
-      _profile = null;
-      _seed = null;
-    });
+    _openDifficultyPicker();
   }
 
   Future<void> _leave() async {
@@ -166,7 +216,8 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     final inProgress =
         state != null &&
         state.turnsUsed > 0 &&
-        state.status != GameStatus.ended;
+        state.status != GameStatus.ended &&
+        !_revealResults;
     if (inProgress) {
       final copy = TournamentCopy.of(context);
       final leave = await showDialog<bool>(
@@ -194,19 +245,19 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       setState(() {
         _review = true;
         _replayed = false;
+        _revealResults = true;
       });
       return;
     }
-    setState(() {
-      _profile = null;
-      _seed = null;
-    });
+    _openDifficultyPicker();
   }
 
   @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
-    final state = _session.view.canonicalState;
+    final view = _session.view;
+    final state = view.canonicalState;
+
     if (_review && _finished != null && _profile != null) {
       return PracticeResultView(
         copy: copy,
@@ -214,43 +265,40 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         profile: _profile!,
         onReplay: () => _start(_profile!, seed: _seed, replay: true),
         onNew: () => _start(_profile!),
-        onDifficulty: () => setState(() {
-          _review = false;
-          _profile = null;
-          _seed = null;
-        }),
+        onDifficulty: _openDifficultyPicker,
         onHome: () => Navigator.pop(context),
         deviceBest: _deviceBest,
       );
     }
-    if (state != null && state.status == GameStatus.ended) {
-      if (!_recorded) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) unawaited(_maybeRecord());
-        });
-      }
+
+    final showResults =
+        _revealResults &&
+        _profile != null &&
+        (_finished != null ||
+            (state != null && state.status == GameStatus.ended));
+    if (showResults) {
+      final resultState = _finished ?? state!;
       return PracticeResultView(
         copy: copy,
-        state: state,
+        state: resultState,
         profile: _profile!,
         onReplay: () => _start(_profile!, seed: _seed, replay: true),
         onNew: () => _start(_profile!),
-        onDifficulty: () => setState(() {
-          _profile = null;
-          _seed = null;
-        }),
+        onDifficulty: _openDifficultyPicker,
         onHome: () => Navigator.pop(context),
         deviceBest: _deviceBest,
       );
     }
-    if (state == null || _profile == null) {
+
+    if (_profile == null || view.phase == GameScreenPhase.menu) {
       return _PracticePicker(
         copy: copy,
         onPick: _start,
         onClose: () => Navigator.pop(context),
       );
     }
-    // Only the live board listens to session ticks — picker/results stay static.
+
+    // Playing + resolving (including the terminal move) stay on the board.
     return ListenableBuilder(
       listenable: _session,
       builder: (context, _) => _PracticePlay(
@@ -393,7 +441,10 @@ final class _PracticePlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = session.view.canonicalState!;
+    final view = session.view;
+    final state = view.canonicalState!;
+    final scoreDelta = view.activeScript?.applied.scoreDelta;
+    final showDelta = view.isResolving && scoreDelta != null && scoreDelta > 0;
     return Scaffold(
       backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
@@ -421,13 +472,29 @@ final class _PracticePlay extends StatelessWidget {
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
-                    Text(
-                      '${state.score}',
-                      key: const Key('practice-score'),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 22,
-                      ),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${state.score}',
+                          key: const Key('practice-score'),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 22,
+                          ),
+                        ),
+                        if (showDelta)
+                          Text(
+                            '+$scoreDelta',
+                            key: const Key('practice-score-delta'),
+                            style: const TextStyle(
+                              color: GameTokens.success,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(width: 12),
                   ],
@@ -444,7 +511,9 @@ final class _PracticePlay extends StatelessWidget {
                 height: 36,
                 child: TextButton(
                   key: const Key('practice-change'),
-                  onPressed: () => onChangeDifficulty(),
+                  onPressed: view.isResolving
+                      ? null
+                      : () => onChangeDifficulty(),
                   child: Text(copy.changeDifficulty),
                 ),
               ),
@@ -523,6 +592,7 @@ final class PracticeResultView extends StatelessWidget {
     final tone = GameTokens.difficultyAccent(profile);
     final best = deviceBest;
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: ListView(
@@ -582,6 +652,7 @@ final class PracticeResultView extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               TextButton(
+                key: const Key('practice-change-difficulty'),
                 onPressed: onDifficulty,
                 child: Text(copy.changeDifficulty),
               ),

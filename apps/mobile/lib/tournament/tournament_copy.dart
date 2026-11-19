@@ -256,7 +256,7 @@ final class TournamentCopy {
     'Yerleştirilecek yasal hamle kalmadı.',
   );
   String get gameFinished =>
-      pick('The server closed this game.', 'Sunucu bu oyunu kapattı.');
+      pick('This game was closed remotely.', 'Bu oyun uzaktan kapatıldı.');
   String get resultsTitle => pick('Tournament complete', 'Turnuva tamam');
   String get resultsPending => pick(
     'The verified result is not available yet.',
@@ -333,8 +333,8 @@ final class TournamentCopy {
     'Bugünün kayıt penceresi kapalı.',
   );
   String get rejectedMove => pick(
-    'The server did not accept that move.',
-    'Sunucu bu hamleyi kabul etmedi.',
+    'That move was not accepted. Try again.',
+    'Hamle kabul edilmedi. Yeniden dene.',
   );
   String get genericFailure =>
       pick('Something went wrong.', 'Bir şeyler ters gitti.');
