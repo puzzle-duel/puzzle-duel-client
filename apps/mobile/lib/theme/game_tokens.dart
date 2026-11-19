@@ -29,13 +29,13 @@ abstract final class GameTokens {
   static const Color cellFlash = Color(0xFFFFF1A8);
   static const Color gridLine = Color(0xFF334866);
 
-  // PZD-47: aligned with PremiumShapeMaterials / icon attachment 10000.
-  static const Color circleFill = Color(0xFF47F5D4);
-  static const Color circleDeep = Color(0xFF0A8F78);
-  static const Color diamondFill = Color(0xFFB06BFF);
-  static const Color diamondDeep = Color(0xFF3B128A);
-  static const Color triangleFill = Color(0xFFFFD84A);
-  static const Color triangleDeep = Color(0xFFD06500);
+  // PZD-47: aligned with owner-approved premium material palette.
+  static const Color circleFill = Color(0xFF27C99A);
+  static const Color circleDeep = Color(0xFF064A3C);
+  static const Color diamondFill = Color(0xFFB533E9);
+  static const Color diamondDeep = Color(0xFF1A083E);
+  static const Color triangleFill = Color(0xFFFFC22A);
+  static const Color triangleDeep = Color(0xFF6A2E06);
 
   static const Color easyCard = Color(0xFF163A3A);
   static const Color easyAccent = Color(0xFF2EE6A8);

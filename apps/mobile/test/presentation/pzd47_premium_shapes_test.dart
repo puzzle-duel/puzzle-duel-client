@@ -28,10 +28,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('canonical materials version and source hash are pinned', () {
-    expect(PremiumShapeMaterials.version, 'pzd47-canonical-shapes-v1');
+    expect(PremiumShapeMaterials.version, 'pzd47-premium-material-v1');
     expect(
       PremiumShapeMaterials.sourceSha256,
-      '32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b',
+      'e1ad23104bdff8302434bdbcfbcec81d7ccbd70f9bfa02387ed8d94a70992cb6',
     );
   });
 
