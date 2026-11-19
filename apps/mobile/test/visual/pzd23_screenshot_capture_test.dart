@@ -6,6 +6,7 @@ import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
 import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Local / macOS UAT evidence capture.
@@ -29,7 +30,8 @@ Future<void> _pumpPhone(WidgetTester tester, GameSession session) async {
       child: PuzzleDuelApp(session: session, sfx: RecordingGameSfx()),
     ),
   );
-  await tester.pump(const Duration(milliseconds: 16));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 50));
 }
 
 Future<void> _golden(WidgetTester tester, String name) async {
@@ -43,6 +45,10 @@ Future<void> _golden(WidgetTester tester, String name) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await PremiumShapeAtlas.ensureLoaded();
+  });
 
   testWidgets('capture home menu', (tester) async {
     await _pumpPhone(tester, GameSession());

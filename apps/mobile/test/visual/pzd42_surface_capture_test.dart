@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
@@ -18,6 +19,10 @@ bool get _skipOnCi =>
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await PremiumShapeAtlas.ensureLoaded();
+  });
 
   testWidgets('home tournament available', (tester) async {
     await _captureHome(tester, '01-home-ready', turnsUsed: 0, ordinal: 1, completed: false);

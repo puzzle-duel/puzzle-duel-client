@@ -5,6 +5,7 @@ import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/game/game_screen.dart';
 import 'package:puzzle_duel_mobile/presentation/home/home_screen.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_atlas.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 
 /// Entry used by [main] and widget tests.
@@ -35,6 +36,15 @@ final class _PuzzleDuelAppState extends State<PuzzleDuelApp> {
     _ownsSfx = widget.sfx == null;
     _sfx = widget.sfx ?? AssetGameSfx();
     InteractionPerf.mark('app.init');
+    // Production [main] awaits ensureLoaded before runApp. Tests may not —
+    // kick a background load so PiecePainter can switch from vector fallback
+    // to canonical rasters without blocking the first home frame.
+    if (!PremiumShapeAtlas.isLoaded) {
+      // ignore: discarded_futures
+      PremiumShapeAtlas.ensureLoaded().then((_) {
+        if (mounted) setState(() {});
+      });
+    }
     // Warm audio off the critical path after the first home frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       InteractionPerf.mark('app.first_frame');

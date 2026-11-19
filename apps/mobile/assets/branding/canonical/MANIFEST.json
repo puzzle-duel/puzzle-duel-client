@@ -1,0 +1,60 @@
+{
+  "version": "pzd47-canonical-clipped-sprite-v4",
+  "strategy": "Runtime atlas = app_icon_master_1024 (attachment 10000 resized). PiecePainter samples quadrant src rects and clips to silhouette. canonical/*_body.png are clipped previews for docs/UAT only.",
+  "source_attachment": {
+    "path": "docs/features/pzd-47/reference/Neon_Puzzle_Trophy_Icon.png",
+    "sha256": "32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b",
+    "bytes": 1653310,
+    "jira_attachment_id": "10000"
+  },
+  "assets": {
+    "circle": {
+      "preview": "assets/branding/canonical/circle_body.png",
+      "sha256": "d1214d340a530d2630eaa859c7b7a893b1b668eca58fb3e24f6cbaf28743ded9",
+      "native_direction_turns_from_up": 0,
+      "runtime": "srcRect on app_icon_master_1024 + shapePath clip"
+    },
+    "diamond": {
+      "preview": "assets/branding/canonical/diamond_body.png",
+      "sha256": "8532f2895a13ba0e5ea7ccf5e25f811fb997c9a32c765d0adab1d7265e31a669",
+      "native_direction_turns_from_up": 3,
+      "runtime": "srcRect on app_icon_master_1024 + shapePath clip"
+    },
+    "triangle": {
+      "preview": "assets/branding/canonical/triangle_body.png",
+      "sha256": "1fec4ae032073e28279ce147eaf6d435b3a61eeef8d5b36e39ffa09dd2c9245c",
+      "native_direction_turns_from_up": 0,
+      "runtime": "srcRect on app_icon_master_1024 + shapePath clip"
+    },
+    "trophy": {
+      "preview": "assets/branding/canonical/trophy.png",
+      "sha256": "39da9cd30c0f5030b65def3a5a84a370359b03a0389566e0fa48e2a3e4a6ba43",
+      "playable": false
+    },
+    "direction_chevron_up": {
+      "note": "Unused in v4 icon-clip mode (compat placeholder).",
+      "sha256": "e0f89dc98bc3cd5e36fe43afbf3d9ce142f69be881931e0a9733700e0df30628"
+    }
+  },
+  "native_turns_from_up": {
+    "circle": 0,
+    "diamond": 3,
+    "triangle": 0
+  },
+  "direction_layer": {
+    "mode": "whole_sprite_rotation",
+    "turns": {
+      "up": 0,
+      "right": 1,
+      "down": 2,
+      "left": 3
+    },
+    "note": "Rotate clipped icon sample by (desired - native) quarter-turns. Diamond silhouette remains 45\u00b0 under 90\u00b0 rotation."
+  },
+  "icon_master": {
+    "path": "apps/mobile/assets/branding/app_icon_master_1024.png",
+    "sha256": "e3e5dbfaabd0b2849597da5b782e20fcee51ed4276b665216e535b5aa1f1d590",
+    "source": "original_attachment_resized_1024",
+    "runtime_atlas": true
+  }
+}

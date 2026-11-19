@@ -12,7 +12,7 @@ abstract final class PremiumShapeMaterials {
       'docs/features/pzd-47/reference/Neon_Puzzle_Trophy_Icon.png';
   static const String sourceSha256 =
       '32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b';
-  static const String version = 'pzd47-canonical-shapes-v1';
+  static const String version = 'pzd47-canonical-clipped-sprite-v4';
 
   /// Direction glyph fill — dark navy/black inset cutout from the icon.
   static const Color directionInset = Color(0xFF061018);

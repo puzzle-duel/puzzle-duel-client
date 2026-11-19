@@ -33,4 +33,10 @@ flutter:
     - assets/sfx/chain_complete.wav
     - assets/sfx/round_end.wav
     - assets/branding/app_icon_master_1024.png
+    - assets/branding/canonical/circle_body.png
+    - assets/branding/canonical/diamond_body.png
+    - assets/branding/canonical/triangle_body.png
+    - assets/branding/canonical/direction_chevron_up.png
+    - assets/branding/canonical/trophy.png
+    - assets/branding/canonical/MANIFEST.json
 
