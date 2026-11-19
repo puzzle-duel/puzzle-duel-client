@@ -132,5 +132,6 @@ Goldens, nihai UAT, launcher icons, master branding, reference master **ignore e
 
 ## Exact HEAD SHA
 
-Pre-commit tip (cleanup parent): `c2dfae64a81bc2877ed5802f08dda4de8c806165`  
-Post-commit SHA: *(filled after commit)*
+Pre-cleanup tip: `c2dfae64a81bc2877ed5802f08dda4de8c806165`  
+**Cleanup commit SHA:** `8e90e626fe1d8c66615d2f6e436b5b4a2ece10ca`  
+**Exact branch HEAD:** see `git rev-parse HEAD` on `feature/PZD-47-premium-shapes-app-icon` after push (docs-record commit on top of cleanup).
