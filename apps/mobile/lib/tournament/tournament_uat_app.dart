@@ -10,8 +10,10 @@ import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
+import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
 import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_settings.dart';
@@ -22,11 +24,13 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 export 'tournament_controller.dart';
 
-void runTournamentUatApp(UatConfig config, {UatApi? api}) {
+Future<void> runTournamentUatApp(UatConfig config, {UatApi? api}) async {
+  final directory = await AppStateDirectory.resolve();
   runApp(
     TournamentUatApp(
       config: config,
       api: api,
+      stateDirectory: directory,
       sfx: AssetGameSfx(coupledHaptics: false),
       ownsSfx: true,
     ),
@@ -61,43 +65,64 @@ final class TournamentUatApp extends StatefulWidget {
 
 final class _TournamentUatAppState extends State<TournamentUatApp> {
   late final GameSfx _sfx = widget.sfx ?? SilentGameSfx();
-  late final LocalSettings _settings = LocalSettings.load(
-    widget.stateDirectory ?? Directory.systemTemp,
-  );
-  late final TournamentController _controller = TournamentController(
-    config: widget.config,
-    api: widget.api,
-    stateDirectory: widget.stateDirectory,
-    sfx: _sfx,
-    settings: _settings,
-    haptics:
-        widget.haptics ??
-        DeviceTournamentHaptics(
-          enabled: () => _settings.haptics,
-          successAllowed: () => !WidgetsBinding
-              .instance
-              .platformDispatcher
-              .accessibilityFeatures
-              .reduceMotion,
-        ),
-  );
+  TournamentController? _controller;
+  String? _bootError;
 
   @override
   void initState() {
     super.initState();
-    _controller.start();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    try {
+      final directory =
+          widget.stateDirectory ?? await AppStateDirectory.resolve();
+      final settings = LocalSettings.load(directory);
+      final identity = PracticeIdentityStore(directory);
+      await identity.load();
+      final controller = TournamentController(
+        config: widget.config,
+        api: widget.api,
+        stateDirectory: directory,
+        identity: identity,
+        sfx: _sfx,
+        settings: settings,
+        haptics:
+            widget.haptics ??
+            DeviceTournamentHaptics(
+              enabled: () => settings.haptics,
+              successAllowed: () => !WidgetsBinding
+                  .instance
+                  .platformDispatcher
+                  .accessibilityFeatures
+                  .reduceMotion,
+            ),
+      );
+      await controller.start();
+      if (!mounted) {
+        controller.session.dispose();
+        controller.dispose();
+        return;
+      }
+      setState(() => _controller = controller);
+    } catch (error) {
+      if (mounted) setState(() => _bootError = error.toString());
+    }
   }
 
   @override
   void dispose() {
-    _controller.session.dispose();
-    _controller.dispose();
+    final controller = _controller;
+    controller?.session.dispose();
+    controller?.dispose();
     if (widget.ownsSfx || widget.sfx == null) _sfx.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _controller;
     return GameSfxScope(
       sfx: _sfx,
       child: MaterialApp(
@@ -124,10 +149,22 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
             child: wrapped,
           );
         },
-        home: ListenableBuilder(
-          listenable: _controller,
-          builder: (context, _) => _TournamentShell(controller: _controller),
-        ),
+        home: controller == null
+            ? Scaffold(
+                body: Center(
+                  child: Text(
+                    key: const Key('app-boot'),
+                    _bootError == null
+                        ? 'Loading…'
+                        : 'Could not open local storage.\n$_bootError',
+                  ),
+                ),
+              )
+            : ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) =>
+                    _TournamentShell(controller: controller),
+              ),
       ),
     );
   }
@@ -250,10 +287,7 @@ void _openProfile(BuildContext context, TournamentController controller) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       settings: const RouteSettings(name: 'player-profile'),
-      builder: (context) => PlayerProfileScreen(
-        controller: controller,
-        directory: controller.settings.file.parent,
-      ),
+      builder: (context) => PlayerProfileScreen(controller: controller),
     ),
   );
 }
@@ -262,11 +296,7 @@ void _openPractice(BuildContext context, TournamentController controller) {
   controller.haptics.selection();
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (context) => PracticeFlow(
-        directory: controller.settings.file.parent,
-        haptics: controller.haptics,
-        playerScope: controller.config.playerLabel,
-      ),
+      builder: (context) => PracticeFlow(controller: controller),
     ),
   );
 }

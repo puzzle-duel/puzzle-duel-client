@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
@@ -59,8 +60,15 @@ void main() {
     tester,
   ) async {
     final directory = Directory.systemTemp.createTempSync('pzd43-profile-data');
-    final store = PracticeStore(directory, playerScope: 'profile');
-    store.append(
+    const playerId = '11111111-1111-4111-8111-111111111111';
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    await identity.bindAuthenticatedPlayer(playerId);
+    await PracticeStore(
+      directory: directory,
+      scope: identity.activeScope,
+      identity: identity,
+    ).append(
       PracticeRecord(
         sessionId: 'p1',
         difficulty: 'easy',
@@ -77,6 +85,7 @@ void main() {
     final api = ScriptedUatApi((method, path, body) async {
       if (path == '/v1/tournament/session' && method == 'POST') {
         return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
           'sessionSecret': 'secret',
           'sessionId': 's1',
         });
@@ -142,6 +151,7 @@ void main() {
     final api = ScriptedUatApi((method, path, body) async {
       if (path == '/v1/tournament/session' && method == 'POST') {
         return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
           'sessionSecret': 'secret',
           'sessionId': 's1',
         });
@@ -219,6 +229,7 @@ ScriptedUatApi _api() {
   return ScriptedUatApi((method, path, body) async {
     if (path == '/v1/tournament/session' && method == 'POST') {
       return const UatHttpResult(201, {
+        'playerId': '11111111-1111-4111-8111-111111111111',
         'sessionSecret': 'secret',
         'sessionId': 's1',
       });
@@ -285,5 +296,10 @@ Future<void> _pumpHome(
       textScaler: textScaler,
     ),
   );
-  await tester.pumpAndSettle();
+  await tester.pump();
+  for (var i = 0; i < 40; i++) {
+    if (find.byKey(const Key('profile')).evaluate().isNotEmpty) break;
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  expect(find.byKey(const Key('profile')), findsOneWidget);
 }

@@ -6,12 +6,13 @@ Personal overview, version-aware Easy/Medium/Hard practice bests, and a data-dri
 
 ## Persistence
 
-- Device-local JSON via `PracticeStore`, scoped by sanitized player label.
-- History capped at 40 rows; personal bests survive pruning.
+- Durable application-support directory via `path_provider` (`puzzle_duel/`). Tests inject temp dirs.
+- Practice scopes: `guest_<localUuid>` or `player_<serverPlayerId>` from session. Never display labels.
+- Guest → authenticated does **not** auto-merge. Logout returns to guest scope without deleting player files.
+- History capped at 40 rows; personal bests survive pruning; async atomic writes.
 - Practice ruleset for free play remains `core-001.v2` / `gen-001.v1`.
 - Never uploaded to ranked claim/publication/leaderboard APIs.
-- Guest scope does not auto-merge into signed-in scope.
-- Reinstall / wiped temp directory loses data (same limitation as PZD-42 UAT state).
+- Uninstall removes data. Reinstall does not restore practice history.
 
 ## Badges
 

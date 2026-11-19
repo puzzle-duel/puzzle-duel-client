@@ -6,6 +6,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -101,26 +103,34 @@ final class _QuietSfx extends GameSfx {
 final class TournamentController extends ChangeNotifier {
   TournamentController({
     required this.config,
+    required this.stateDirectory,
+    required this.identity,
     UatApi? api,
-    Directory? stateDirectory,
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
   }) : api = api ?? UatApi(baseUrl: config.baseUrl, bearer: config.bearer),
        haptics = haptics ?? DeviceTournamentHaptics(),
        sfx = sfx ?? _QuietSfx(),
-       settings = settings ?? LocalSettings.load(stateDirectory ?? Directory.systemTemp),
-       _stateFile = File(
-         '${(stateDirectory ?? Directory.systemTemp).path}/pzd-uat-${config.playerLabel}.json',
-       );
+       settings = settings ?? LocalSettings.load(stateDirectory),
+       _stateFile = File('${stateDirectory.path}/pzd-uat-session.json');
 
   final UatConfig config;
+  final Directory stateDirectory;
+  final PracticeIdentityStore identity;
   final UatApi api;
   final TournamentHaptics haptics;
   final GameSfx sfx;
   final LocalSettings settings;
   final File _stateFile;
   final GameSession session = GameSession();
+
+  /// Practice persistence for the active guest or verified player scope.
+  PracticeStore practiceStore() => PracticeStore(
+    directory: stateDirectory,
+    scope: identity.activeScope,
+    identity: identity,
+  );
 
   TournamentRoute route = const TournamentRoute();
   TournamentDay? day;
@@ -289,17 +299,25 @@ final class TournamentController extends ChangeNotifier {
   Future<void> retryUnknown() async {
     final pending = _pending;
     if (pending is! Map || moveInFlight) return;
-    await _sendCommand(pending, key: _pendingKey ?? '', fromPlay: route.place == TournamentPlace.playing);
+    await _sendCommand(
+      pending,
+      key: _pendingKey ?? '',
+      fromPlay: route.place == TournamentPlace.playing,
+    );
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
-    if (moveInFlight || hasPendingCommand || session.authoritativeOutcomeUnknown) return;
+    if (moveInFlight ||
+        hasPendingCommand ||
+        session.authoritativeOutcomeUnknown)
+      return;
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
     final revision = board['boardRevision'];
     final writer = board['writerGeneration'];
-    final key = _pendingKey ??
+    final key =
+        _pendingKey ??
         'tap-$id-${board['ordinal']}-$revision-$offerIndex-${tap.row}-${tap.column}';
     final body = {
       'commandType': 'move',
@@ -327,7 +345,10 @@ final class TournamentController extends ChangeNotifier {
     noticeCode = null;
     notifyListeners();
     try {
-      final response = await api.post('/v1/tournament/series/$id/commands', body);
+      final response = await api.post(
+        '/v1/tournament/series/$id/commands',
+        body,
+      );
       if (response.status == 0) {
         _pending = body;
         _pendingKey = key;
@@ -344,7 +365,9 @@ final class TournamentController extends ChangeNotifier {
         final delta = fromPlay && before != null && day?.seriesScore != null
             ? day!.seriesScore! - before
             : 0;
-        scoreDelta = delta > 0 && route.place == TournamentPlace.playing ? delta : null;
+        scoreDelta = delta > 0 && route.place == TournamentPlace.playing
+            ? delta
+            : null;
         if (route.place == TournamentPlace.results) {
           sfx.play(GameSfxEvent.chainComplete);
           _haptic((feel) => feel.completed());
@@ -463,16 +486,15 @@ final class TournamentController extends ChangeNotifier {
     final weekly = route.place == TournamentPlace.weekly;
     busy = true;
     notifyListeners();
-    final response = await api.get(_leaderboardPath(weekly: weekly, week: weekStart, cursor: cursor));
+    final response = await api.get(
+      _leaderboardPath(weekly: weekly, week: weekStart, cursor: cursor),
+    );
     if (!_accepted(response, const {200})) return;
     final existing = leaderboard['rows'];
     final more = response.map['rows'];
     leaderboard = {
       ...response.map,
-      'rows': [
-        if (existing is List) ...existing,
-        if (more is List) ...more,
-      ],
+      'rows': [if (existing is List) ...existing, if (more is List) ...more],
     };
     nextCursor = _cursor(response.map['nextCursor']);
     weeklyFinal = response.map['state'] == 'FINAL';
@@ -480,7 +502,11 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _leaderboardPath({required bool weekly, String? week, String? cursor}) {
+  String _leaderboardPath({
+    required bool weekly,
+    String? week,
+    String? cursor,
+  }) {
     final base = weekly
         ? '/v1/tournament/leaderboards/weekly?weekStart=$week&category=$category&pageSize=50'
         : '/v1/tournament/leaderboards/daily?date=${_today()}&category=$category&pageSize=50';
@@ -552,21 +578,54 @@ final class TournamentController extends ChangeNotifier {
 
   Future<void> _restoreSession() async {
     if (_stateFile.existsSync()) {
-      final saved = jsonDecode(_stateFile.readAsStringSync());
-      if (saved is Map && saved['secret'] is String) {
-        api.sessionSecret = saved['secret'] as String;
-        final current = await api.get('/v1/tournament/session');
-        if (current.status == 200) return;
+      try {
+        final saved = jsonDecode(_stateFile.readAsStringSync());
+        if (saved is Map && saved['secret'] is String) {
+          api.sessionSecret = saved['secret'] as String;
+          final current = await api.get('/v1/tournament/session');
+          if (current.status == 200) {
+            await _bindPlayerId(current.map['playerId']?.toString());
+            return;
+          }
+        }
+      } catch (_) {
+        // Fall through and open a fresh session.
       }
     }
     final opened = await api.post('/v1/tournament/session');
     if (opened.status != 201) {
+      await identity.clearAuthenticatedPlayer();
       _fail(opened.status == 401 ? 'UNAUTHENTICATED' : opened.error);
       return;
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
-    _stateFile.writeAsStringSync(jsonEncode({'secret': api.sessionSecret}));
+    await _bindPlayerId(opened.map['playerId']?.toString());
+    _stateFile.parent.createSync(recursive: true);
+    final tmp = File('${_stateFile.path}.tmp');
+    tmp.writeAsStringSync(
+      jsonEncode({'secret': api.sessionSecret}),
+      flush: true,
+    );
+    if (_stateFile.existsSync()) _stateFile.deleteSync();
+    tmp.renameSync(_stateFile.path);
   }
+
+  Future<void> _bindPlayerId(String? playerId) async {
+    if (playerId == null || playerId.isEmpty) {
+      // Session without a verified internal id cannot isolate authenticated
+      // practice. Stay on the local guest scope rather than inventing one.
+      await identity.clearAuthenticatedPlayer();
+      return;
+    }
+    final bound = await identity.bindAuthenticatedPlayer(playerId);
+    if (!bound) {
+      await identity.clearAuthenticatedPlayer();
+    }
+  }
+
+  /// Clears authenticated practice binding after logout / identity switch.
+  Future<void> clearAuthenticatedPracticeScope() =>
+      identity.clearAuthenticatedPlayer();
 
   String _today() => DateTime.now().toUtc().toIso8601String().substring(0, 10);
 }

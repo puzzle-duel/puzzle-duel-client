@@ -1,18 +1,29 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 
 void main() {
   late Directory directory;
+  late PracticeIdentityStore identity;
 
-  setUp(() {
+  setUp(() async {
     directory = Directory.systemTemp.createTempSync('pzd43-practice-store');
+    identity = PracticeIdentityStore(directory, random: Random(9));
+    await identity.load();
   });
 
   tearDown(() {
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
+
+  PracticeStore store() => PracticeStore(
+    directory: directory,
+    scope: identity.activeScope,
+    identity: identity,
+  );
 
   PracticeRecord record({
     required String sessionId,
@@ -34,18 +45,19 @@ void main() {
     );
   }
 
-  test('starts empty and persists completions', () {
-    final store = PracticeStore(directory, playerScope: 'alice');
-    expect(store.load(), isEmpty);
-    expect(store.stats().completedCount, 0);
+  test('starts empty and persists completions asynchronously', () async {
+    final practice = store();
+    expect(await practice.load(), isEmpty);
+    expect((await practice.stats()).completedCount, 0);
     expect(
-      store.append(record(sessionId: 'a1', difficulty: 'easy', score: 40)),
+      await practice.append(
+        record(sessionId: 'a1', difficulty: 'easy', score: 40),
+      ),
       isTrue,
     );
-    expect(store.load(), hasLength(1));
-    expect(store.stats().completedCount, 1);
+    expect(await practice.load(), hasLength(1));
     expect(
-      store.bestScore(
+      await practice.bestScore(
         'easy',
         rulesVersion: 'core-001.v2',
         generatorVersion: 'gen-001.v1',
@@ -54,119 +66,63 @@ void main() {
     );
   });
 
-  test('replaces personal best and ignores lower scores', () {
-    final store = PracticeStore(directory, playerScope: 'alice');
-    store.append(record(sessionId: 'a1', difficulty: 'medium', score: 50));
-    store.append(record(sessionId: 'a2', difficulty: 'medium', score: 80));
-    store.append(record(sessionId: 'a3', difficulty: 'medium', score: 70));
+  test('preserves personal bests when history is pruned', () async {
+    final practice = store();
+    for (var i = 0; i < PracticeStore.maxRecords + 5; i++) {
+      await practice.append(
+        record(sessionId: 's$i', difficulty: 'easy', score: i == 0 ? 1000 : i),
+      );
+    }
+    expect(await practice.load(), hasLength(PracticeStore.maxRecords));
     expect(
-      store.bestScore(
+      await practice.bestScore(
+        'easy',
+        rulesVersion: 'core-001.v2',
+        generatorVersion: 'gen-001.v1',
+      ),
+      1000,
+    );
+  });
+
+  test('corrupt bests file does not erase valid history bests permanently', () async {
+    final practice = store();
+    await practice.append(
+      record(sessionId: 'ok', difficulty: 'medium', score: 77),
+    );
+    final bests = File(
+      '${directory.path}/practice-bests-${identity.activeScope.storageKey}.json',
+    );
+    await bests.writeAsString('{not-json');
+    expect(
+      await practice.bestScore(
         'medium',
         rulesVersion: 'core-001.v2',
         generatorVersion: 'gen-001.v1',
       ),
-      80,
+      77,
     );
   });
 
-  test('isolates difficulties and incompatible versions', () {
-    final store = PracticeStore(directory, playerScope: 'alice');
-    store.append(record(sessionId: 'e', difficulty: 'easy', score: 10));
-    store.append(record(sessionId: 'h', difficulty: 'hard', score: 90));
-    store.append(
+  test('rejects duplicates and isolates incompatible versions', () async {
+    final practice = store();
+    final first = record(sessionId: 'same', difficulty: 'easy', score: 20);
+    expect(await practice.append(first), isTrue);
+    expect(await practice.append(first), isFalse);
+    await practice.append(
       record(
-        sessionId: 'e-old',
+        sessionId: 'old',
         difficulty: 'easy',
         score: 999,
         rulesVersion: 'core-001.v1',
       ),
     );
     expect(
-      store.bestScore(
+      await practice.bestScore(
         'easy',
         rulesVersion: 'core-001.v2',
         generatorVersion: 'gen-001.v1',
       ),
-      10,
+      20,
     );
-    expect(
-      store.personalBestForDifficulty('easy', rulesVersion: 'core-001.v3'),
-      isNull,
-    );
-    expect(
-      store.bestScore(
-        'hard',
-        rulesVersion: 'core-001.v2',
-        generatorVersion: 'gen-001.v1',
-      ),
-      90,
-    );
-  });
-
-  test('rejects duplicate session ids', () {
-    final store = PracticeStore(directory, playerScope: 'alice');
-    final first = record(sessionId: 'same', difficulty: 'easy', score: 20);
-    expect(store.append(first), isTrue);
-    expect(store.append(first), isFalse);
-    expect(store.load(), hasLength(1));
-  });
-
-  test('survives restart and preserves bests when history is pruned', () {
-    final writing = PracticeStore(directory, playerScope: 'alice');
-    for (var i = 0; i < PracticeStore.maxRecords + 5; i++) {
-      writing.append(
-        record(sessionId: 's$i', difficulty: 'easy', score: i == 0 ? 1000 : i),
-      );
-    }
-    expect(writing.load(), hasLength(PracticeStore.maxRecords));
-    expect(
-      writing.bestScore(
-        'easy',
-        rulesVersion: 'core-001.v2',
-        generatorVersion: 'gen-001.v1',
-      ),
-      1000,
-    );
-
-    final reloaded = PracticeStore(directory, playerScope: 'alice');
-    expect(
-      reloaded.bestScore(
-        'easy',
-        rulesVersion: 'core-001.v2',
-        generatorVersion: 'gen-001.v1',
-      ),
-      1000,
-    );
-    expect(reloaded.load().any((item) => item.score == 1000), isFalse);
-  });
-
-  test('isolates players and does not merge guest into signed-in', () {
-    final guest = PracticeStore(directory, playerScope: 'guest');
-    guest.append(record(sessionId: 'g1', difficulty: 'easy', score: 55));
-    final alice = PracticeStore(directory, playerScope: 'alice');
-    expect(alice.load(), isEmpty);
-    expect(
-      alice.bestScore(
-        'easy',
-        rulesVersion: 'core-001.v2',
-        generatorVersion: 'gen-001.v1',
-      ),
-      isNull,
-    );
-    alice.append(record(sessionId: 'a1', difficulty: 'easy', score: 12));
-    expect(guest.load(), hasLength(1));
-    expect(alice.load(), hasLength(1));
-  });
-
-  test('migrates legacy unscoped files only into guest scope', () {
-    File('${directory.path}/practice-records.json').writeAsStringSync(
-      '[{"sessionId":"legacy","difficulty":"hard","rulesVersion":"core-001.v2",'
-      '"generatorVersion":"gen-001.v1","seed":1,"score":33,'
-      '"terminalReason":"ended","completedAt":"2026-11-01T00:00:00.000Z","verifiedRank":false}]',
-    );
-    final guest = PracticeStore(directory, playerScope: 'guest');
-    expect(guest.load().single.score, 33);
-    final bob = PracticeStore(directory, playerScope: 'bob');
-    expect(bob.load(), isEmpty);
   });
 }

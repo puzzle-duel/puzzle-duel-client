@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+
 /// One finished practice puzzle. This is not a ranked or server-verified result.
 final class PracticeRecord {
   const PracticeRecord({
@@ -47,7 +49,6 @@ final class PracticeRecord {
     if (raw is! Map) return null;
     final sessionId = raw['sessionId']?.toString() ?? '';
     if (sessionId.isEmpty) return null;
-    final sourceWire = raw['source']?.toString();
     return PracticeRecord(
       sessionId: sessionId,
       difficulty: raw['difficulty']?.toString() ?? '',
@@ -60,7 +61,7 @@ final class PracticeRecord {
       moveCount: raw['moveCount'] is num
           ? (raw['moveCount'] as num).toInt()
           : null,
-      source: PracticeSource.fromWire(sourceWire),
+      source: PracticeSource.fromWire(raw['source']?.toString()),
     );
   }
 }
@@ -147,7 +148,6 @@ final class PracticeBest {
   }
 }
 
-/// Aggregate counts derived only from persisted practice records and bests.
 final class PracticeStats {
   const PracticeStats({
     required this.completedCount,
@@ -158,98 +158,75 @@ final class PracticeStats {
   final Map<String, int> difficultyCounts;
 }
 
-/// Bounded on-device practice history, immortalized personal bests, and next seed.
+/// Bounded on-device practice history keyed by [PracticeIdentityScope].
 ///
-/// Uninstall and a wiped app directory delete these files. Records are never
-/// sent to tournament claim, publication, or leaderboard APIs. Scopes isolate
-/// players on a shared device; guest records are never auto-merged on login.
+/// Never uses display names. Never sends scores to ranked APIs. Guest records
+/// are never auto-merged into authenticated player scopes.
 final class PracticeStore {
-  PracticeStore(Directory directory, {String playerScope = 'guest'})
-    : playerScope = sanitizePlayerScope(playerScope),
-      _directory = directory,
-      _records = File(
-        '${directory.path}/practice-records-${sanitizePlayerScope(playerScope)}.json',
-      ),
-      _bests = File(
-        '${directory.path}/practice-bests-${sanitizePlayerScope(playerScope)}.json',
-      ),
-      _seed = File(
-        '${directory.path}/practice-seed-${sanitizePlayerScope(playerScope)}.txt',
-      ),
-      _legacyRecords = File('${directory.path}/practice-records.json'),
-      _legacySeed = File('${directory.path}/practice-seed.txt');
+  PracticeStore({
+    required Directory directory,
+    required this.scope,
+    PracticeIdentityStore? identity,
+  }) : _directory = directory,
+       _identity = identity,
+       _records = File(
+         '${directory.path}/practice-records-${scope.storageKey}.json',
+       ),
+       _bests = File(
+         '${directory.path}/practice-bests-${scope.storageKey}.json',
+       ),
+       _seed = File('${directory.path}/practice-seed-${scope.storageKey}.txt');
 
   /// History retention. Personal bests survive pruning via [_bests].
   static const int maxRecords = 40;
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
-  final String playerScope;
+  final PracticeIdentityScope scope;
   final Directory _directory;
+  final PracticeIdentityStore? _identity;
   final File _records;
   final File _bests;
   final File _seed;
-  final File _legacyRecords;
-  final File _legacySeed;
 
-  static String sanitizePlayerScope(String raw) {
-    final cleaned = raw
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
-        .replaceAll(RegExp(r'-{2,}'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
-    if (cleaned.isEmpty || cleaned.length > 64) return 'guest';
-    return cleaned;
-  }
-
-  int nextSeed() {
+  Future<int> nextSeed() async {
+    await _maybeMigrateLegacyIntoGuest();
     var current = 1;
-    final seedFile = _seed.existsSync()
-        ? _seed
-        : (playerScope == 'guest' && _legacySeed.existsSync()
-              ? _legacySeed
-              : _seed);
-    if (seedFile.existsSync()) {
-      current = int.tryParse(seedFile.readAsStringSync().trim()) ?? 1;
+    if (_seed.existsSync()) {
+      current = int.tryParse(_seed.readAsStringSync().trim()) ?? 1;
     }
     if (current < 1 || current > 4294967294) current = 1;
     final issued = current;
-    _seed.parent.createSync(recursive: true);
-    _seed.writeAsStringSync('${issued + 1}');
+    _atomicWrite(_seed, '${issued + 1}');
     return issued;
   }
 
-  /// Highest score for [difficulty] under an exact rules/generator match.
-  /// Incompatible versions are never compared.
-  int? bestScore(
+  Future<int?> bestScore(
     String difficulty, {
     required String rulesVersion,
     required String generatorVersion,
-  }) {
-    return personalBest(
+  }) async {
+    return (await personalBest(
       difficulty,
       rulesVersion: rulesVersion,
       generatorVersion: generatorVersion,
-    )?.score;
+    ))?.score;
   }
 
-  PracticeBest? personalBest(
+  Future<PracticeBest?> personalBest(
     String difficulty, {
     required String rulesVersion,
     required String generatorVersion,
-  }) {
+  }) async {
     final key = '$difficulty|$rulesVersion|$generatorVersion';
-    return loadBests()[key];
+    return (await loadBests())[key];
   }
 
-  /// Best available for [difficulty] under [rulesVersion], preferring the
-  /// requested generator when present.
-  PracticeBest? personalBestForDifficulty(
+  Future<PracticeBest?> personalBestForDifficulty(
     String difficulty, {
     required String rulesVersion,
     String? preferredGeneratorVersion,
-  }) {
-    final matches = loadBests().values.where(
+  }) async {
+    final matches = (await loadBests()).values.where(
       (best) =>
           best.difficulty == difficulty && best.rulesVersion == rulesVersion,
     );
@@ -258,38 +235,39 @@ final class PracticeStore {
       for (final best in matches) {
         if (best.generatorVersion == preferredGeneratorVersion) return best;
       }
+      return null;
     }
     return null;
   }
 
-  PracticeStats stats() {
-    final records = load();
+  Future<PracticeStats> stats() async {
+    final records = await load();
     final counts = <String, int>{};
     for (final record in records) {
       counts[record.difficulty] = (counts[record.difficulty] ?? 0) + 1;
     }
-    // Bests may outlive pruned history; count at least one completion per best.
-    final bests = loadBests();
+    final bests = await loadBests();
     var completed = records.length;
     for (final best in bests.values) {
       final inHistory = records.any(
         (record) => record.sessionId == best.sessionId,
       );
-      if (!inHistory) completed += 1;
-      counts.putIfAbsent(best.difficulty, () => 0);
       if (!inHistory) {
+        completed += 1;
         counts[best.difficulty] = (counts[best.difficulty] ?? 0) + 1;
+      } else {
+        counts.putIfAbsent(best.difficulty, () => 0);
       }
     }
     return PracticeStats(completedCount: completed, difficultyCounts: counts);
   }
 
   /// Appends a completed practice result. Duplicate [sessionId] is ignored.
-  /// Incomplete games must never call this.
-  bool append(PracticeRecord record) {
+  Future<bool> append(PracticeRecord record) async {
     if (record.sessionId.isEmpty) return false;
     if (record.source != PracticeSource.localPractice) return false;
-    final all = load();
+    await _maybeMigrateLegacyIntoGuest();
+    final all = await load();
     if (all.any((item) => item.sessionId == record.sessionId)) {
       return false;
     }
@@ -297,13 +275,13 @@ final class PracticeStore {
     final kept = all.length > maxRecords
         ? all.sublist(all.length - maxRecords)
         : all;
-    _writeRecords(kept);
-    _updateBest(record);
+    await _writeRecords(kept);
+    await _updateBest(record);
     return true;
   }
 
-  List<PracticeRecord> load() {
-    _maybeMigrateLegacyGuest();
+  Future<List<PracticeRecord>> load() async {
+    await _maybeMigrateLegacyIntoGuest();
     if (!_records.existsSync()) return [];
     try {
       final raw = jsonDecode(_records.readAsStringSync());
@@ -314,57 +292,59 @@ final class PracticeStore {
     }
   }
 
-  Map<String, PracticeBest> loadBests() {
-    _maybeMigrateLegacyGuest();
-    final fromFile = <String, PracticeBest>{};
+  Future<Map<String, PracticeBest>> loadBests() async {
+    await _maybeMigrateLegacyIntoGuest();
     if (_bests.existsSync()) {
       try {
         final raw = jsonDecode(_bests.readAsStringSync());
         if (raw is Map && raw['bests'] is Map) {
-          final bests = raw['bests'] as Map;
-          for (final entry in bests.entries) {
+          final bests = <String, PracticeBest>{};
+          for (final entry in (raw['bests'] as Map).entries) {
             final parsed = PracticeBest.tryParse(entry.value);
-            if (parsed != null) fromFile[parsed.versionKey] = parsed;
+            if (parsed != null) bests[parsed.versionKey] = parsed;
           }
+          return bests;
         }
       } catch (_) {
-        // Fall through and rebuild from history.
+        // Corrupt bests: rebuild from history without deleting the corrupt file
+        // until a successful rewrite completes.
       }
     }
-    if (fromFile.isNotEmpty) return fromFile;
     final rebuilt = <String, PracticeBest>{};
-    for (final record in load()) {
+    for (final record in await load()) {
       final existing = rebuilt[record.versionKey];
       if (existing == null || record.score > existing.score) {
         rebuilt[record.versionKey] = PracticeBest.fromRecord(record);
       }
     }
-    if (rebuilt.isNotEmpty) _writeBests(rebuilt);
+    if (rebuilt.isNotEmpty) {
+      await _writeBests(rebuilt);
+    }
     return rebuilt;
   }
 
-  void _updateBest(PracticeRecord record) {
-    final bests = Map<String, PracticeBest>.of(loadBests());
+  Future<void> _updateBest(PracticeRecord record) async {
+    final bests = Map<String, PracticeBest>.of(await loadBests());
     final existing = bests[record.versionKey];
     if (existing == null || record.score > existing.score) {
       bests[record.versionKey] = PracticeBest.fromRecord(record);
-      _writeBests(bests);
+      await _writeBests(bests);
     }
   }
 
-  void _writeRecords(List<PracticeRecord> records) {
-    _records.parent.createSync(recursive: true);
-    _records.writeAsStringSync(
+  Future<void> _writeRecords(List<PracticeRecord> records) async {
+    _atomicWrite(
+      _records,
       jsonEncode([for (final item in records) item.toJson()]),
     );
   }
 
-  void _writeBests(Map<String, PracticeBest> bests) {
-    _bests.parent.createSync(recursive: true);
-    _bests.writeAsStringSync(
+  Future<void> _writeBests(Map<String, PracticeBest> bests) async {
+    _atomicWrite(
+      _bests,
       jsonEncode({
         'schemaVersion': schemaVersion,
-        'playerScope': playerScope,
+        'scope': scope.storageKey,
         'bests': {
           for (final entry in bests.entries) entry.key: entry.value.toJson(),
         },
@@ -372,20 +352,81 @@ final class PracticeStore {
     );
   }
 
-  /// Legacy unscoped files belong only to the guest scope. Never merge into a
-  /// signed-in player scope automatically.
-  void _maybeMigrateLegacyGuest() {
-    if (playerScope != 'guest') return;
-    if (_records.existsSync()) return;
-    if (!_legacyRecords.existsSync()) return;
-    try {
-      _directory.createSync(recursive: true);
-      _legacyRecords.copySync(_records.path);
-      if (_legacySeed.existsSync() && !_seed.existsSync()) {
-        _legacySeed.copySync(_seed.path);
-      }
-    } catch (_) {
-      // Leave legacy files untouched when migration fails.
+  void _atomicWrite(File file, String contents) {
+    file.parent.createSync(recursive: true);
+    final tmp = File('${file.path}.tmp');
+    tmp.writeAsStringSync(contents, flush: true);
+    if (file.existsSync()) {
+      file.deleteSync();
     }
+    tmp.renameSync(file.path);
+  }
+
+  /// Legacy unscoped / label-scoped files migrate only into the active guest
+  /// scope, never into an authenticated player scope.
+  Future<void> _maybeMigrateLegacyIntoGuest() async {
+    if (scope.kind != PracticeIdentityKind.guest) return;
+    final identity = _identity;
+    if (identity != null && identity.legacyLabelScopesMigratedToGuest) {
+      return;
+    }
+    if (_records.existsSync()) {
+      await identity?.markLegacyLabelScopesMigratedToGuest();
+      return;
+    }
+
+    final sources = <File>[File('${_directory.path}/practice-records.json')];
+    if (_directory.existsSync()) {
+      for (final entity in _directory.listSync(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.isEmpty
+            ? entity.path
+            : entity.uri.pathSegments.last;
+        final match = RegExp(r'^practice-records-(.+)\.json$').firstMatch(name);
+        if (match == null) continue;
+        final token = match.group(1)!;
+        if (PracticeIdentityScope.tryParseStorageKey(token) != null) continue;
+        sources.add(entity);
+      }
+    }
+
+    final merged = <PracticeRecord>[];
+    final seen = <String>{};
+    for (final source in sources) {
+      if (!source.existsSync()) continue;
+      try {
+        final raw = jsonDecode(source.readAsStringSync());
+        if (raw is! List) continue;
+        for (final item in raw) {
+          final record = PracticeRecord.tryParse(item);
+          if (record == null || !seen.add(record.sessionId)) continue;
+          merged.add(record);
+        }
+      } catch (_) {
+        // Leave corrupt legacy sources untouched.
+      }
+    }
+    if (merged.isNotEmpty) {
+      final kept = merged.length > maxRecords
+          ? merged.sublist(merged.length - maxRecords)
+          : merged;
+      await _writeRecords(kept);
+      final bests = <String, PracticeBest>{};
+      for (final record in kept) {
+        final existing = bests[record.versionKey];
+        if (existing == null || record.score > existing.score) {
+          bests[record.versionKey] = PracticeBest.fromRecord(record);
+        }
+      }
+      await _writeBests(bests);
+    }
+
+    final legacySeed = File('${_directory.path}/practice-seed.txt');
+    if (!_seed.existsSync() && legacySeed.existsSync()) {
+      try {
+        _atomicWrite(_seed, legacySeed.readAsStringSync());
+      } catch (_) {}
+    }
+    await identity?.markLegacyLabelScopesMigratedToGuest();
   }
 }

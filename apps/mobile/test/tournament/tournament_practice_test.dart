@@ -124,10 +124,13 @@ void main() {
       );
       expect(find.text('On-Time'), findsNothing);
       await tester.pump();
-      final records = jsonDecode(
-        File('${directory.path}/practice-records-practice.json')
-            .readAsStringSync(),
-      ) as List;
+      final recordFiles = directory
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.contains('practice-records-player_'))
+          .toList();
+      expect(recordFiles, hasLength(1));
+      final records = jsonDecode(recordFiles.single.readAsStringSync()) as List;
       final record = records.single as Map;
       expect(record['verifiedRank'], isFalse);
       expect(record['difficulty'], 'hard');
@@ -141,7 +144,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.textContaining('7×7 board, 10 moves'), findsOneWidget);
       expect(
-        File('${directory.path}/practice-seed-practice.txt')
+        directory
+            .listSync()
+            .whereType<File>()
+            .firstWhere((f) => f.path.contains('practice-seed-player_'))
             .readAsStringSync()
             .trim(),
         '2',
@@ -155,7 +161,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.textContaining('7×7 board, 10 moves'), findsOneWidget);
       expect(
-        File('${directory.path}/practice-seed-practice.txt')
+        directory
+            .listSync()
+            .whereType<File>()
+            .firstWhere((f) => f.path.contains('practice-seed-player_'))
             .readAsStringSync()
             .trim(),
         '3',
@@ -278,7 +287,10 @@ _Move _legal(GameState state) {
 ScriptedUatApi _api({required bool completed}) {
   return ScriptedUatApi((method, path, body) async {
     if (method == 'POST' && path.endsWith('/session')) {
-      return const UatHttpResult(201, {'sessionSecret': 'secret'});
+      return const UatHttpResult(201, {
+        'playerId': '66666666-6666-4666-8666-666666666666',
+        'sessionSecret': 'secret',
+      });
     }
     if (path.endsWith('/claims/daily')) {
       return UatHttpResult(completed ? 200 : 201, {
@@ -340,6 +352,20 @@ Future<void> _pumpHome(
       haptics: const SilentTournamentHaptics(),
     ),
   );
-  await tester.pumpAndSettle();
+  await tester.pump();
+  for (var i = 0; i < 40; i++) {
+    if (find.byKey(const Key('practice')).evaluate().isNotEmpty) break;
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  if (find.byKey(const Key('practice')).evaluate().isEmpty) {
+    final boot = find.byKey(const Key('app-boot'));
+    final message = boot.evaluate().isEmpty
+        ? tester.allWidgets
+              .map((w) => w.runtimeType.toString())
+              .take(20)
+              .join(',')
+        : (boot.evaluate().single.widget as Text).data;
+    fail('home did not boot: $message');
+  }
   await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
 }

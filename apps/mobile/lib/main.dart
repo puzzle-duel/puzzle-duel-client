@@ -11,10 +11,11 @@ Future<void> main() async {
   const bearer = String.fromEnvironment('PZD_UAT_BEARER');
   const player = String.fromEnvironment('PZD_UAT_PLAYER');
   if (base.isNotEmpty && bearer.isNotEmpty) {
-    runTournamentUatApp(
+    await runTournamentUatApp(
       UatConfig(
         baseUrl: base,
         bearer: bearer,
+        // Display-only label. Never used as practice persistence identity.
         playerLabel: player.isEmpty ? 'UAT player' : player,
       ),
     );

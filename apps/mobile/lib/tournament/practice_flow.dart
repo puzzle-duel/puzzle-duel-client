@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
@@ -15,16 +15,9 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Offline practice. It never calls the tournament API.
 final class PracticeFlow extends StatefulWidget {
-  const PracticeFlow({
-    super.key,
-    required this.directory,
-    required this.haptics,
-    this.playerScope = 'guest',
-  });
+  const PracticeFlow({super.key, required this.controller});
 
-  final Directory directory;
-  final TournamentHaptics haptics;
-  final String playerScope;
+  final TournamentController controller;
 
   @override
   State<PracticeFlow> createState() => _PracticeFlowState();
@@ -32,10 +25,7 @@ final class PracticeFlow extends StatefulWidget {
 
 final class _PracticeFlowState extends State<PracticeFlow> {
   final GameSession _session = GameSession();
-  late final PracticeStore _store = PracticeStore(
-    widget.directory,
-    playerScope: widget.playerScope,
-  );
+  late PracticeStore _store = widget.controller.practiceStore();
   DifficultyProfile? _profile;
   int? _seed;
   bool _recorded = false;
@@ -58,14 +48,14 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     if (script != null && script.resolutionId != _seenResolution) {
       _seenResolution = script.resolutionId;
       if (script.applied.scoreDelta > 0) {
-        widget.haptics.cleared();
+        widget.controller.haptics.cleared();
       } else {
-        widget.haptics.accepted();
+        widget.controller.haptics.accepted();
       }
     }
     if (view.feedbackKind == MoveFeedbackKind.rejected &&
         _seenFeedback != MoveFeedbackKind.rejected) {
-      widget.haptics.rejected();
+      widget.controller.haptics.rejected();
       GameSfxScope.maybeOf(context)?.play(GameSfxEvent.reject);
     }
     _seenFeedback = view.feedbackKind;
@@ -78,10 +68,15 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     super.dispose();
   }
 
-  void _start(DifficultyProfile profile, {int? seed, bool replay = false}) {
-    final issued = seed ?? _store.nextSeed();
+  Future<void> _start(
+    DifficultyProfile profile, {
+    int? seed,
+    bool replay = false,
+  }) async {
+    _store = widget.controller.practiceStore();
+    final issued = seed ?? await _store.nextSeed();
     final started = _session.startRound(profile: profile, seed: issued);
-    if (!started) return;
+    if (!started || !mounted) return;
     setState(() {
       _profile = profile;
       _seed = issued;
@@ -91,7 +86,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     });
   }
 
-  void _maybeRecord() {
+  Future<void> _maybeRecord() async {
     if (!mounted || _recorded) return;
     final state = _session.view.canonicalState;
     final profile = _profile;
@@ -105,7 +100,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     _recorded = true;
     _finished = state;
     final when = DateTime.now().toUtc().toIso8601String();
-    _store.append(
+    await _store.append(
       PracticeRecord(
         sessionId: 'practice-$seed-$when',
         difficulty: profile.wire,
@@ -118,14 +113,15 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         moveCount: state.turnsUsed,
       ),
     );
-    final best = _store.bestScore(
+    final best = await _store.bestScore(
       profile.wire,
       rulesVersion: state.rulesVersion.id,
       generatorVersion: GeneratorVersion.gen001V1.id,
     );
+    if (!mounted) return;
     GameSfxScope.maybeOf(context)?.play(GameSfxEvent.roundEnd);
-    widget.haptics.completed();
-    if (mounted) setState(() => _deviceBest = best);
+    widget.controller.haptics.completed();
+    setState(() => _deviceBest = best);
   }
 
   Future<void> _changeDifficulty() async {
@@ -229,7 +225,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         if (state != null && state.status == GameStatus.ended) {
           if (!_recorded) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _maybeRecord();
+              if (mounted) unawaited(_maybeRecord());
             });
           }
           return PracticeResultView(
@@ -256,7 +252,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         return _PracticePlay(
           copy: copy,
           session: _session,
-          haptics: widget.haptics,
+          haptics: widget.controller.haptics,
           onLeave: _leave,
           onChangeDifficulty: _changeDifficulty,
         );

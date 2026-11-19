@@ -14,7 +14,11 @@ class UatApi {
   Future<UatHttpResult> post(String path, [Object? body]) =>
       _send('POST', path, body);
 
-  Future<UatHttpResult> _send(String method, String path, [Object? body]) async {
+  Future<UatHttpResult> _send(
+    String method,
+    String path, [
+    Object? body,
+  ]) async {
     final client = HttpClient();
     try {
       final request = await client
@@ -34,7 +38,9 @@ class UatApi {
         request.contentLength = bytes.length;
         request.add(bytes);
       }
-      final response = await request.close().timeout(const Duration(seconds: 12));
+      final response = await request.close().timeout(
+        const Duration(seconds: 12),
+      );
       final text = await utf8.decodeStream(response);
       Object? json;
       if (text.isNotEmpty) json = jsonDecode(text);

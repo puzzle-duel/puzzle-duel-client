@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
@@ -11,14 +9,9 @@ import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 /// Personal overview, version-aware practice bests, and authoritative badges.
 /// Distinct from official Tournament leaderboards.
 final class PlayerProfileScreen extends StatefulWidget {
-  const PlayerProfileScreen({
-    super.key,
-    required this.controller,
-    required this.directory,
-  });
+  const PlayerProfileScreen({super.key, required this.controller});
 
   final TournamentController controller;
-  final Directory directory;
 
   @override
   State<PlayerProfileScreen> createState() => _PlayerProfileScreenState();
@@ -29,8 +22,15 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   static const _practiceGenerator = 'gen-001.v1';
 
   late PracticeStore _store;
-  late PracticeStats _stats;
-  late Map<String, PracticeBest?> _bests;
+  PracticeStats _stats = const PracticeStats(
+    completedCount: 0,
+    difficultyCounts: {},
+  );
+  Map<String, PracticeBest?> _bests = const {
+    'easy': null,
+    'medium': null,
+    'hard': null,
+  };
   BadgeCollectionSnapshot _badges = BadgeCollectionSnapshot.lockedCatalog(
     status: BadgeCollectionStatus.loading,
   );
@@ -43,20 +43,22 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     _loadBadges();
   }
 
-  void _reloadLocal() {
-    _store = PracticeStore(
-      widget.directory,
-      playerScope: widget.controller.config.playerLabel,
-    );
-    _stats = _store.stats();
-    _bests = {
-      for (final difficulty in const ['easy', 'medium', 'hard'])
-        difficulty: _store.personalBestForDifficulty(
-          difficulty,
-          rulesVersion: _practiceRules,
-          preferredGeneratorVersion: _practiceGenerator,
-        ),
-    };
+  Future<void> _reloadLocal() async {
+    _store = widget.controller.practiceStore();
+    final stats = await _store.stats();
+    final bests = <String, PracticeBest?>{};
+    for (final difficulty in const ['easy', 'medium', 'hard']) {
+      bests[difficulty] = await _store.personalBestForDifficulty(
+        difficulty,
+        rulesVersion: _practiceRules,
+        preferredGeneratorVersion: _practiceGenerator,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _stats = stats;
+      _bests = bests;
+    });
   }
 
   Future<void> _loadBadges() async {
@@ -119,7 +121,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(_reloadLocal);
+    await _reloadLocal();
     await _loadBadges();
   }
 
