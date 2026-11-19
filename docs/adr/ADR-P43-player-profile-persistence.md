@@ -27,7 +27,7 @@ If session responses omit a trustworthy UUID `playerId`, the client stays on the
 
 1. Default practice/settings/identity directory is the platform **application support** path via `path_provider` (`…/puzzle_duel`).
 2. Automated tests inject a temporary directory override; production code does not default to `Directory.systemTemp`.
-3. Practice I/O uses async reads/writes with temp-file rename for atomicity.
+3. Practice I/O is exposed as async APIs that yield once (`Future<void>.value`) then perform small synchronous `dart:io` reads/writes with temp-file rename for atomicity. Native async File futures are avoided because they can hang under `flutter_test`; payloads stay tiny (bounded history JSON).
 4. Corrupt bests files are rebuilt from history without discarding valid personal bests after a successful rewrite.
 5. History remains bounded (`maxRecords = 40`) with immortalized version-aware bests.
 6. Uninstall removes application-support data. Reinstall does **not** restore practice history. Cross-device sync is out of scope.

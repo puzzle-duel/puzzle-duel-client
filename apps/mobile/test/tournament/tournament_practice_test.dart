@@ -276,8 +276,9 @@ _Move _legal(GameState state) {
           continue;
         }
         final applied = applyMove(state, Move(offerIndex: offer, tap: tap));
-        if (applied is MoveApplied)
+        if (applied is MoveApplied) {
           return _Move(offer, tap, applied.finalState);
+        }
       }
     }
   }

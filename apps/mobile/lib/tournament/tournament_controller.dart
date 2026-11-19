@@ -309,8 +309,9 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
     if (moveInFlight ||
         hasPendingCommand ||
-        session.authoritativeOutcomeUnknown)
+        session.authoritativeOutcomeUnknown) {
       return;
+    }
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;

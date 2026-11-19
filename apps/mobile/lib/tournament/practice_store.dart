@@ -162,13 +162,18 @@ final class PracticeStats {
 ///
 /// Never uses display names. Never sends scores to ranked APIs. Guest records
 /// are never auto-merged into authenticated player scopes.
+///
+/// Public methods are async and yield once (`Future<void>.value`) before
+/// touching disk so gesture handlers return without a sync stall on the current
+/// stack frame. Disk work then uses synchronous `dart:io` for the small JSON
+/// payloads. Native async File futures are avoided: under `flutter_test` they
+/// can fail to complete and freeze widget pumps.
 final class PracticeStore {
   PracticeStore({
     required Directory directory,
     required this.scope,
-    PracticeIdentityStore? identity,
+    this._identity,
   }) : _directory = directory,
-       _identity = identity,
        _records = File(
          '${directory.path}/practice-records-${scope.storageKey}.json',
        ),
@@ -188,8 +193,11 @@ final class PracticeStore {
   final File _bests;
   final File _seed;
 
+  Future<void> _yieldForUi() => Future<void>.value();
+
   Future<int> nextSeed() async {
-    await _maybeMigrateLegacyIntoGuest();
+    await _yieldForUi();
+    await _migrateLegacyIntoGuestIfNeeded();
     var current = 1;
     if (_seed.existsSync()) {
       current = int.tryParse(_seed.readAsStringSync().trim()) ?? 1;
@@ -266,8 +274,9 @@ final class PracticeStore {
   Future<bool> append(PracticeRecord record) async {
     if (record.sessionId.isEmpty) return false;
     if (record.source != PracticeSource.localPractice) return false;
-    await _maybeMigrateLegacyIntoGuest();
-    final all = await load();
+    await _yieldForUi();
+    await _migrateLegacyIntoGuestIfNeeded();
+    final all = _loadRecordsSync();
     if (all.any((item) => item.sessionId == record.sessionId)) {
       return false;
     }
@@ -275,13 +284,24 @@ final class PracticeStore {
     final kept = all.length > maxRecords
         ? all.sublist(all.length - maxRecords)
         : all;
-    await _writeRecords(kept);
-    await _updateBest(record);
+    _writeRecordsSync(kept);
+    _updateBestSync(record);
     return true;
   }
 
   Future<List<PracticeRecord>> load() async {
-    await _maybeMigrateLegacyIntoGuest();
+    await _yieldForUi();
+    await _migrateLegacyIntoGuestIfNeeded();
+    return _loadRecordsSync();
+  }
+
+  Future<Map<String, PracticeBest>> loadBests() async {
+    await _yieldForUi();
+    await _migrateLegacyIntoGuestIfNeeded();
+    return _loadBestsSync();
+  }
+
+  List<PracticeRecord> _loadRecordsSync() {
     if (!_records.existsSync()) return [];
     try {
       final raw = jsonDecode(_records.readAsStringSync());
@@ -292,8 +312,7 @@ final class PracticeStore {
     }
   }
 
-  Future<Map<String, PracticeBest>> loadBests() async {
-    await _maybeMigrateLegacyIntoGuest();
+  Map<String, PracticeBest> _loadBestsSync() {
     if (_bests.existsSync()) {
       try {
         final raw = jsonDecode(_bests.readAsStringSync());
@@ -311,35 +330,35 @@ final class PracticeStore {
       }
     }
     final rebuilt = <String, PracticeBest>{};
-    for (final record in await load()) {
+    for (final record in _loadRecordsSync()) {
       final existing = rebuilt[record.versionKey];
       if (existing == null || record.score > existing.score) {
         rebuilt[record.versionKey] = PracticeBest.fromRecord(record);
       }
     }
     if (rebuilt.isNotEmpty) {
-      await _writeBests(rebuilt);
+      _writeBestsSync(rebuilt);
     }
     return rebuilt;
   }
 
-  Future<void> _updateBest(PracticeRecord record) async {
-    final bests = Map<String, PracticeBest>.of(await loadBests());
+  void _updateBestSync(PracticeRecord record) {
+    final bests = Map<String, PracticeBest>.of(_loadBestsSync());
     final existing = bests[record.versionKey];
     if (existing == null || record.score > existing.score) {
       bests[record.versionKey] = PracticeBest.fromRecord(record);
-      await _writeBests(bests);
+      _writeBestsSync(bests);
     }
   }
 
-  Future<void> _writeRecords(List<PracticeRecord> records) async {
+  void _writeRecordsSync(List<PracticeRecord> records) {
     _atomicWrite(
       _records,
       jsonEncode([for (final item in records) item.toJson()]),
     );
   }
 
-  Future<void> _writeBests(Map<String, PracticeBest> bests) async {
+  void _writeBestsSync(Map<String, PracticeBest> bests) {
     _atomicWrite(
       _bests,
       jsonEncode({
@@ -352,6 +371,7 @@ final class PracticeStore {
     );
   }
 
+  /// Temp-file + rename so a crash mid-write cannot leave a truncated JSON body.
   void _atomicWrite(File file, String contents) {
     file.parent.createSync(recursive: true);
     final tmp = File('${file.path}.tmp');
@@ -364,7 +384,7 @@ final class PracticeStore {
 
   /// Legacy unscoped / label-scoped files migrate only into the active guest
   /// scope, never into an authenticated player scope.
-  Future<void> _maybeMigrateLegacyIntoGuest() async {
+  Future<void> _migrateLegacyIntoGuestIfNeeded() async {
     if (scope.kind != PracticeIdentityKind.guest) return;
     final identity = _identity;
     if (identity != null && identity.legacyLabelScopesMigratedToGuest) {
@@ -410,7 +430,7 @@ final class PracticeStore {
       final kept = merged.length > maxRecords
           ? merged.sublist(merged.length - maxRecords)
           : merged;
-      await _writeRecords(kept);
+      _writeRecordsSync(kept);
       final bests = <String, PracticeBest>{};
       for (final record in kept) {
         final existing = bests[record.versionKey];
@@ -418,7 +438,7 @@ final class PracticeStore {
           bests[record.versionKey] = PracticeBest.fromRecord(record);
         }
       }
-      await _writeBests(bests);
+      _writeBestsSync(bests);
     }
 
     final legacySeed = File('${_directory.path}/practice-seed.txt');

@@ -121,8 +121,9 @@ final class TournamentDay {
   final int? boardSize;
 
   DayPhase get phase {
-    if (resultsPublished || claimStatus == 'COMPLETED')
+    if (resultsPublished || claimStatus == 'COMPLETED') {
       return DayPhase.completed;
+    }
     if (awaitAdvance) return DayPhase.betweenGames;
     if ((ordinal ?? 1) == 1 && (turnsUsed ?? 0) == 0) return DayPhase.ready;
     return DayPhase.inProgress;

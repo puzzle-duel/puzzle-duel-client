@@ -114,8 +114,9 @@ void main() {
         }
         if (path.endsWith('/commands')) {
           commandPosts += 1;
-          if (commandPosts == 1)
+          if (commandPosts == 1) {
             return const UatHttpResult(0, {'error': 'TIMEOUT'});
+          }
           return const UatHttpResult(200, {'ok': true});
         }
         return const UatHttpResult(404, {'error': 'NOT_FOUND'});

@@ -375,8 +375,9 @@ final class TournamentCopy {
     final raw = value.abs().toString();
     final buffer = StringBuffer(value < 0 ? '-' : '');
     for (var index = 0; index < raw.length; index++) {
-      if (index > 0 && (raw.length - index) % 3 == 0)
+      if (index > 0 && (raw.length - index) % 3 == 0) {
         buffer.write(isTurkish ? '.' : ',');
+      }
       buffer.write(raw[index]);
     }
     return buffer.toString();
@@ -426,8 +427,9 @@ DateTime? _utcDay(String value) {
   if (year == null || month == null || day == null) return null;
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   final parsed = DateTime.utc(year, month, day);
-  if (parsed.year != year || parsed.month != month || parsed.day != day)
+  if (parsed.year != year || parsed.month != month || parsed.day != day) {
     return null;
+  }
   return parsed;
 }
 
