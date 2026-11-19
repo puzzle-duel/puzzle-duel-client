@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
@@ -115,7 +116,12 @@ final class TournamentController extends ChangeNotifier {
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
-  }) : api = api ?? UatApi(baseUrl: config.baseUrl, bearer: config.bearer),
+  }) : api =
+           api ??
+           UatApi(
+             baseUrl: UatApi.apiOrigin(config.baseUrl),
+             bearer: config.bearer,
+           ),
        haptics = haptics ?? DeviceTournamentHaptics(),
        sfx = sfx ?? _QuietSfx(),
        settings = settings ?? LocalSettings.load(stateDirectory),
@@ -219,10 +225,11 @@ final class TournamentController extends ChangeNotifier {
     tournamentNoticeCode = null;
     errorCode = null;
     notifyListeners();
-    await _restoreSession(degradedOnFailure: true);
+    final sessionOk = await _restoreSession(degradedOnFailure: true);
     if (epoch != _tournamentEpoch) return;
-    if (api.sessionSecret == null) {
-      if (epoch == _tournamentEpoch) {
+    if (!sessionOk || api.sessionSecret == null) {
+      if (epoch == _tournamentEpoch &&
+          tournamentSync == TournamentSyncState.syncing) {
         tournamentSync = TournamentSyncState.degraded;
         notifyListeners();
       }
@@ -646,7 +653,7 @@ final class TournamentController extends ChangeNotifier {
     if (ok.contains(response.status)) return true;
     if (response.status == 0) {
       _fail(
-        response.error == 'TIMEOUT' ? 'TIMEOUT' : 'OFFLINE',
+        response.isTimeout ? 'TIMEOUT' : 'OFFLINE',
         degradedOnFailure: degradedOnFailure,
       );
       return false;
@@ -681,59 +688,115 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _restoreSession({bool degradedOnFailure = false}) async {
-    if (_stateFile.existsSync()) {
-      try {
-        final saved = jsonDecode(_stateFile.readAsStringSync());
-        if (saved is Map && saved['secret'] is String) {
-          api.sessionSecret = saved['secret'] as String;
-          final current = await api.get('/v1/tournament/session');
-          if (current.status == 200) {
-            await _bindPlayerId(current.map['playerId']?.toString());
-            await _hydrateHomeSnapshot();
-            return;
-          }
-          if (current.status == 0) {
-            // Keep last verified practice scope while offline.
-            api.sessionSecret = saved['secret'] as String;
-            _fail(
-              current.error == 'TIMEOUT' ? 'TIMEOUT' : 'OFFLINE',
-              degradedOnFailure: degradedOnFailure,
-            );
-            return;
-          }
-          if (current.status == 401) {
-            api.sessionSecret = null;
-            await identity.clearAuthenticatedPlayer();
-            await _hydrateHomeSnapshot();
-          }
-        }
-      } catch (_) {
-        // Fall through and open a fresh session.
-      }
+  /// Returns true only when a usable session secret is ready for ranked calls.
+  Future<bool> _restoreSession({bool degradedOnFailure = false}) async {
+    final binding = UatApi.authBinding(config.bearer);
+    final origin = UatApi.apiOrigin(config.baseUrl);
+    InteractionPerf.mark('tournament.session.restore.start');
+    if (InteractionPerf.enabled) {
+      // Origin only — never bearer, secret, or Authorization.
+      debugPrint('PZD_PERF tournament.api.origin=$origin');
     }
+
+    final saved = _readBoundSession(binding: binding, origin: origin);
+    if (saved != null) {
+      api.sessionSecret = saved;
+      final current = await api.get('/v1/tournament/session');
+      if (current.status == 200) {
+        InteractionPerf.mark('tournament.session.restore.hit');
+        await _bindPlayerId(current.map['playerId']?.toString());
+        await _hydrateHomeSnapshot();
+        return true;
+      }
+      if (current.status == 0) {
+        // Bound session + network failure: keep practice scope, do not POST.
+        api.sessionSecret = saved;
+        _fail(
+          current.isTimeout ? 'TIMEOUT' : 'OFFLINE',
+          degradedOnFailure: degradedOnFailure,
+        );
+        return false;
+      }
+      // Expired / rejected: drop secret and open a fresh session with bearer.
+      api.sessionSecret = null;
+      if (current.status == 401) {
+        await identity.clearAuthenticatedPlayer();
+        await _hydrateHomeSnapshot();
+      }
+      InteractionPerf.mark('tournament.session.restore.rejected');
+    } else {
+      api.sessionSecret = null;
+      InteractionPerf.mark('tournament.session.restore.unbound');
+    }
+
     final opened = await api.post('/v1/tournament/session');
     if (opened.status != 201) {
       if (opened.status == 401) {
         await identity.clearAuthenticatedPlayer();
         await _hydrateHomeSnapshot();
         _fail('UNAUTHENTICATED', degradedOnFailure: degradedOnFailure);
-        return;
+        return false;
       }
       // Offline / timeout: never clear a previously verified practice binding.
       _fail(
-        opened.status == 0 && opened.error == 'TIMEOUT' ? 'TIMEOUT' : 'OFFLINE',
+        opened.isTimeout ? 'TIMEOUT' : 'OFFLINE',
         degradedOnFailure: degradedOnFailure,
       );
-      return;
+      return false;
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
     await _bindPlayerId(opened.map['playerId']?.toString());
     await _hydrateHomeSnapshot();
+    _persistBoundSession(
+      secret: api.sessionSecret,
+      binding: binding,
+      origin: origin,
+    );
+    InteractionPerf.mark('tournament.session.restore.opened');
+    return api.sessionSecret != null && api.sessionSecret!.isNotEmpty;
+  }
+
+  /// Returns a secret only when file proves same auth + API origin ownership.
+  String? _readBoundSession({
+    required String binding,
+    required String origin,
+  }) {
+    if (!_stateFile.existsSync()) return null;
+    try {
+      final saved = jsonDecode(_stateFile.readAsStringSync());
+      if (saved is! Map) return null;
+      final secret = saved['secret']?.toString();
+      if (secret == null || secret.isEmpty) return null;
+      final savedBinding = saved['authBinding']?.toString();
+      final savedOrigin = saved['apiOrigin']?.toString();
+      // Legacy files without binding cannot prove current auth ownership.
+      if (savedBinding == null ||
+          savedBinding.isEmpty ||
+          savedOrigin == null ||
+          savedOrigin.isEmpty) {
+        return null;
+      }
+      if (savedBinding != binding || savedOrigin != origin) return null;
+      return secret;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _persistBoundSession({
+    required String? secret,
+    required String binding,
+    required String origin,
+  }) {
+    if (secret == null || secret.isEmpty) return;
     _stateFile.parent.createSync(recursive: true);
     final tmp = File('${_stateFile.path}.tmp');
     tmp.writeAsStringSync(
-      jsonEncode({'secret': api.sessionSecret}),
+      jsonEncode({
+        'secret': secret,
+        'authBinding': binding,
+        'apiOrigin': origin,
+      }),
       flush: true,
     );
     // Preserve the last valid session until its replacement is durable.
