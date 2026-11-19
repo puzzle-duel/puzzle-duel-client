@@ -90,7 +90,7 @@ void main() {
         haptics: const SilentTournamentHaptics(),
       ),
     );
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
 
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(find.text('Tournament complete'), findsNothing);
@@ -98,18 +98,18 @@ void main() {
     expect(api.claimPosts, 1);
 
     await tester.tap(find.byKey(const Key('primary-action')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('results-score')), findsOneWidget);
     expect(api.claimPosts, 1);
 
     await tester.tap(find.byKey(const Key('leaderboard')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('board-weekly')), findsOneWidget);
     expect(find.text('Provisional'), findsOneWidget);
     final weeklyPeriod = tester.getRect(find.byKey(const Key('period-row')));
     final weeklyRank = tester.getTopLeft(find.byKey(const Key('self-rank')));
     await tester.tap(find.byKey(const Key('board-daily')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.text('18 November 2026'), findsOneWidget);
     final dailyPeriod = tester.getRect(find.byKey(const Key('period-row')));
     final dailyRank = tester.getTopLeft(find.byKey(const Key('self-rank')));
@@ -118,21 +118,21 @@ void main() {
     expect(dailyRank.dy, weeklyRank.dy);
 
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('results-score')), findsOneWidget);
 
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     await navigator.maybePop();
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(api.claimPosts, 1);
 
     await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
     await tester.tap(find.byKey(const Key('leaderboard')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.text('Provisional'), findsOneWidget);
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(find.text('Tournament complete'), findsNothing);
   });
@@ -184,7 +184,7 @@ void main() {
           textScaler: scaler,
         ),
       );
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       expect(tester.takeException(), isNull);
     }
 
@@ -259,11 +259,11 @@ void main() {
         haptics: const SilentTournamentHaptics(),
       ),
     );
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
 
     await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
     await tester.tap(find.byKey(const Key('leaderboard')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(paths.last, contains('weekStart=2026-11-16'));
     expect(paths.last, contains('category=ALL'));
     expect(find.textContaining('no verified rank'), findsOneWidget);
@@ -271,20 +271,28 @@ void main() {
     expect(find.textContaining('No verified scores'), findsOneWidget);
 
     await tester.tap(find.text('Hard'));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(paths.last, contains('category=HARD'));
     await tester.tap(find.byKey(const Key('week-older')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(paths.last, contains('weekStart=2026-11-09'));
     expect(paths.last, contains('category=HARD'));
 
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
     await tester.tap(find.byKey(const Key('leaderboard')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(paths.last, contains('weekStart=2026-11-16'));
     expect(paths.last, contains('category=ALL'));
     expect(find.text('16–22 November 2026'), findsOneWidget);
   });
 }
+
+Future<void> _pumpFrames(WidgetTester tester, [int frames = 20]) async {
+  await tester.pump();
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+

@@ -31,7 +31,10 @@ final class TournamentSettingsScreen extends StatelessWidget {
                         icon: const Icon(Icons.arrow_back),
                       ),
                       const SizedBox(width: 4),
-                      Text(copy.settingsTitle, style: Theme.of(context).textTheme.headlineSmall),
+                      Text(
+                        copy.settingsTitle,
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -92,7 +95,13 @@ final class _SettingSwitch extends StatelessWidget {
         key: switchKey,
         contentPadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
         secondary: Icon(icon, color: GameTokens.accent),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: GameTokens.textPrimary)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            color: GameTokens.textPrimary,
+          ),
+        ),
         subtitle: Text(body),
         value: value,
         onChanged: onChanged,

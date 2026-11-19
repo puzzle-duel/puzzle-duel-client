@@ -54,34 +54,42 @@ void main() {
     }
 
     await pump();
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byType(SwitchListTile), findsNothing);
     await tester.tap(find.byKey(const Key('settings')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.text('Sounds for placements, clears, and results.'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('settings-sound')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     await tester.tap(find.byKey(const Key('settings-haptics')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
 
     final saved = jsonDecode(File('${directory.path}/pzd-settings.json').readAsStringSync()) as Map;
     expect(saved['sound'], isFalse);
     expect(saved['haptics'], isFalse);
 
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     expect(find.byKey(const Key('home-title')), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     await pump();
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     await tester.tap(find.byKey(const Key('settings')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
     final sound = tester.widget<SwitchListTile>(find.byKey(const Key('settings-sound')));
     final haptics = tester.widget<SwitchListTile>(find.byKey(const Key('settings-haptics')));
     expect(sound.value, isFalse);
     expect(haptics.value, isFalse);
   });
 }
+
+Future<void> _pumpFrames(WidgetTester tester, [int frames = 20]) async {
+  await tester.pump();
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+

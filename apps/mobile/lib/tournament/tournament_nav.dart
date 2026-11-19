@@ -39,9 +39,13 @@ final class TournamentRoute {
   TournamentRoute open(TournamentPlace next) {
     if (next == TournamentPlace.daily || next == TournamentPlace.weekly) {
       if (place == TournamentPlace.daily || place == TournamentPlace.weekly) {
-        return TournamentRoute(place: next, leaderboardReturn: leaderboardReturn);
+        return TournamentRoute(
+          place: next,
+          leaderboardReturn: leaderboardReturn,
+        );
       }
-      final from = place == TournamentPlace.results ||
+      final from =
+          place == TournamentPlace.results ||
               place == TournamentPlace.home ||
               place == TournamentPlace.overview
           ? place
@@ -57,7 +61,8 @@ final class TournamentRoute {
       case TournamentPlace.daily:
       case TournamentPlace.weekly:
         final dest = leaderboardReturn;
-        if (dest == TournamentPlace.results || dest == TournamentPlace.overview) {
+        if (dest == TournamentPlace.results ||
+            dest == TournamentPlace.overview) {
           return TournamentRoute(place: dest!);
         }
         return const TournamentRoute();
@@ -116,7 +121,9 @@ final class TournamentDay {
   final int? boardSize;
 
   DayPhase get phase {
-    if (resultsPublished || claimStatus == 'COMPLETED') return DayPhase.completed;
+    if (resultsPublished || claimStatus == 'COMPLETED') {
+      return DayPhase.completed;
+    }
     if (awaitAdvance) return DayPhase.betweenGames;
     if ((ordinal ?? 1) == 1 && (turnsUsed ?? 0) == 0) return DayPhase.ready;
     return DayPhase.inProgress;
@@ -129,8 +136,7 @@ final class TournamentDay {
     return (current - 1).clamp(0, 6);
   }
 
-  String get label =>
-      ordinalLabel ?? tournamentOrdinalLabels[ordinal] ?? '';
+  String get label => ordinalLabel ?? tournamentOrdinalLabels[ordinal] ?? '';
 }
 
 TournamentDay dayFromPayload({
@@ -144,7 +150,8 @@ TournamentDay dayFromPayload({
     original: claim['original'] == true,
     claimStatus: claim['status']?.toString() ?? '',
     ordinal: ordinal,
-    ordinalLabel: board?['ordinalLabel']?.toString() ?? tournamentOrdinalLabels[ordinal],
+    ordinalLabel:
+        board?['ordinalLabel']?.toString() ?? tournamentOrdinalLabels[ordinal],
     seriesScore: tournamentInt(board?['seriesScore']),
     gameScore: tournamentInt(board?['score']),
     awaitAdvance: board?['awaitAdvance'] == true,

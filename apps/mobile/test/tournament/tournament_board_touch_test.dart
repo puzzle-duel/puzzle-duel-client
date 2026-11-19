@@ -100,7 +100,7 @@ void main() {
           haptics: const SilentTournamentHaptics(),
         ),
       );
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('primary-action')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
@@ -133,3 +133,11 @@ void main() {
     });
   }
 }
+
+Future<void> _pumpFrames(WidgetTester tester, [int frames = 20]) async {
+  await tester.pump();
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+

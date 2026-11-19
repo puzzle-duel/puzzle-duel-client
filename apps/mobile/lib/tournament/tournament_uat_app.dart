@@ -10,9 +10,13 @@ import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
+import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
+import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_page_route.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
@@ -21,11 +25,13 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 export 'tournament_controller.dart';
 
-void runTournamentUatApp(UatConfig config, {UatApi? api}) {
+Future<void> runTournamentUatApp(UatConfig config, {UatApi? api}) async {
+  final directory = await AppStateDirectory.resolve();
   runApp(
     TournamentUatApp(
       config: config,
       api: api,
+      stateDirectory: directory,
       sfx: AssetGameSfx(coupledHaptics: false),
       ownsSfx: true,
     ),
@@ -60,52 +66,86 @@ final class TournamentUatApp extends StatefulWidget {
 
 final class _TournamentUatAppState extends State<TournamentUatApp> {
   late final GameSfx _sfx = widget.sfx ?? SilentGameSfx();
-  late final LocalSettings _settings = LocalSettings.load(
-    widget.stateDirectory ?? Directory.systemTemp,
-  );
-  late final TournamentController _controller = TournamentController(
-    config: widget.config,
-    api: widget.api,
-    stateDirectory: widget.stateDirectory,
-    sfx: _sfx,
-    settings: _settings,
-    haptics: widget.haptics ??
-        DeviceTournamentHaptics(
-          enabled: () => _settings.haptics,
-          successAllowed: () =>
-              !WidgetsBinding.instance.platformDispatcher.accessibilityFeatures.reduceMotion,
-        ),
-  );
+  TournamentController? _controller;
+  String? _bootError;
 
   @override
   void initState() {
     super.initState();
-    _controller.start();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    try {
+      final directory =
+          widget.stateDirectory ?? await AppStateDirectory.resolve();
+      final settings = LocalSettings.load(directory);
+      final identity = PracticeIdentityStore(directory);
+      await identity.load();
+      final controller = TournamentController(
+        config: widget.config,
+        api: widget.api,
+        stateDirectory: directory,
+        identity: identity,
+        sfx: _sfx,
+        settings: settings,
+        haptics:
+            widget.haptics ??
+            DeviceTournamentHaptics(
+              enabled: () => settings.haptics,
+              successAllowed: () => !WidgetsBinding
+                  .instance
+                  .platformDispatcher
+                  .accessibilityFeatures
+                  .reduceMotion,
+            ),
+      );
+      await controller.beginLocal();
+      if (!mounted) {
+        controller.session.dispose();
+        controller.dispose();
+        return;
+      }
+      setState(() => _controller = controller);
+      // Ranked refresh never gates Practice / Profile entry.
+      // Startup: silent info banners; failures still surface as red/offline.
+      unawaited(
+        controller.refreshTournament(origin: TournamentRefreshOrigin.startup),
+      );
+      // Audio warm-up must not delay first tap.
+      unawaited(_sfx.prepare());
+    } catch (error) {
+      if (mounted) setState(() => _bootError = error.toString());
+    }
   }
 
   @override
   void dispose() {
-    _controller.session.dispose();
-    _controller.dispose();
+    final controller = _controller;
+    controller?.session.dispose();
+    controller?.dispose();
     if (widget.ownsSfx || widget.sfx == null) _sfx.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _controller;
     return GameSfxScope(
       sfx: _sfx,
       child: MaterialApp(
         title: 'Puzzle Duel',
         debugShowCheckedModeBanner: false,
-        theme: PuzzleDuelTheme.dark(),
+        theme: PuzzleDuelTheme.dark().copyWith(
+          scaffoldBackgroundColor: GameTokens.bgDeep,
+          canvasColor: GameTokens.bgDeep,
+        ),
         locale: const Locale('en'),
         supportedLocales: const [Locale('en')],
-        localizationsDelegates: const [
-          TournamentCopyDelegate(),
-        ],
+        localizationsDelegates: const [TournamentCopyDelegate()],
         builder: (context, child) {
-          final requested = widget.locale ?? View.of(context).platformDispatcher.locale;
+          final requested =
+              widget.locale ?? View.of(context).platformDispatcher.locale;
           final copyLocale = requested.languageCode == 'tr'
               ? const Locale('tr')
               : const Locale('en');
@@ -120,10 +160,22 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
             child: wrapped,
           );
         },
-        home: ListenableBuilder(
-          listenable: _controller,
-          builder: (context, _) => _TournamentShell(controller: _controller),
-        ),
+        home: controller == null
+            ? Scaffold(
+                body: Center(
+                  child: Text(
+                    key: const Key('app-boot'),
+                    _bootError == null
+                        ? 'Loading…'
+                        : 'Could not open local storage.\n$_bootError',
+                  ),
+                ),
+              )
+            : ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) =>
+                    _TournamentShell(controller: controller),
+              ),
       ),
     );
   }
@@ -156,7 +208,8 @@ final class _TournamentShell extends StatelessWidget {
       canPop: atHome && !controller.booting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (place == TournamentPlace.playing || place == TournamentPlace.transition) {
+        if (place == TournamentPlace.playing ||
+            place == TournamentPlace.transition) {
           _confirmLeave(context, controller);
           return;
         }
@@ -167,14 +220,21 @@ final class _TournamentShell extends StatelessWidget {
   }
 
   Widget _body(BuildContext context, TournamentPlace place) {
-    if (controller.booting || (controller.busy && controller.day == null)) {
+    // Local Home is available as soon as beginLocal completes. Tournament
+    // syncing never replaces the whole shell with a blocking spinner.
+    if (!controller.localReady && controller.booting) {
       return _Loading(label: TournamentCopy.of(context).loading);
     }
     return switch (place) {
       TournamentPlace.playing => _PlayScreen(controller: controller),
       TournamentPlace.transition => _TransitionScreen(controller: controller),
       TournamentPlace.results => _ResultsScreen(controller: controller),
-      TournamentPlace.daily || TournamentPlace.weekly => TournamentLeaderboardView(controller: controller),
+      // Home→Leaderboard is a pushed route. Keep Home as the shell underlay so
+      // pop reveals a stable Home backdrop instead of a second leaderboard.
+      TournamentPlace.daily || TournamentPlace.weekly =>
+        controller.route.leaderboardReturn == TournamentPlace.home
+            ? _HomeScreen(controller: controller)
+            : TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
       TournamentPlace.home => _HomeScreen(controller: controller),
@@ -183,35 +243,40 @@ final class _TournamentShell extends StatelessWidget {
 }
 
 final class _PlayFeedback extends StatelessWidget {
-  const _PlayFeedback({required this.controller, required this.notice, required this.copy});
+  const _PlayFeedback({
+    required this.controller,
+    required this.copy,
+  });
 
   final TournamentController controller;
-  final String? notice;
   final TournamentCopy copy;
 
   @override
   Widget build(BuildContext context) {
     final delta = controller.scoreDelta;
     if (controller.hasPendingCommand) {
-      return TextButton(onPressed: controller.retryUnknown, child: Text(copy.retrySame));
-    }
-    if (notice != null) {
-      return Text(
-        copy.forError(notice),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: GameTokens.danger),
+      return TextButton(
+        onPressed: controller.retryUnknown,
+        child: Text(copy.retrySame),
       );
     }
+    // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
     if (delta != null && delta > 0) {
       return Text(
         '+$delta',
         key: const Key('score-delta'),
-        style: const TextStyle(color: GameTokens.success, fontWeight: FontWeight.w800, fontSize: 20),
+        style: const TextStyle(
+          color: GameTokens.success,
+          fontWeight: FontWeight.w800,
+          fontSize: 20,
+        ),
       );
     }
     if (controller.moveInFlight) {
-      return Text(copy.sending, style: const TextStyle(color: GameTokens.accent));
+      return Text(
+        copy.sending,
+        style: const TextStyle(color: GameTokens.accent),
+      );
     }
     return const SizedBox.shrink();
   }
@@ -219,22 +284,18 @@ final class _PlayFeedback extends StatelessWidget {
 
 void _openSettings(BuildContext context, TournamentController controller) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    tournamentPageRoute<void>(
       builder: (context) => TournamentSettingsScreen(controller: controller),
     ),
   );
 }
 
-void _showProfileHold(BuildContext context) {
-  final copy = TournamentCopy.of(context);
-  showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(copy.profile),
-      content: Text(copy.profileLater),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(copy.back)),
-      ],
+void _openProfile(BuildContext context, TournamentController controller) {
+  controller.haptics.selection();
+  Navigator.of(context).push(
+    tournamentPageRoute<void>(
+      settings: const RouteSettings(name: 'player-profile'),
+      builder: (context) => PlayerProfileScreen(controller: controller),
     ),
   );
 }
@@ -242,16 +303,41 @@ void _showProfileHold(BuildContext context) {
 void _openPractice(BuildContext context, TournamentController controller) {
   controller.haptics.selection();
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (context) => PracticeFlow(
-        directory: controller.settings.file.parent,
-        haptics: controller.haptics,
-      ),
+    tournamentPageRoute<void>(
+      settings: const RouteSettings(name: 'practice'),
+      builder: (context) => PracticeFlow(controller: controller),
     ),
   );
 }
 
-Future<void> _confirmLeave(BuildContext context, TournamentController controller) async {
+void _openLeaderboardFromHome(
+  BuildContext context,
+  TournamentController controller,
+) {
+  controller.haptics.selection();
+  unawaited(controller.openWeekly(fromHome: true));
+  Navigator.of(context)
+      .push(
+        tournamentPageRoute<void>(
+          settings: const RouteSettings(name: 'leaderboard'),
+          builder: (context) => ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => TournamentLeaderboardView(
+              controller: controller,
+              onClose: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ),
+      )
+      .then((_) {
+        controller.returnToHomeShell();
+      });
+}
+
+Future<void> _confirmLeave(
+  BuildContext context,
+  TournamentController controller,
+) async {
   final copy = TournamentCopy.of(context);
   final leave = await showDialog<bool>(
     context: context,
@@ -259,8 +345,14 @@ Future<void> _confirmLeave(BuildContext context, TournamentController controller
       title: Text(copy.leaveTitle),
       content: Text(copy.leaveBody),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(copy.stay)),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(copy.leave)),
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text(copy.stay),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(copy.leave),
+        ),
       ],
     ),
   );
@@ -301,86 +393,435 @@ final class _HomeScreen extends StatelessWidget {
     final copy = TournamentCopy.of(context);
     final day = controller.day;
     final phase = day?.phase ?? DayPhase.ready;
+    final syncing =
+        controller.tournamentSync == TournamentSyncState.syncing;
+    final stale = controller.homeSnapshotStale && !controller.tournamentReady;
+    final notice = controller.tournamentNoticeCode;
+    final connectivityLost = controller.tournamentConnectivityLost;
     final verified = tournamentInt(controller.results['all']);
-    final score = phase == DayPhase.completed ? verified ?? day?.seriesScore : day?.seriesScore;
+    final score = phase == DayPhase.completed
+        ? verified ?? day?.seriesScore
+        : day?.seriesScore;
     final scoreLabel = phase == DayPhase.completed && verified != null
         ? copy.verifiedScore
         : score == null
         ? copy.scoreUnavailable
         : copy.currentScore;
     final badge = phase == DayPhase.completed && controller.results.isNotEmpty
-        ? (controller.results['onTimeAwarded'] == true ? copy.onTime : copy.onTimeMissing)
+        ? (controller.results['onTimeAwarded'] == true
+              ? copy.onTime
+              : copy.onTimeMissing)
         : null;
-    final primary = switch (phase) {
-      DayPhase.completed => copy.viewResults,
-      DayPhase.betweenGames || DayPhase.inProgress => copy.continueTournament,
-      _ => copy.playToday,
-    };
-    final headline = switch (phase) {
-      DayPhase.completed => copy.completedHeadline,
-      DayPhase.inProgress || DayPhase.betweenGames => copy.progressHeadline,
-      _ => copy.readyHeadline,
-    };
+    final primary = syncing
+        ? copy.tournamentSyncing
+        : switch (phase) {
+            DayPhase.completed => copy.viewResults,
+            DayPhase.betweenGames || DayPhase.inProgress =>
+              copy.continueTournament,
+            _ => copy.playToday,
+          };
+    final headline = stale
+        ? copy.cachedTournamentHeadline
+        : switch (phase) {
+            DayPhase.completed => copy.completedHeadline,
+            DayPhase.inProgress || DayPhase.betweenGames =>
+              copy.progressHeadline,
+            _ => copy.readyHeadline,
+          };
+    VoidCallback? onPrimary;
+    if (syncing) {
+      onPrimary = null;
+    } else if (!controller.tournamentReady) {
+      onPrimary = null;
+    } else if (phase == DayPhase.completed) {
+      onPrimary = controller.openResults;
+    } else {
+      onPrimary = controller.resume;
+    }
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              RefreshIndicator(
+                key: const Key('home-refresh'),
+                color: GameTokens.accent,
+                backgroundColor: GameTokens.surfaceHigh,
+                displacement: 36,
+                onRefresh: () => controller.refreshTournament(
+                  origin: TournamentRefreshOrigin.pullToRefresh,
+                ),
+                child: ListView(
+                  key: const Key('home-scroll'),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  children: [
+                    Row(
+                      key: const Key('home-header-row'),
                       children: [
-                        Text(
-                          copy.appTitle.toUpperCase(),
-                          key: const Key('home-title'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            letterSpacing: 1.6,
-                            fontWeight: FontWeight.w800,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                copy.appTitle.toUpperCase(),
+                                key: const Key('home-title'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      letterSpacing: 1.6,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              ),
+                              Text(
+                                copy.tagline,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: GameTokens.accent),
+                              ),
+                            ],
                           ),
                         ),
-                        Text(
-                          copy.tagline,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: GameTokens.accent),
+                        IconButton(
+                          key: const Key('profile'),
+                          tooltip: copy.profile,
+                          onPressed: () => _openProfile(context, controller),
+                          icon: const Icon(Icons.person_rounded),
+                        ),
+                        IconButton(
+                          key: const Key('settings'),
+                          tooltip: copy.settingsTitle,
+                          onPressed: () => _openSettings(context, controller),
+                          icon: const Icon(Icons.settings_rounded),
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('profile'),
-                    tooltip: copy.profile,
-                    onPressed: () => _showProfileHold(context),
-                    icon: const Icon(Icons.person_rounded),
-                  ),
-                  IconButton(
-                    key: const Key('settings'),
-                    tooltip: copy.settingsTitle,
-                    onPressed: () => _openSettings(context, controller),
-                    icon: const Icon(Icons.settings_rounded),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    _DailyCard(
+                      key: const Key('home-daily-card'),
+                      copy: copy,
+                      day: day,
+                      score: score,
+                      scoreLabel: scoreLabel,
+                      phase: phase,
+                      badge: badge,
+                      headline: headline,
+                      action: primary,
+                      onAction: onPrimary,
+                      connectivityLost: connectivityLost,
+                    ),
+                    const SizedBox(height: 32),
+                    _HomeActions(controller: controller),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              _DailyCard(
-                copy: copy,
-                day: day,
-                score: score,
-                scoreLabel: scoreLabel,
-                phase: phase,
-                badge: badge,
-                headline: headline,
-                action: primary,
-                onAction: phase == DayPhase.completed ? controller.openResults : controller.resume,
+              // Floating status: does not participate in ListView layout.
+              Positioned(
+                top: 0,
+                left: 16,
+                right: 16,
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: _TournamentStatusHost(
+                    key: const Key('tournament-status-host'),
+                    controller: controller,
+                    copy: copy,
+                    notice: notice,
+                    syncing: syncing,
+                    infoBanners: controller.tournamentInfoBannersEnabled,
+                  ),
+                ),
               ),
-              const SizedBox(height: 32),
-              _HomeActions(controller: controller),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _NotifyKind { info, error, success }
+
+final class _TournamentStatusHost extends StatefulWidget {
+  const _TournamentStatusHost({
+    super.key,
+    required this.controller,
+    required this.copy,
+    required this.notice,
+    required this.syncing,
+    required this.infoBanners,
+  });
+
+  final TournamentController controller;
+  final TournamentCopy copy;
+  final String? notice;
+  final bool syncing;
+
+  /// When false (startup/background), suppress blue info toasts.
+  final bool infoBanners;
+
+  @override
+  State<_TournamentStatusHost> createState() => _TournamentStatusHostState();
+}
+
+final class _TournamentStatusHostState extends State<_TournamentStatusHost>
+    with SingleTickerProviderStateMixin {
+  static const _slideIn = Duration(milliseconds: 240);
+  static const _infoHold = Duration(milliseconds: 2500);
+  static const _errorHold = Duration(milliseconds: 4000);
+  static const _slideOut = Duration(milliseconds: 280);
+
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    duration: _slideIn,
+  );
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, -1.15),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _motion, curve: Curves.easeOutCubic));
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _motion,
+    curve: Curves.easeOut,
+  );
+  Timer? _dismiss;
+  int _motionEpoch = 0;
+  _NotifyKind? _kind;
+  String? _text;
+  String? _activeSignature;
+  String? _dismissedSignature;
+  var _wasSyncing = false;
+  var _didDepend = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasSyncing = widget.syncing;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didDepend) return;
+    _didDepend = true;
+    _apply(fromSyncEdge: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TournamentStatusHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final finishedSync =
+        (_wasSyncing && !widget.syncing && widget.notice == null) ||
+        (oldWidget.notice != null &&
+            widget.notice == null &&
+            !widget.syncing &&
+            widget.controller.tournamentReady);
+    _wasSyncing = widget.syncing;
+    _apply(fromSyncEdge: finishedSync);
+  }
+
+  @override
+  void dispose() {
+    _dismiss?.cancel();
+    _motion.dispose();
+    super.dispose();
+  }
+
+  bool get _reduceMotion {
+    final media = MediaQuery.maybeOf(context);
+    return media?.disableAnimations == true ||
+        WidgetsBinding
+            .instance
+            .platformDispatcher
+            .accessibilityFeatures
+            .reduceMotion;
+  }
+
+  Color get _accent => switch (_kind) {
+    _NotifyKind.info => GameTokens.notifyInfo,
+    _NotifyKind.error => GameTokens.notifyError,
+    _NotifyKind.success => GameTokens.notifySuccess,
+    null => GameTokens.notifyInfo,
+  };
+
+  void _clearBanner({required String? dismissedFor}) {
+    setState(() {
+      _kind = null;
+      _text = null;
+      _activeSignature = null;
+      _dismissedSignature = dismissedFor;
+    });
+  }
+
+  void _scheduleDismiss({
+    required _NotifyKind kind,
+    required String signature,
+    required bool reduceMotion,
+  }) {
+    final hold = kind == _NotifyKind.error ? _errorHold : _infoHold;
+    final epoch = ++_motionEpoch;
+    _dismiss?.cancel();
+    _dismiss = Timer(hold, () {
+      if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
+        return;
+      }
+      if (reduceMotion) {
+        _motion.value = 0;
+        _clearBanner(dismissedFor: signature);
+        return;
+      }
+      _motion.duration = _slideOut;
+      _motion.reverse().whenComplete(() {
+        if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
+          return;
+        }
+        _clearBanner(dismissedFor: signature);
+      });
+    });
+  }
+
+  void _apply({required bool fromSyncEdge}) {
+    final reduceMotion = _reduceMotion;
+    final notice = widget.notice;
+    final infoOk = widget.infoBanners;
+    _NotifyKind? nextKind;
+    String? nextText;
+
+    // A new refresh episode may re-announce the same offline copy.
+    if (widget.syncing || fromSyncEdge) {
+      _dismissedSignature = null;
+    }
+
+    // UX-11: never show blue "updating…" toast — native pull spinner covers load.
+    if (notice == 'OFFLINE') {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.connectionUnavailable;
+    } else if (notice == 'TIMEOUT') {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.timedOut;
+    } else if (notice == 'UNAUTHENTICATED' ||
+        notice == 'WRITER_NOT_AUTHORIZED') {
+      // Auth/writer: red notice, never treat as wifi outage.
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.forError(notice);
+    } else if (notice != null) {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.forError(notice);
+    } else if (infoOk &&
+        fromSyncEdge &&
+        widget.controller.tournamentReady) {
+      // Pull-to-refresh completion stays info (blue), not success green.
+      nextKind = _NotifyKind.info;
+      nextText = widget.copy.tournamentRefreshSuccess;
+    } else if (widget.syncing) {
+      // In-flight refresh: no floating info toast (startup, background, or pull).
+      nextKind = null;
+      nextText = null;
+    }
+
+    if (nextKind == null || nextText == null) {
+      _dismiss?.cancel();
+      _dismiss = null;
+      if (_text != null) {
+        final epoch = ++_motionEpoch;
+        final leaving = _activeSignature;
+        if (reduceMotion) {
+          _motion.value = 0;
+          _clearBanner(dismissedFor: leaving);
+        } else {
+          _motion.duration = _slideOut;
+          _motion.reverse().whenComplete(() {
+            if (!mounted || epoch != _motionEpoch) return;
+            _clearBanner(dismissedFor: leaving);
+          });
+        }
+      }
+      return;
+    }
+
+    final signature = '${nextKind.name}|$nextText';
+    if (signature == _activeSignature) {
+      return;
+    }
+    if (signature == _dismissedSignature) {
+      return;
+    }
+
+    _dismiss?.cancel();
+    _dismiss = null;
+    final changed = nextText != _text || nextKind != _kind;
+    setState(() {
+      _kind = nextKind;
+      _text = nextText;
+      _activeSignature = signature;
+      _dismissedSignature = null;
+    });
+    if (reduceMotion) {
+      _motion.value = 1;
+    } else if (changed) {
+      _motion.duration = _slideIn;
+      _motion.forward(from: 0);
+    } else if (_motion.value < 1) {
+      _motion.forward();
+    }
+
+    // Syncing stays until replaced; info completion + errors auto-dismiss.
+    if (!widget.syncing) {
+      _scheduleDismiss(
+        kind: nextKind,
+        signature: signature,
+        reduceMotion: reduceMotion,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _text;
+    final kind = _kind;
+    if (text == null || kind == null) return const SizedBox.shrink();
+    final accent = _accent;
+    // Near-opaque tinted navy so Home header/icons cannot read through.
+    final fill = Color.alphaBlend(
+      accent.withValues(alpha: 0.42),
+      GameTokens.surface,
+    ).withValues(alpha: 0.94);
+    return SlideTransition(
+      position: _slide,
+      child: FadeTransition(
+        opacity: _fade,
+        child: Material(
+          key: Key('tournament-status-${kind.name}'),
+          color: Colors.transparent,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          child: DecoratedBox(
+            key: const Key('tournament-status'),
+            decoration: BoxDecoration(
+              color: fill,
+              borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+              border: Border.all(color: accent.withValues(alpha: 0.72)),
+            ),
+            child: Semantics(
+              liveRegion: true,
+              container: true,
+              label: text,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Text(
+                  text,
+                  key: const Key('tournament-status-text'),
+                  softWrap: true,
+                  style: const TextStyle(
+                    color: GameTokens.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -404,7 +845,7 @@ final class _HomeActions extends StatelessWidget {
       iconColor: GameTokens.scoreGlow,
       title: copy.leaderboard,
       subtitle: copy.weeklyRankings,
-      onTap: () => controller.openWeekly(fromHome: true),
+      onTap: () => _openLeaderboardFromHome(context, controller),
     );
     final practice = _ActionCard(
       cardKey: const Key('practice'),
@@ -416,11 +857,7 @@ final class _HomeActions extends StatelessWidget {
     );
     if (stacked) {
       return Column(
-        children: [
-          leaderboard,
-          const SizedBox(height: 12),
-          practice,
-        ],
+        children: [leaderboard, const SizedBox(height: 12), practice],
       );
     }
     return IntrinsicHeight(
@@ -483,7 +920,11 @@ final class _ActionCard extends StatelessWidget {
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: GameTokens.textPrimary),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: GameTokens.textPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -505,6 +946,7 @@ final class _ActionCard extends StatelessWidget {
 
 final class _DailyCard extends StatelessWidget {
   const _DailyCard({
+    super.key,
     required this.copy,
     required this.day,
     required this.score,
@@ -514,6 +956,7 @@ final class _DailyCard extends StatelessWidget {
     required this.headline,
     required this.action,
     required this.onAction,
+    required this.connectivityLost,
   });
 
   final TournamentCopy copy;
@@ -524,12 +967,15 @@ final class _DailyCard extends StatelessWidget {
   final String? badge;
   final String headline;
   final String action;
-  final VoidCallback onAction;
+  final VoidCallback? onAction;
+  final bool connectivityLost;
 
   @override
   Widget build(BuildContext context) {
     final label = day?.label ?? 'E1';
-    final tone = phase == DayPhase.completed ? GameTokens.success : _tone(label);
+    final tone = phase == DayPhase.completed
+        ? GameTokens.success
+        : _tone(label);
     final body = switch (phase) {
       DayPhase.completed => copy.completedBody,
       DayPhase.ready when day?.original == false => copy.alreadyClaimed,
@@ -556,50 +1002,87 @@ final class _DailyCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              copy.dailyChallenge.toUpperCase(),
-              style: TextStyle(color: tone, fontWeight: FontWeight.w800, letterSpacing: 1.1),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  copy.dailyChallenge.toUpperCase(),
+                  style: TextStyle(
+                    color: tone,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(headline, style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 14),
+                _Pips(
+                  completed: day?.completedGames ?? 0,
+                  current: phase == DayPhase.completed ? null : day?.ordinal,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  scoreLabel,
+                  style: const TextStyle(color: GameTokens.textMuted),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    score == null ? '—' : copy.groupedScore(score!),
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      color: GameTokens.scoreGlow,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (badge != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      badge!,
+                      style: TextStyle(fontWeight: FontWeight.w800, color: tone),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('primary-action'),
+                    onPressed: onAction,
+                    child: Text(
+                      action,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(headline, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 14),
-            _Pips(completed: day?.completedGames ?? 0, current: phase == DayPhase.completed ? null : day?.ordinal),
-            const SizedBox(height: 14),
-            Text(scoreLabel, style: const TextStyle(color: GameTokens.textMuted)),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                score == null ? '—' : copy.groupedScore(score!),
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  color: GameTokens.scoreGlow,
-                  fontWeight: FontWeight.w800,
+          ),
+          if (connectivityLost)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Tooltip(
+                message: copy.noConnection,
+                child: Icon(
+                  Icons.wifi_off_rounded,
+                  key: const Key('daily-offline-icon'),
+                  size: 20,
+                  color: GameTokens.notifyError,
+                  semanticLabel: copy.noConnection,
                 ),
               ),
             ),
-            if (badge != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(badge!, style: TextStyle(fontWeight: FontWeight.w800, color: tone)),
-              ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                key: const Key('primary-action'),
-                onPressed: onAction,
-                child: Text(action, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -636,7 +1119,9 @@ final class _OverviewScreen extends StatelessWidget {
                 ? controller.openResults
                 : controller.resume,
             child: Text(
-              controller.day?.phase == DayPhase.completed ? copy.viewResults : copy.resume,
+              controller.day?.phase == DayPhase.completed
+                  ? copy.viewResults
+                  : copy.resume,
             ),
           ),
         ],
@@ -673,7 +1158,10 @@ final class _GameRow extends StatelessWidget {
         child: ListTile(
           leading: CircleAvatar(
             backgroundColor: tone.withValues(alpha: 0.2),
-            child: Text(label, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+            child: Text(
+              label,
+              style: TextStyle(color: tone, fontWeight: FontWeight.w800),
+            ),
           ),
           title: Text(difficulty),
           trailing: Icon(
@@ -703,126 +1191,164 @@ final class _PlayScreen extends StatelessWidget {
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
-          child: Column(
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              SizedBox(
-                height: 52,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        key: const Key('nav-back'),
-                        tooltip: copy.back,
-                        onPressed: () => _confirmLeave(context, controller),
-                        icon: const Icon(Icons.arrow_back),
-                      ),
-                      Text(
-                        day?.label ?? '',
-                        style: TextStyle(color: tone, fontWeight: FontWeight.w800, fontSize: 18),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '${day?.seriesScore ?? '—'}',
-                        style: const TextStyle(
-                          color: GameTokens.scoreGlow,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 22,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: 40,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(child: _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal)),
-                      const SizedBox(width: 8),
-                      Text(copy.movesLeft(moves)),
-                      const SizedBox(width: 8),
-                      _IdleClock(
-                        label: copy.idle,
-                        deadlineMs: controller.deadlineMs,
-                        serverNowMs: controller.serverNowMs,
-                        syncedAt: controller.syncedAt,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: 48,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      copy.objective(moves, size),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(
-                key: const Key('play-feedback'),
-                height: 44,
-                child: Center(child: _PlayFeedback(controller: controller, notice: notice, copy: copy)),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final side = constraints.biggest.shortestSide;
-                      return Center(
-                        child: SizedBox(
-                          key: const Key('play-board'),
-                          width: side,
-                          height: side,
-                          child: ListenableBuilder(
-                            listenable: controller.session,
-                            builder: (context, _) => AccessibleBoard(
-                              session: controller.session,
-                              view: controller.session.view,
-                              showPlacementPreview: true,
+              Column(
+                children: [
+                  SizedBox(
+                    height: 52,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            key: const Key('nav-back'),
+                            tooltip: copy.back,
+                            onPressed: () => _confirmLeave(context, controller),
+                            icon: const Icon(Icons.arrow_back),
+                          ),
+                          Text(
+                            day?.label ?? '',
+                            style: TextStyle(
+                              color: tone,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
                             ),
                           ),
-                        ),
-                      );
-                    },
+                          const Spacer(),
+                          Text(
+                            '${day?.seriesScore ?? '—'}',
+                            style: const TextStyle(
+                              color: GameTokens.scoreGlow,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 22,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              SizedBox(
-                key: const Key('offer-tray-frame'),
-                height: 152,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                  child: ListenableBuilder(
-                    listenable: controller.session,
-                    builder: (context, _) {
-                      final live = controller.session.view;
-                      final locked = !live.acceptsInput ||
-                          controller.hasPendingCommand ||
-                          controller.moveInFlight ||
-                          controller.session.authoritativeOutcomeUnknown;
-                      return OfferTray(
-                        offers: live.canonicalState?.offers ??
-                            const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
-                        selectedIndex: live.selectedOfferIndex,
-                        enabled: !locked,
-                        selectionLabel: copy.selectPiece,
-                        onSelect: (index) {
-                          controller.session.selectOffer(index);
-                          controller.noteSelection();
+                  SizedBox(
+                    height: 40,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _Pips(
+                              completed: day?.completedGames ?? 0,
+                              current: day?.ordinal,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(copy.movesLeft(moves)),
+                          const SizedBox(width: 8),
+                          _IdleClock(
+                            label: copy.idle,
+                            deadlineMs: controller.deadlineMs,
+                            serverNowMs: controller.serverNowMs,
+                            syncedAt: controller.syncedAt,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 48,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          copy.objective(moves, size),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    key: const Key('play-feedback'),
+                    height: 44,
+                    child: Center(
+                      child: _PlayFeedback(
+                        controller: controller,
+                        copy: copy,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final side = constraints.biggest.shortestSide;
+                          return Center(
+                            child: SizedBox(
+                              key: const Key('play-board'),
+                              width: side,
+                              height: side,
+                              child: ListenableBuilder(
+                                listenable: controller.session,
+                                builder: (context, _) => AccessibleBoard(
+                                  session: controller.session,
+                                  view: controller.session.view,
+                                  showPlacementPreview: true,
+                                ),
+                              ),
+                            ),
+                          );
                         },
-                      );
-                    },
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    key: const Key('offer-tray-frame'),
+                    height: 152,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                      child: ListenableBuilder(
+                        listenable: controller.session,
+                        builder: (context, _) {
+                          final live = controller.session.view;
+                          final locked =
+                              !live.acceptsInput ||
+                              controller.hasPendingCommand ||
+                              controller.moveInFlight ||
+                              controller.rankedWriterLocked ||
+                              controller.session.authoritativeOutcomeUnknown;
+                          return OfferTray(
+                            offers:
+                                live.canonicalState?.offers ??
+                                const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
+                            selectedIndex: live.selectedOfferIndex,
+                            enabled: !locked,
+                            selectionLabel: copy.selectPiece,
+                            onSelect: (index) {
+                              controller.session.selectOffer(index);
+                              controller.noteSelection();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Positioned(
+                top: 0,
+                left: 16,
+                right: 16,
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: _TournamentStatusHost(
+                    key: const Key('play-status-host'),
+                    controller: controller,
+                    copy: copy,
+                    notice: notice,
+                    syncing: false,
+                    infoBanners: false,
                   ),
                 ),
               ),
@@ -853,14 +1379,20 @@ final class _TransitionScreen extends StatelessWidget {
         children: [
           Text(
             day?.label ?? '',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(color: tone, fontWeight: FontWeight.w800),
+            style: Theme.of(context).textTheme.displaySmall
+                ?.copyWith(color: tone, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(copy.finishReason(day?.terminalReason)),
           const SizedBox(height: 16),
           _ScoreHero(label: copy.gameScore, value: day?.gameScore, copy: copy),
           const SizedBox(height: 10),
-          _ScoreHero(label: copy.totalScore, value: day?.seriesScore, copy: copy, compact: true),
+          _ScoreHero(
+            label: copy.totalScore,
+            value: day?.seriesScore,
+            copy: copy,
+            compact: true,
+          ),
           const SizedBox(height: 16),
           _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal),
           if (next != null) ...[
@@ -882,13 +1414,20 @@ final class _TransitionScreen extends StatelessWidget {
           if (controller.noticeCode != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Text(copy.forError(controller.noticeCode), style: const TextStyle(color: GameTokens.danger)),
+              child: Text(
+                copy.forError(controller.noticeCode),
+                style: const TextStyle(color: GameTokens.danger),
+              ),
             ),
           const SizedBox(height: 20),
           FilledButton(
             key: const Key('continue-next'),
-            onPressed: controller.hasPendingCommand ? controller.retryUnknown : controller.advance,
-            child: Text(controller.hasPendingCommand ? copy.retrySame : copy.continueNext),
+            onPressed: controller.hasPendingCommand
+                ? controller.retryUnknown
+                : controller.advance,
+            child: Text(
+              controller.hasPendingCommand ? copy.retrySame : copy.continueNext,
+            ),
           ),
         ],
       ),
@@ -915,9 +1454,16 @@ final class _ResultsScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          const Icon(Icons.emoji_events_rounded, color: GameTokens.scoreGlow, size: 36),
+          const Icon(
+            Icons.emoji_events_rounded,
+            color: GameTokens.scoreGlow,
+            size: 36,
+          ),
           const SizedBox(height: 8),
-          Text(copy.verifiedScore, style: const TextStyle(color: GameTokens.textMuted)),
+          Text(
+            copy.verifiedScore,
+            style: const TextStyle(color: GameTokens.textMuted),
+          ),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -931,28 +1477,46 @@ final class _ResultsScreen extends StatelessWidget {
             ),
           ),
           if (!published)
-            Text(copy.resultsPending, style: const TextStyle(color: GameTokens.danger)),
+            Text(
+              copy.resultsPending,
+              style: const TextStyle(color: GameTokens.danger),
+            ),
           if (controller.resultsError != null)
-            Text(copy.forError(controller.resultsError), style: const TextStyle(color: GameTokens.textMuted)),
+            Text(
+              copy.forError(controller.resultsError),
+              style: const TextStyle(color: GameTokens.textMuted),
+            ),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: (onTime ? GameTokens.success : GameTokens.textMuted).withValues(alpha: 0.16),
+                color: (onTime ? GameTokens.success : GameTokens.textMuted)
+                    .withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 child: Text(
                   onTime ? copy.onTime : copy.onTimeMissing,
-                  style: TextStyle(fontWeight: FontWeight.w800, color: onTime ? GameTokens.success : GameTokens.textSecondary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: onTime
+                        ? GameTokens.success
+                        : GameTokens.textSecondary,
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(height: 14),
-          _Pips(completed: published ? 6 : controller.day?.completedGames ?? 0, current: null),
+          _Pips(
+            completed: published ? 6 : controller.day?.completedGames ?? 0,
+            current: null,
+          ),
           const SizedBox(height: 12),
           if (games is List)
             Wrap(
@@ -970,12 +1534,15 @@ final class _ResultsScreen extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           _ScoreLine(label: copy.easy, value: tournamentInt(results['easy'])),
-          _ScoreLine(label: copy.medium, value: tournamentInt(results['medium'])),
+          _ScoreLine(
+            label: copy.medium,
+            value: tournamentInt(results['medium']),
+          ),
           _ScoreLine(label: copy.hard, value: tournamentInt(results['hard'])),
           const SizedBox(height: 18),
           FilledButton(
             key: const Key('leaderboard'),
-            onPressed: () => controller.openWeekly(fromHome: true),
+            onPressed: () => controller.openWeekly(),
             child: Text(copy.viewLeaderboard),
           ),
           const SizedBox(height: 10),
@@ -996,7 +1563,6 @@ final class _ResultsScreen extends StatelessWidget {
   }
 }
 
-
 final class _RecoveryScreen extends StatelessWidget {
   const _RecoveryScreen({required this.controller});
 
@@ -1014,7 +1580,11 @@ final class _RecoveryScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(copy.appTitle, style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
+                Text(
+                  copy.appTitle,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 16),
                 Text(copy.forError(code), textAlign: TextAlign.center),
                 if (code != null && code.isNotEmpty) ...[
@@ -1028,7 +1598,20 @@ final class _RecoveryScreen extends StatelessWidget {
                 const Spacer(),
                 FilledButton(
                   onPressed: controller.recover,
-                  child: Text(controller.hasPendingCommand ? copy.retrySame : copy.tryAgain),
+                  child: Text(
+                    controller.hasPendingCommand
+                        ? copy.retrySame
+                        : copy.tryAgain,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  key: const Key('recovery-practice'),
+                  onPressed: () {
+                    controller.showHome();
+                    _openPractice(context, controller);
+                  },
+                  child: Text(copy.practice),
                 ),
               ],
             ),
@@ -1096,7 +1679,10 @@ final class _Pips extends StatelessWidget {
                 children: [
                   Text(
                     tournamentOrdinalLabels[i] ?? '',
-                    style: const TextStyle(fontSize: 10, color: GameTokens.textMuted),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: GameTokens.textMuted,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Container(
@@ -1121,7 +1707,12 @@ final class _Pips extends StatelessWidget {
 }
 
 final class _ScoreHero extends StatelessWidget {
-  const _ScoreHero({required this.label, required this.value, required this.copy, this.compact = false});
+  const _ScoreHero({
+    required this.label,
+    required this.value,
+    required this.copy,
+    this.compact = false,
+  });
 
   final String label;
   final int? value;
@@ -1140,7 +1731,12 @@ final class _ScoreHero extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Expanded(child: Text(label, style: const TextStyle(color: GameTokens.textSecondary))),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: GameTokens.textSecondary),
+              ),
+            ),
             Text(
               value == null ? '—' : copy.groupedScore(value!),
               style: TextStyle(
@@ -1157,7 +1753,11 @@ final class _ScoreHero extends StatelessWidget {
 }
 
 final class _StageChip extends StatelessWidget {
-  const _StageChip({required this.label, required this.value, required this.copy});
+  const _StageChip({
+    required this.label,
+    required this.value,
+    required this.copy,
+  });
 
   final String label;
   final int? value;
@@ -1179,7 +1779,10 @@ final class _StageChip extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+              Text(
+                label,
+                style: TextStyle(color: tone, fontWeight: FontWeight.w800),
+              ),
               Text(
                 value == null ? '—' : copy.groupedScore(value!),
                 style: const TextStyle(fontWeight: FontWeight.w800),
