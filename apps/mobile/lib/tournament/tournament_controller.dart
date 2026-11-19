@@ -784,31 +784,21 @@ final class TournamentController extends ChangeNotifier {
     return api.sessionSecret != null && api.sessionSecret!.isNotEmpty;
   }
 
-  /// Returns a secret only when file proves same auth + API origin ownership.
+  /// Returns a secret only when the vault proves same auth + API origin.
+  ///
+  /// Secrets are keyed by [authBinding] so Player A → B → A on one device
+  /// restores each player's writer session instead of POSTing a new device
+  /// binding that would hit WRITER_NOT_AUTHORIZED on an existing claim.
   String? _readBoundSession({
     required String binding,
     required String origin,
   }) {
-    if (!_stateFile.existsSync()) return null;
-    try {
-      final saved = jsonDecode(_stateFile.readAsStringSync());
-      if (saved is! Map) return null;
-      final secret = saved['secret']?.toString();
-      if (secret == null || secret.isEmpty) return null;
-      final savedBinding = saved['authBinding']?.toString();
-      final savedOrigin = saved['apiOrigin']?.toString();
-      // Legacy files without binding cannot prove current auth ownership.
-      if (savedBinding == null ||
-          savedBinding.isEmpty ||
-          savedOrigin == null ||
-          savedOrigin.isEmpty) {
-        return null;
-      }
-      if (savedBinding != binding || savedOrigin != origin) return null;
-      return secret;
-    } catch (_) {
-      return null;
-    }
+    final vault = _loadSessionVault();
+    final entry = vault[binding];
+    if (entry == null) return null;
+    if (entry.origin != origin) return null;
+    if (entry.secret.isEmpty) return null;
+    return entry.secret;
   }
 
   void _persistBoundSession({
@@ -817,17 +807,71 @@ final class TournamentController extends ChangeNotifier {
     required String origin,
   }) {
     if (secret == null || secret.isEmpty) return;
+    final vault = _loadSessionVault();
+    vault[binding] = (secret: secret, origin: origin);
+    _writeSessionVault(vault);
+  }
+
+  Map<String, ({String secret, String origin})> _loadSessionVault() {
+    final out = <String, ({String secret, String origin})>{};
+    if (!_stateFile.existsSync()) return out;
+    try {
+      final saved = jsonDecode(_stateFile.readAsStringSync());
+      if (saved is! Map) return out;
+      final sessions = saved['sessions'];
+      if (sessions is Map) {
+        for (final entry in sessions.entries) {
+          final key = entry.key.toString();
+          final value = entry.value;
+          if (value is! Map) continue;
+          final secret = value['secret']?.toString();
+          final origin = value['apiOrigin']?.toString();
+          if (secret == null ||
+              secret.isEmpty ||
+              origin == null ||
+              origin.isEmpty) {
+            continue;
+          }
+          out[key] = (secret: secret, origin: origin);
+        }
+      }
+      // Migrate legacy single-binding files without wiping other identities.
+      final legacySecret = saved['secret']?.toString();
+      final legacyBinding = saved['authBinding']?.toString();
+      final legacyOrigin = saved['apiOrigin']?.toString();
+      if (legacySecret != null &&
+          legacySecret.isNotEmpty &&
+          legacyBinding != null &&
+          legacyBinding.isNotEmpty &&
+          legacyOrigin != null &&
+          legacyOrigin.isNotEmpty &&
+          !out.containsKey(legacyBinding)) {
+        out[legacyBinding] = (secret: legacySecret, origin: legacyOrigin);
+      }
+    } catch (_) {
+      return out;
+    }
+    return out;
+  }
+
+  void _writeSessionVault(Map<String, ({String secret, String origin})> vault) {
     _stateFile.parent.createSync(recursive: true);
+    final sessions = <String, Object?>{
+      for (final entry in vault.entries)
+        entry.key: {
+          'secret': entry.value.secret,
+          'apiOrigin': entry.value.origin,
+        },
+    };
     final tmp = File('${_stateFile.path}.tmp');
     tmp.writeAsStringSync(
       jsonEncode({
-        'secret': secret,
-        'authBinding': binding,
-        'apiOrigin': origin,
+        'version': 2,
+        'sessions': sessions,
       }),
       flush: true,
     );
-    // Preserve the last valid session until its replacement is durable.
+    // Preserve the last valid vault until its replacement is durable.
     tmp.renameSync(_stateFile.path);
   }
 

@@ -88,9 +88,14 @@ void main() {
     final persisted = jsonDecode(
       File('${directory.path}/pzd-uat-session.json').readAsStringSync(),
     ) as Map;
-    expect(persisted['secret'], 'fresh-secret');
-    expect(persisted['authBinding'], UatApi.authBinding('Bearer player-a'));
-    expect(persisted['apiOrigin'], 'http://192.168.68.52:8787');
+    final binding = UatApi.authBinding('Bearer player-a');
+    final sessions = persisted['sessions'] as Map;
+    expect(sessions[binding], isA<Map>());
+    expect((sessions[binding] as Map)['secret'], 'fresh-secret');
+    expect(
+      (sessions[binding] as Map)['apiOrigin'],
+      'http://192.168.68.52:8787',
+    );
   });
 
   test('bound session for other bearer is not reused', () async {
