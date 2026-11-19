@@ -226,15 +226,19 @@ void main() {
     online = true;
     await tester.tap(find.byKey(const Key('tournament-retry')));
     for (var i = 0; i < 40; i++) {
-      if (find.byKey(const Key('tournament-status')).evaluate().isEmpty &&
-          find.byKey(const Key('primary-action')).evaluate().isNotEmpty) {
+      if (find.byKey(const Key('primary-action')).evaluate().isNotEmpty) {
         break;
       }
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byKey(const Key('practice')), findsOneWidget);
-    expect(find.byKey(const Key('tournament-status')), findsNothing);
     expect(find.byKey(const Key('primary-action')), findsOneWidget);
+    // Success banner may remain briefly (~2.5s) then fade; wait it out.
+    for (var i = 0; i < 80; i++) {
+      if (find.byKey(const Key('tournament-status')).evaluate().isEmpty) break;
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(const Key('tournament-status')), findsNothing);
   });
 
   test('snapshot JSON stays bounded without raw board payloads', () {

@@ -7,9 +7,16 @@ import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 
 /// Arcade leaderboard. Ranks and scores are the server payload only.
 final class TournamentLeaderboardView extends StatelessWidget {
-  const TournamentLeaderboardView({super.key, required this.controller});
+  const TournamentLeaderboardView({
+    super.key,
+    required this.controller,
+    this.onClose,
+  });
 
   final TournamentController controller;
+
+  /// When set (pushed from Home), back pops the Navigator instead of shell place.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -27,11 +34,15 @@ final class TournamentLeaderboardView extends StatelessWidget {
         ? copy.weekRange(controller.weekStart ?? '')
         : copy.dayLabel(controller.leaderboard['period']?.toString() ?? '');
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: Column(
             children: [
-              _Header(copy: copy, onBack: controller.back),
+              _Header(
+                copy: copy,
+                onBack: onClose ?? controller.back,
+              ),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),

@@ -284,6 +284,16 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
+  /// Returns the shell to Home without starting a network refresh.
+  /// Used when a pushed Leaderboard route is popped.
+  void returnToHomeShell() {
+    noticeCode = null;
+    errorCode = null;
+    if (route.place == TournamentPlace.home) return;
+    route = const TournamentRoute();
+    notifyListeners();
+  }
+
   void showOverview() {
     route = const TournamentRoute(place: TournamentPlace.overview);
     notifyListeners();

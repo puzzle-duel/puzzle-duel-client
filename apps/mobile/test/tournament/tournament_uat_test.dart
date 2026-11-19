@@ -49,7 +49,7 @@ void main() {
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(find.byKey(const Key('tournament-status')), findsOneWidget);
     expect(
-      find.text('Unauthorized. Issue a new UAT bearer and relaunch.'),
+      find.text('Sign in again to update tournament info.'),
       findsOneWidget,
     );
   });

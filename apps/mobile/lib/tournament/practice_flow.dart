@@ -278,22 +278,35 @@ final class _PracticePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: IconButton(
-                  key: const Key('nav-back'),
-                  onPressed: onClose,
-                  icon: const Icon(Icons.arrow_back),
+              SizedBox(
+                height: 52,
+                child: Row(
+                  children: [
+                    IconButton(
+                      key: const Key('nav-back'),
+                      tooltip: copy.back,
+                      onPressed: onClose,
+                      icon: const Icon(Icons.arrow_back),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        copy.practiceTitle,
+                        key: const Key('practice-title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                copy.practiceTitle,
-                style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 8),
               Text(copy.practiceBlurb),
@@ -382,6 +395,7 @@ final class _PracticePlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = session.view.canonicalState!;
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: Column(
@@ -392,14 +406,21 @@ final class _PracticePlay extends StatelessWidget {
                   children: [
                     IconButton(
                       key: const Key('nav-back'),
+                      tooltip: copy.back,
                       onPressed: () => onLeave(),
                       icon: const Icon(Icons.arrow_back),
                     ),
-                    Text(
-                      copy.practiceTitle,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        copy.practiceTitle,
+                        key: const Key('practice-title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
                     ),
-                    const Spacer(),
                     Text(
                       '${state.score}',
                       key: const Key('practice-score'),

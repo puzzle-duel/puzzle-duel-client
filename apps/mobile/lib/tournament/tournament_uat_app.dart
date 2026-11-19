@@ -16,6 +16,7 @@ import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_page_route.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
@@ -132,7 +133,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
       child: MaterialApp(
         title: 'Puzzle Duel',
         debugShowCheckedModeBanner: false,
-        theme: PuzzleDuelTheme.dark(),
+        theme: PuzzleDuelTheme.dark().copyWith(
+          scaffoldBackgroundColor: GameTokens.bgDeep,
+          canvasColor: GameTokens.bgDeep,
+        ),
         locale: const Locale('en'),
         supportedLocales: const [Locale('en')],
         localizationsDelegates: const [TournamentCopyDelegate()],
@@ -222,8 +226,12 @@ final class _TournamentShell extends StatelessWidget {
       TournamentPlace.playing => _PlayScreen(controller: controller),
       TournamentPlace.transition => _TransitionScreen(controller: controller),
       TournamentPlace.results => _ResultsScreen(controller: controller),
+      // Home→Leaderboard is a pushed route. Keep Home as the shell underlay so
+      // pop reveals a stable Home backdrop instead of a second leaderboard.
       TournamentPlace.daily || TournamentPlace.weekly =>
-        TournamentLeaderboardView(controller: controller),
+        controller.route.leaderboardReturn == TournamentPlace.home
+            ? _HomeScreen(controller: controller)
+            : TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
       TournamentPlace.home => _HomeScreen(controller: controller),
@@ -282,7 +290,7 @@ final class _PlayFeedback extends StatelessWidget {
 
 void _openSettings(BuildContext context, TournamentController controller) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    tournamentPageRoute<void>(
       builder: (context) => TournamentSettingsScreen(controller: controller),
     ),
   );
@@ -291,7 +299,7 @@ void _openSettings(BuildContext context, TournamentController controller) {
 void _openProfile(BuildContext context, TournamentController controller) {
   controller.haptics.selection();
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    tournamentPageRoute<void>(
       settings: const RouteSettings(name: 'player-profile'),
       builder: (context) => PlayerProfileScreen(controller: controller),
     ),
@@ -301,10 +309,35 @@ void _openProfile(BuildContext context, TournamentController controller) {
 void _openPractice(BuildContext context, TournamentController controller) {
   controller.haptics.selection();
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    tournamentPageRoute<void>(
+      settings: const RouteSettings(name: 'practice'),
       builder: (context) => PracticeFlow(controller: controller),
     ),
   );
+}
+
+void _openLeaderboardFromHome(
+  BuildContext context,
+  TournamentController controller,
+) {
+  controller.haptics.selection();
+  unawaited(controller.openWeekly(fromHome: true));
+  Navigator.of(context)
+      .push(
+        tournamentPageRoute<void>(
+          settings: const RouteSettings(name: 'leaderboard'),
+          builder: (context) => ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => TournamentLeaderboardView(
+              controller: controller,
+              onClose: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ),
+      )
+      .then((_) {
+        controller.returnToHomeShell();
+      });
 }
 
 Future<void> _confirmLeave(
@@ -411,6 +444,7 @@ final class _HomeScreen extends StatelessWidget {
       onPrimary = controller.resume;
     }
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: ListView(
@@ -456,17 +490,14 @@ final class _HomeScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              if (stale || notice != null) ...[
-                const SizedBox(height: 12),
-                _TournamentStatusBanner(
-                  key: const Key('tournament-status'),
-                  text: notice != null
-                      ? copy.forError(notice)
-                      : copy.cachedTournamentBody,
-                  onRetry: controller.refreshTournament,
-                  retryLabel: copy.tryAgain,
-                ),
-              ],
+              _TournamentStatusHost(
+                key: const Key('tournament-status-host'),
+                controller: controller,
+                copy: copy,
+                stale: stale,
+                notice: notice,
+                syncing: syncing,
+              ),
               const SizedBox(height: 12),
               _DailyCard(
                 copy: copy,
@@ -489,40 +520,224 @@ final class _HomeScreen extends StatelessWidget {
   }
 }
 
-final class _TournamentStatusBanner extends StatelessWidget {
-  const _TournamentStatusBanner({
+enum _StatusTone { syncing, success, persistent }
+
+final class _TournamentStatusHost extends StatefulWidget {
+  const _TournamentStatusHost({
     super.key,
-    required this.text,
-    required this.onRetry,
-    required this.retryLabel,
+    required this.controller,
+    required this.copy,
+    required this.stale,
+    required this.notice,
+    required this.syncing,
   });
 
-  final String text;
-  final VoidCallback onRetry;
-  final String retryLabel;
+  final TournamentController controller;
+  final TournamentCopy copy;
+  final bool stale;
+  final String? notice;
+  final bool syncing;
+
+  @override
+  State<_TournamentStatusHost> createState() => _TournamentStatusHostState();
+}
+
+final class _TournamentStatusHostState extends State<_TournamentStatusHost>
+    with SingleTickerProviderStateMixin {
+  static const _fadeIn = Duration(milliseconds: 220);
+  static const _hold = Duration(milliseconds: 2500);
+  static const _fadeOut = Duration(milliseconds: 300);
+
+  late final AnimationController _opacity = AnimationController(
+    vsync: this,
+    duration: _fadeIn,
+  );
+  Timer? _dismiss;
+  _StatusTone? _tone;
+  String? _text;
+  var _showRetry = false;
+  var _wasSyncing = false;
+  var _didDepend = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasSyncing = widget.syncing;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didDepend) return;
+    _didDepend = true;
+    _apply(fromSyncEdge: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TournamentStatusHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Refresh may resolve in one frame (degraded→ready) without a painted
+    // syncing intermediate, so also treat notice-clear + ready as success.
+    final finishedSync =
+        (_wasSyncing && !widget.syncing && widget.notice == null) ||
+        (oldWidget.notice != null &&
+            widget.notice == null &&
+            !widget.syncing &&
+            widget.controller.tournamentReady);
+    _wasSyncing = widget.syncing;
+    _apply(fromSyncEdge: finishedSync);
+  }
+
+  @override
+  void dispose() {
+    _dismiss?.cancel();
+    _opacity.dispose();
+    super.dispose();
+  }
+
+  void _apply({required bool fromSyncEdge}) {
+    final media = MediaQuery.maybeOf(context);
+    final reduceMotion =
+        media?.disableAnimations == true ||
+        WidgetsBinding
+            .instance
+            .platformDispatcher
+            .accessibilityFeatures
+            .reduceMotion;
+    final notice = widget.notice;
+    _StatusTone? nextTone;
+    String? nextText;
+    var nextRetry = false;
+
+    if (widget.syncing) {
+      nextTone = _StatusTone.syncing;
+      nextText = widget.copy.tournamentSyncing;
+    } else if (notice == 'OFFLINE') {
+      nextTone = _StatusTone.persistent;
+      nextText = widget.copy.connectionUnavailable;
+      nextRetry = true;
+    } else if (notice == 'TIMEOUT') {
+      nextTone = _StatusTone.persistent;
+      nextText = widget.copy.timedOut;
+      nextRetry = true;
+    } else if (notice != null) {
+      nextTone = _StatusTone.persistent;
+      nextText = widget.copy.forError(notice);
+      nextRetry = true;
+    } else if (fromSyncEdge && widget.controller.tournamentReady) {
+      nextTone = _StatusTone.success;
+      nextText = widget.copy.tournamentRefreshSuccess;
+    } else if (widget.stale) {
+      nextTone = _StatusTone.persistent;
+      nextText = widget.copy.cachedTournamentBody;
+      nextRetry = true;
+    }
+
+    _dismiss?.cancel();
+    _dismiss = null;
+
+    if (nextTone == null || nextText == null) {
+      if (_text != null) {
+        if (reduceMotion) {
+          setState(() {
+            _tone = null;
+            _text = null;
+            _showRetry = false;
+          });
+          _opacity.value = 0;
+        } else {
+          _opacity.duration = _fadeOut;
+          _opacity.reverse().whenComplete(() {
+            if (!mounted) return;
+            setState(() {
+              _tone = null;
+              _text = null;
+              _showRetry = false;
+            });
+          });
+        }
+      }
+      return;
+    }
+
+    final changed = nextText != _text || nextTone != _tone;
+    setState(() {
+      _tone = nextTone;
+      _text = nextText;
+      _showRetry = nextRetry;
+    });
+    if (reduceMotion) {
+      _opacity.value = 1;
+    } else if (changed) {
+      _opacity.duration = _fadeIn;
+      _opacity.forward(from: 0);
+    } else if (_opacity.value < 1) {
+      _opacity.forward();
+    }
+
+    if (nextTone == _StatusTone.success) {
+      _dismiss = Timer(_hold, () {
+        if (!mounted || _tone != _StatusTone.success) return;
+        if (reduceMotion) {
+          setState(() {
+            _tone = null;
+            _text = null;
+            _showRetry = false;
+          });
+          return;
+        }
+        _opacity.duration = _fadeOut;
+        _opacity.reverse().whenComplete(() {
+          if (!mounted || _tone != _StatusTone.success) return;
+          setState(() {
+            _tone = null;
+            _text = null;
+            _showRetry = false;
+          });
+        });
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: GameTokens.surface.withValues(alpha: 0.96),
-      borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                key: const Key('tournament-status-text'),
-                style: const TextStyle(color: GameTokens.textMuted),
+    final text = _text;
+    if (text == null) return const SizedBox.shrink();
+    final live = _tone == _StatusTone.persistent ||
+        _tone == _StatusTone.syncing;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: FadeTransition(
+        opacity: _opacity,
+        child: Semantics(
+          liveRegion: live,
+          container: true,
+          label: text,
+          child: Material(
+            key: const Key('tournament-status'),
+            color: GameTokens.surface.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      text,
+                      key: const Key('tournament-status-text'),
+                      style: const TextStyle(color: GameTokens.textMuted),
+                    ),
+                  ),
+                  if (_showRetry)
+                    TextButton(
+                      key: const Key('tournament-retry'),
+                      onPressed: widget.controller.refreshTournament,
+                      child: Text(widget.copy.tryAgain),
+                    ),
+                ],
               ),
             ),
-            TextButton(
-              key: const Key('tournament-retry'),
-              onPressed: onRetry,
-              child: Text(retryLabel),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -545,7 +760,7 @@ final class _HomeActions extends StatelessWidget {
       iconColor: GameTokens.scoreGlow,
       title: copy.leaderboard,
       subtitle: copy.weeklyRankings,
-      onTap: () => controller.openWeekly(fromHome: true),
+      onTap: () => _openLeaderboardFromHome(context, controller),
     );
     final practice = _ActionCard(
       cardKey: const Key('practice'),
@@ -1199,7 +1414,7 @@ final class _ResultsScreen extends StatelessWidget {
           const SizedBox(height: 18),
           FilledButton(
             key: const Key('leaderboard'),
-            onPressed: () => controller.openWeekly(fromHome: true),
+            onPressed: () => controller.openWeekly(),
             child: Text(copy.viewLeaderboard),
           ),
           const SizedBox(height: 10),

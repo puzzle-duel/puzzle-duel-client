@@ -85,8 +85,8 @@ final class TournamentCopy {
     'Henüz doğrulanmış rozet yok. Zamanında rozeti için günlük turnuvayı zamanında bitir.',
   );
   String get badgeOffline => pick(
-    'Offline. Practice records stay available; badge verification needs the server.',
-    'Çevrimdışı. Pratik kayıtları duruyor; rozet doğrulaması sunucu ister.',
+    'Offline. Practice records stay available; badges update when you reconnect.',
+    'Çevrimdışı. Pratik kayıtların duruyor; rozetler bağlantı gelince güncellenir.',
   );
   String get badgeAuthRequired => pick(
     'Sign in again to load verified badges.',
@@ -277,38 +277,52 @@ final class TournamentCopy {
   String get finalLabel => pick('Final', 'Kesinleşti');
   String get tryAgain => pick('Try again', 'Yeniden dene');
   String get loading => pick('Loading the tournament…', 'Turnuva yükleniyor…');
-  String get tournamentSyncing =>
-      pick('Updating tournament…', 'Turnuva güncelleniyor…');
+  String get tournamentSyncing => pick(
+    'Updating tournament info…',
+    'Turnuva bilgileri güncelleniyor…',
+  );
+  String get tournamentRefreshSuccess => pick(
+    'Tournament info updated.',
+    'Turnuva bilgileri güncellendi.',
+  );
   String get cachedTournamentHeadline => pick(
-    'Last known tournament (cached)',
-    'Son bilinen turnuva (önbellek)',
+    'Your latest tournament info',
+    'Son turnuva bilgilerin',
   );
   String get cachedTournamentBody => pick(
-    'Showing a saved summary. It may be outdated until the server responds.',
-    'Kayıtlı özet gösteriliyor. Sunucu yanıtlayana kadar eski olabilir.',
+    'Showing your latest tournament info.',
+    'Son turnuva bilgilerin gösteriliyor.',
+  );
+  String get connectionUnavailable => pick(
+    'No connection. You can keep practicing.',
+    'Bağlantı yok. Pratik yapmaya devam edebilirsin.',
   );
   String get boardLoading =>
       pick('Loading verified scores…', 'Doğrulanmış puanlar yükleniyor…');
   String get reference => pick('Reference', 'Referans');
-  String get unauthorized =>
-      'Unauthorized. Issue a new UAT bearer and relaunch.';
-  String get timedOut =>
-      pick('The server timed out.', 'Sunucu zaman aşımına uğradı.');
+  String get unauthorized => pick(
+    'Sign in again to update tournament info.',
+    'Turnuva bilgilerini güncellemek için yeniden oturum aç.',
+  );
+  String get timedOut => pick(
+    'Connection timed out. You can keep practicing.',
+    'Bağlantı zaman aşımına uğradı. Pratik yapmaya devam edebilirsin.',
+  );
   String get offline => pick(
-    'Offline. Nothing was confirmed.',
-    'Çevrimdışı. Hiçbir şey onaylanmadı.',
+    'No connection. You can keep practicing.',
+    'Bağlantı yok. Pratik yapmaya devam edebilirsin.',
   );
   String get writerBlocked => pick(
     'This device is not the active writer. Continue on the device that claimed today.',
     'Bu cihaz yazıcı değil. Bugünü alan cihazda devam et.',
   );
   String get staleBoard => pick(
-    'The board changed. Showing the server position.',
-    'Tahta değişti. Sunucudaki konum gösteriliyor.',
+    'The board changed. Showing the latest position.',
+    'Tahta değişti. Güncel konum gösteriliyor.',
   );
   String get couldNotRead => pick(
-    'The server could not read that request.',
-    'Sunucu bu isteği okuyamadı.',
+    'That request could not be read. Try again.',
+    'İstek okunamadı. Yeniden dene.',
   );
   String get rateLimited => pick(
     'Too many requests. Wait and retry the same move.',

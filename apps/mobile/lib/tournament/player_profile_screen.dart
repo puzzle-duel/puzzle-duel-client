@@ -132,6 +132,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         ? copy.playerFallback
         : widget.controller.config.playerLabel;
     return Scaffold(
+      backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
         child: SafeArea(
           child: RefreshIndicator(
