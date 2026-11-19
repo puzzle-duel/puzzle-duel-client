@@ -11,6 +11,7 @@ final class OfferTray extends StatelessWidget {
     required this.selectedIndex,
     required this.enabled,
     required this.onSelect,
+    this.selectionLabel,
   });
 
   /// Versioned tray slots (`OfferLive` / `OfferEmpty` / `OfferSpent`).
@@ -20,6 +21,9 @@ final class OfferTray extends StatelessWidget {
   final int? selectedIndex;
   final bool enabled;
   final ValueChanged<int> onSelect;
+
+  /// When set, a selected slot shows this label under the piece.
+  final String? selectionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -49,11 +53,13 @@ final class OfferTray extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 5),
                     child: _OfferSlot(
+                      key: ValueKey('offer-slot-$i'),
                       index: i,
                       piece: offers[i].pieceOrNull,
                       selected: selectedIndex == i,
                       enabled: enabled && offers[i].isSelectable,
                       onSelect: onSelect,
+                      selectionLabel: selectionLabel,
                     ),
                   ),
                 ),
@@ -67,11 +73,13 @@ final class OfferTray extends StatelessWidget {
 
 final class _OfferSlot extends StatelessWidget {
   const _OfferSlot({
+    super.key,
     required this.index,
     required this.piece,
     required this.selected,
     required this.enabled,
     required this.onSelect,
+    required this.selectionLabel,
   });
 
   final int index;
@@ -79,6 +87,7 @@ final class _OfferSlot extends StatelessWidget {
   final bool selected;
   final bool enabled;
   final ValueChanged<int> onSelect;
+  final String? selectionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +95,21 @@ final class _OfferSlot extends StatelessWidget {
         ? 'Offer slot ${index + 1}, empty'
         : 'Offer slot ${index + 1}, ${PieceGlyph.semanticsLabel(piece!)}'
               '${selected ? ', selected' : ''}';
+    final glyph = piece == null
+        ? const Text(
+            '—',
+            style: TextStyle(
+              fontSize: 28,
+              color: GameTokens.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          )
+        : PieceGlyph(
+            piece: piece!,
+            size: selectionLabel == null ? 56 : 48,
+            selected: selected,
+            muted: !enabled && !selected,
+          );
     return Semantics(
       button: true,
       enabled: enabled,
@@ -94,7 +118,7 @@ final class _OfferSlot extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         curve: Curves.easeOut,
-        height: 100,
+        height: selectionLabel == null ? 100 : 118,
         transform: selected
             ? Matrix4.translationValues(0, -3, 0)
             : Matrix4.identity(),
@@ -122,23 +146,27 @@ final class _OfferSlot extends StatelessWidget {
           child: InkWell(
             onTap: enabled ? () => onSelect(index) : null,
             borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-            child: Center(
-              child: piece == null
-                  ? const Text(
-                      '—',
-                      style: TextStyle(
-                        fontSize: 28,
-                        color: GameTokens.textMuted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    )
-                  : PieceGlyph(
-                      piece: piece!,
-                      size: 56,
-                      selected: selected,
-                      muted: !enabled && !selected,
-                    ),
-            ),
+            child: selectionLabel == null
+                ? Center(child: glyph)
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      glyph,
+                      if (selected)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            selectionLabel!,
+                            style: const TextStyle(
+                              color: GameTokens.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
           ),
         ),
       ),

@@ -66,9 +66,14 @@ final class AssetGameSfx extends GameSfx {
     AudioPlayer Function()? playerFactory,
     this.playOverride,
     this.cacheLoadAll,
+    this.coupledHaptics = true,
     int warmPoolSize = 2,
   }) : _playerFactory = playerFactory ?? AudioPlayer.new,
        _warmPoolSize = warmPoolSize.clamp(1, 4);
+
+  /// Offline play couples a haptic to each sound. Tournament turns this off
+  /// and dispatches haptics from the confirmed event instead.
+  final bool coupledHaptics;
 
   final AudioPlayer Function() _playerFactory;
   final int _warmPoolSize;
@@ -229,7 +234,7 @@ final class AssetGameSfx extends GameSfx {
 
     // Haptics are best-effort and must not gate visuals.
     scheduleMicrotask(() {
-      if (_disposed || _muted) return;
+      if (!coupledHaptics || _disposed || _muted) return;
       try {
         switch (event) {
           case GameSfxEvent.reject:

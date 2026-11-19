@@ -98,6 +98,14 @@ final class GameSession extends ChangeNotifier {
   @visibleForTesting
   MoveResult Function(GameState state, Move move)? applyMoveOverride;
 
+  /// When set, a tap is sent to the server instead of the local engine.
+  /// The callback must adopt the returned authoritative state. A different
+  /// tap is ignored while a command outcome is still unknown.
+  Future<void> Function(int offerIndex, Coordinate tap)? onAuthoritativeTap;
+
+  bool _authoritativeBusy = false;
+  bool authoritativeOutcomeUnknown = false;
+
   GameSessionView get view => GameSessionView(
     phase: _phase,
     generation: _generation,
@@ -123,6 +131,50 @@ final class GameSession extends ChangeNotifier {
     _selectedOffer = null;
     _clearFeedback();
     _generationFailure = null;
+    notifyListeners();
+  }
+
+  /// Shows a server-owned board. This does not apply a local move.
+  void showAuthoritative(GameState state) {
+    _invalidateResolutions();
+    _authoritativeBusy = false;
+    _generation += 1;
+    _canonical = state;
+    _selectedOffer = null;
+    _clearFeedback();
+    _generationFailure = null;
+    _phase = state.status == GameStatus.ended
+        ? GameScreenPhase.ended
+        : GameScreenPhase.playing;
+    notifyListeners();
+  }
+
+  void markAuthoritativeUnknown() {
+    _authoritativeBusy = false;
+    authoritativeOutcomeUnknown = true;
+    if (_canonical != null) {
+      _phase = GameScreenPhase.playing;
+    }
+    _feedbackKind = MoveFeedbackKind.rejected;
+    _feedbackCode = 'outcome_unknown';
+    notifyListeners();
+  }
+
+  void clearAuthoritativeUnknown() {
+    authoritativeOutcomeUnknown = false;
+    _clearFeedback();
+    notifyListeners();
+  }
+
+  /// Records a server rejection without applying a local move or score.
+  void showServerRejection(String code) {
+    _authoritativeBusy = false;
+    authoritativeOutcomeUnknown = false;
+    _feedbackKind = MoveFeedbackKind.rejected;
+    _feedbackCode = code;
+    if (_canonical != null && _canonical!.status != GameStatus.ended) {
+      _phase = GameScreenPhase.playing;
+    }
     notifyListeners();
   }
 
@@ -175,6 +227,23 @@ final class GameSession extends ChangeNotifier {
   /// Single serialized move path. Returns false when the tap is ignored.
   bool submitTap(Coordinate tap) {
     if (!view.acceptsInput) return false;
+    if (onAuthoritativeTap != null) {
+      if (_authoritativeBusy || authoritativeOutcomeUnknown) return false;
+      final selected = _selectedOffer;
+      if (selected == null) {
+        _feedbackKind = MoveFeedbackKind.rejected;
+        _feedbackCode = 'select_offer_first';
+        notifyListeners();
+        return false;
+      }
+      _authoritativeBusy = true;
+      _phase = GameScreenPhase.resolving;
+      notifyListeners();
+      onAuthoritativeTap!(selected, tap).whenComplete(() {
+        _authoritativeBusy = false;
+      });
+      return true;
+    }
     final selected = _selectedOffer;
     if (selected == null) {
       _feedbackKind = MoveFeedbackKind.rejected;

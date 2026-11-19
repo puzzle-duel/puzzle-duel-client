@@ -10,10 +10,19 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Flame visual board with a Flutter semantics/input overlay.
 final class AccessibleBoard extends StatefulWidget {
-  const AccessibleBoard({super.key, required this.session, required this.view});
+  const AccessibleBoard({
+    super.key,
+    required this.session,
+    required this.view,
+    this.showPlacementPreview = false,
+  });
 
   final GameSession session;
   final GameSessionView view;
+
+  /// Highlights empty legal taps for the selected piece. Off unless a caller
+  /// opts in, so existing board goldens keep their pixels.
+  final bool showPlacementPreview;
 
   @override
   State<AccessibleBoard> createState() => _AccessibleBoardState();
@@ -162,6 +171,9 @@ final class _AccessibleBoardState extends State<AccessibleBoard> {
                       _SemanticsGrid(
                         state: interactionState,
                         enabled: widget.view.acceptsInput,
+                        previewOfferIndex: widget.showPlacementPreview
+                            ? widget.view.selectedOfferIndex
+                            : null,
                         onTapCell: (coord) => widget.session.submitTap(coord),
                       ),
                     ],
@@ -180,17 +192,23 @@ final class _SemanticsGrid extends StatelessWidget {
   const _SemanticsGrid({
     required this.state,
     required this.enabled,
+    required this.previewOfferIndex,
     required this.onTapCell,
   });
 
   final GameState state;
   final bool enabled;
+  final int? previewOfferIndex;
   final ValueChanged<Coordinate> onTapCell;
 
   @override
   Widget build(BuildContext context) {
     final n = state.boardSize;
     final blocked = {for (final b in state.blocked) '${b.row}:${b.column}'};
+    final selected = previewOfferIndex;
+    final piece = selected == null || selected < 0 || selected >= state.offers.length
+        ? null
+        : state.offers[selected].pieceOrNull;
     return Column(
       children: [
         for (var row = 0; row < n; row++)
@@ -205,6 +223,14 @@ final class _SemanticsGrid extends StatelessWidget {
                       column: col,
                       piece: state.cells[row][col],
                       blocked: blocked.contains('$row:$col'),
+                      legalPreview: piece != null &&
+                          canPlaceAt(
+                            boardSize: state.boardSize,
+                            cells: state.cells,
+                            blocked: state.blocked,
+                            piece: piece,
+                            tap: Coordinate(row: row, column: col),
+                          ),
                       enabled: enabled,
                       onTap: () => onTapCell(Coordinate(row: row, column: col)),
                     ),
@@ -224,6 +250,7 @@ final class _CellSemantics extends StatelessWidget {
     required this.column,
     required this.piece,
     required this.blocked,
+    required this.legalPreview,
     required this.enabled,
     required this.onTap,
   });
@@ -232,6 +259,7 @@ final class _CellSemantics extends StatelessWidget {
   final int column;
   final Piece? piece;
   final bool blocked;
+  final bool legalPreview;
   final bool enabled;
   final VoidCallback onTap;
 
@@ -252,7 +280,26 @@ final class _CellSemantics extends StatelessWidget {
         child: InkWell(
           key: ValueKey('board-ink-$row-$column'),
           onTap: enabled && !blocked ? onTap : null,
-          child: const SizedBox.expand(),
+          child: legalPreview
+              ? DecoratedBox(
+                  key: ValueKey('board-legal-$row-$column'),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: GameTokens.accent.withValues(alpha: 0.85),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: GameTokens.accent.withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const SizedBox(width: 7, height: 7),
+                    ),
+                  ),
+                )
+              : const SizedBox.expand(),
         ),
       ),
     );

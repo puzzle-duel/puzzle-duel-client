@@ -1,0 +1,322 @@
+{
+  "id": "V3-03",
+  "kind": "fullMove",
+  "rulesVersion": "core-001.v3",
+  "summary": "Two-wave cascade: row clear then diamond shift forms second row clear; scoreDelta=900",
+  "oracleVersion": "stage-d-python-stdlib-1",
+  "derivation": "docs/engine/PZD-39-STAGE-D-V3-03-DERIVATION.md",
+  "searchProvenance": {
+    "method": "adapted historical PZD-11 fixture 10-two-wave-cascade geometry to core-001.v3 tagged offers",
+    "historicalSource": "docs/contracts/gameplay/v1/fixtures/10-two-wave-cascade.json",
+    "constraints": "initial parseInitialGameState; no pre-move match; >=2 waves from one move"
+  },
+  "initialState": {
+    "rulesVersion": "core-001.v3",
+    "boardSize": 5,
+    "moveLimit": 5,
+    "blocked": [],
+    "cells": [
+      [
+        {
+          "shape": "circle",
+          "direction": "left"
+        },
+        {
+          "shape": "circle",
+          "direction": "left"
+        },
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        {
+          "shape": "diamond",
+          "direction": "down"
+        },
+        {
+          "shape": "diamond",
+          "direction": "down"
+        },
+        null,
+        {
+          "shape": "diamond",
+          "direction": "left"
+        },
+        null
+      ]
+    ],
+    "offers": [
+      {
+        "kind": "piece",
+        "shape": "circle",
+        "direction": "up"
+      },
+      {
+        "kind": "piece",
+        "shape": "diamond",
+        "direction": "down"
+      },
+      {
+        "kind": "piece",
+        "shape": "triangle",
+        "direction": "left"
+      }
+    ],
+    "futurePieces": [
+      {
+        "shape": "circle",
+        "direction": "left"
+      },
+      {
+        "shape": "diamond",
+        "direction": "up"
+      }
+    ],
+    "turnsUsed": 0,
+    "score": 0,
+    "status": "in_progress",
+    "terminalReason": null
+  },
+  "moves": [
+    {
+      "offerIndex": 0,
+      "tap": [
+        0,
+        2
+      ]
+    }
+  ],
+  "requireInitial": true,
+  "expected": {
+    "ok": true,
+    "finalState": {
+      "rulesVersion": "core-001.v3",
+      "boardSize": 5,
+      "moveLimit": 5,
+      "blocked": [],
+      "cells": [
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "offers": [
+        {
+          "kind": "piece",
+          "shape": "circle",
+          "direction": "left"
+        },
+        {
+          "kind": "piece",
+          "shape": "diamond",
+          "direction": "down"
+        },
+        {
+          "kind": "piece",
+          "shape": "triangle",
+          "direction": "left"
+        }
+      ],
+      "futurePieces": [
+        {
+          "shape": "diamond",
+          "direction": "up"
+        }
+      ],
+      "turnsUsed": 1,
+      "score": 900,
+      "status": "in_progress",
+      "terminalReason": null
+    },
+    "stateHash": "ba90da3fc85df0527510e290375ee66993e5e77d05ef0bb9630bd14c85fbeabc",
+    "canonicalJson": "{\"blocked\":[],\"boardSize\":5,\"cells\":[[null,null,null,null,null],[null,null,null,null,null],[null,null,null,null,null],[null,null,null,null,null],[null,null,null,null,null]],\"futurePieces\":[{\"direction\":\"up\",\"shape\":\"diamond\"}],\"moveLimit\":5,\"offers\":[{\"direction\":\"left\",\"kind\":\"piece\",\"shape\":\"circle\"},{\"direction\":\"down\",\"kind\":\"piece\",\"shape\":\"diamond\"},{\"direction\":\"left\",\"kind\":\"piece\",\"shape\":\"triangle\"}],\"rulesVersion\":\"core-001.v3\",\"score\":900,\"status\":\"in_progress\",\"terminalReason\":null,\"turnsUsed\":1}",
+    "applied": [
+      {
+        "landing": [
+          0,
+          2
+        ],
+        "turnsUsed": 1,
+        "scoreDelta": 900,
+        "waves": [
+          {
+            "wave": 1,
+            "cleared": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                2
+              ]
+            ],
+            "scoreDelta": 300,
+            "moved": [
+              {
+                "sourceIndex": 23,
+                "from": [
+                  4,
+                  3
+                ],
+                "to": [
+                  4,
+                  2
+                ],
+                "shape": "diamond",
+                "direction": "left"
+              }
+            ]
+          },
+          {
+            "wave": 2,
+            "cleared": [
+              [
+                4,
+                0
+              ],
+              [
+                4,
+                1
+              ],
+              [
+                4,
+                2
+              ]
+            ],
+            "scoreDelta": 600,
+            "moved": []
+          }
+        ],
+        "finalState": {
+          "rulesVersion": "core-001.v3",
+          "boardSize": 5,
+          "moveLimit": 5,
+          "blocked": [],
+          "cells": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ],
+          "offers": [
+            {
+              "kind": "piece",
+              "shape": "circle",
+              "direction": "left"
+            },
+            {
+              "kind": "piece",
+              "shape": "diamond",
+              "direction": "down"
+            },
+            {
+              "kind": "piece",
+              "shape": "triangle",
+              "direction": "left"
+            }
+          ],
+          "futurePieces": [
+            {
+              "shape": "diamond",
+              "direction": "up"
+            }
+          ],
+          "turnsUsed": 1,
+          "score": 900,
+          "status": "in_progress",
+          "terminalReason": null
+        },
+        "stateHash": "ba90da3fc85df0527510e290375ee66993e5e77d05ef0bb9630bd14c85fbeabc"
+      }
+    ]
+  }
+}
