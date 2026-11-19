@@ -206,6 +206,9 @@ final class TournamentController extends ChangeNotifier {
 
   bool get hasPendingCommand => _pending != null;
 
+  /// Ranked play fenced after WRITER_NOT_AUTHORIZED until a new writer session.
+  bool rankedWriterLocked = false;
+
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
   /// Origin of the current or just-finished Tournament refresh (banner policy).
@@ -418,7 +421,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> advance() async {
-    if (moveInFlight || hasPendingCommand) return;
+    if (rankedWriterLocked || moveInFlight || hasPendingCommand) return;
     final id = seriesId;
     final ordinal = day?.ordinal;
     if (id == null || ordinal == null) return;
@@ -438,7 +441,8 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
-    if (moveInFlight ||
+    if (rankedWriterLocked ||
+        moveInFlight ||
         hasPendingCommand ||
         session.authoritativeOutcomeUnknown) {
       return;
@@ -492,6 +496,7 @@ final class TournamentController extends ChangeNotifier {
       _pendingKey = null;
       session.clearAuthoritativeUnknown();
       if (response.status == 200) {
+        rankedWriterLocked = false;
         final ok = await _reload(reveal: true, followGameplay: true);
         if (!ok) return;
         final delta = fromPlay && before != null && day?.seriesScore != null
@@ -532,11 +537,10 @@ final class TournamentController extends ChangeNotifier {
         _pending = null;
         _pendingKey = null;
         session.clearAuthoritativeUnknown();
+        rankedWriterLocked = true;
         noticeCode = 'WRITER_NOT_AUTHORIZED';
         errorCode = null;
-        if (route.place == TournamentPlace.playing) {
-          session.showServerRejection('WRITER_NOT_AUTHORIZED');
-        }
+        // Floating banner owns copy — do not push raw codes into board feedback.
         _haptic((feel) => feel.rejected());
         return;
       }

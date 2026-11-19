@@ -245,12 +245,10 @@ final class _TournamentShell extends StatelessWidget {
 final class _PlayFeedback extends StatelessWidget {
   const _PlayFeedback({
     required this.controller,
-    required this.notice,
     required this.copy,
   });
 
   final TournamentController controller;
-  final String? notice;
   final TournamentCopy copy;
 
   @override
@@ -262,14 +260,7 @@ final class _PlayFeedback extends StatelessWidget {
         child: Text(copy.retrySame),
       );
     }
-    if (notice != null) {
-      return Text(
-        copy.forError(notice),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: GameTokens.danger),
-      );
-    }
+    // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
     if (delta != null && delta > 0) {
       return Text(
         '+$delta',
@@ -580,7 +571,7 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     with SingleTickerProviderStateMixin {
   static const _slideIn = Duration(milliseconds: 240);
   static const _infoHold = Duration(milliseconds: 2500);
-  static const _errorHold = Duration(milliseconds: 3500);
+  static const _errorHold = Duration(milliseconds: 4000);
   static const _slideOut = Duration(milliseconds: 280);
 
   late final AnimationController _motion = AnimationController(
@@ -703,10 +694,8 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
       _dismissedSignature = null;
     }
 
-    if (widget.syncing && infoOk) {
-      nextKind = _NotifyKind.info;
-      nextText = widget.copy.tournamentSyncing;
-    } else if (notice == 'OFFLINE') {
+    // UX-11: never show blue "updating…" toast — native pull spinner covers load.
+    if (notice == 'OFFLINE') {
       nextKind = _NotifyKind.error;
       nextText = widget.copy.connectionUnavailable;
     } else if (notice == 'TIMEOUT') {
@@ -726,8 +715,8 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
       // Pull-to-refresh completion stays info (blue), not success green.
       nextKind = _NotifyKind.info;
       nextText = widget.copy.tournamentRefreshSuccess;
-    } else if (widget.syncing && !infoOk) {
-      // Silent startup/background syncing: clear any leftover info toast.
+    } else if (widget.syncing) {
+      // In-flight refresh: no floating info toast (startup, background, or pull).
       nextKind = null;
       nextText = null;
     }
@@ -824,9 +813,11 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
                 child: Text(
                   text,
                   key: const Key('tournament-status-text'),
+                  softWrap: true,
                   style: const TextStyle(
                     color: GameTokens.textPrimary,
                     fontWeight: FontWeight.w700,
+                    height: 1.25,
                   ),
                 ),
               ),
@@ -1200,143 +1191,164 @@ final class _PlayScreen extends StatelessWidget {
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
-          child: Column(
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              SizedBox(
-                height: 52,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        key: const Key('nav-back'),
-                        tooltip: copy.back,
-                        onPressed: () => _confirmLeave(context, controller),
-                        icon: const Icon(Icons.arrow_back),
-                      ),
-                      Text(
-                        day?.label ?? '',
-                        style: TextStyle(
-                          color: tone,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '${day?.seriesScore ?? '—'}',
-                        style: const TextStyle(
-                          color: GameTokens.scoreGlow,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 22,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: 40,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _Pips(
-                          completed: day?.completedGames ?? 0,
-                          current: day?.ordinal,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(copy.movesLeft(moves)),
-                      const SizedBox(width: 8),
-                      _IdleClock(
-                        label: copy.idle,
-                        deadlineMs: controller.deadlineMs,
-                        serverNowMs: controller.serverNowMs,
-                        syncedAt: controller.syncedAt,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: 48,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      copy.objective(moves, size),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(
-                key: const Key('play-feedback'),
-                height: 44,
-                child: Center(
-                  child: _PlayFeedback(
-                    controller: controller,
-                    notice: notice,
-                    copy: copy,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final side = constraints.biggest.shortestSide;
-                      return Center(
-                        child: SizedBox(
-                          key: const Key('play-board'),
-                          width: side,
-                          height: side,
-                          child: ListenableBuilder(
-                            listenable: controller.session,
-                            builder: (context, _) => AccessibleBoard(
-                              session: controller.session,
-                              view: controller.session.view,
-                              showPlacementPreview: true,
+              Column(
+                children: [
+                  SizedBox(
+                    height: 52,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            key: const Key('nav-back'),
+                            tooltip: copy.back,
+                            onPressed: () => _confirmLeave(context, controller),
+                            icon: const Icon(Icons.arrow_back),
+                          ),
+                          Text(
+                            day?.label ?? '',
+                            style: TextStyle(
+                              color: tone,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
                             ),
                           ),
-                        ),
-                      );
-                    },
+                          const Spacer(),
+                          Text(
+                            '${day?.seriesScore ?? '—'}',
+                            style: const TextStyle(
+                              color: GameTokens.scoreGlow,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 22,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              SizedBox(
-                key: const Key('offer-tray-frame'),
-                height: 152,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                  child: ListenableBuilder(
-                    listenable: controller.session,
-                    builder: (context, _) {
-                      final live = controller.session.view;
-                      final locked =
-                          !live.acceptsInput ||
-                          controller.hasPendingCommand ||
-                          controller.moveInFlight ||
-                          controller.session.authoritativeOutcomeUnknown;
-                      return OfferTray(
-                        offers:
-                            live.canonicalState?.offers ??
-                            const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
-                        selectedIndex: live.selectedOfferIndex,
-                        enabled: !locked,
-                        selectionLabel: copy.selectPiece,
-                        onSelect: (index) {
-                          controller.session.selectOffer(index);
-                          controller.noteSelection();
+                  SizedBox(
+                    height: 40,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _Pips(
+                              completed: day?.completedGames ?? 0,
+                              current: day?.ordinal,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(copy.movesLeft(moves)),
+                          const SizedBox(width: 8),
+                          _IdleClock(
+                            label: copy.idle,
+                            deadlineMs: controller.deadlineMs,
+                            serverNowMs: controller.serverNowMs,
+                            syncedAt: controller.syncedAt,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 48,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          copy.objective(moves, size),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    key: const Key('play-feedback'),
+                    height: 44,
+                    child: Center(
+                      child: _PlayFeedback(
+                        controller: controller,
+                        copy: copy,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final side = constraints.biggest.shortestSide;
+                          return Center(
+                            child: SizedBox(
+                              key: const Key('play-board'),
+                              width: side,
+                              height: side,
+                              child: ListenableBuilder(
+                                listenable: controller.session,
+                                builder: (context, _) => AccessibleBoard(
+                                  session: controller.session,
+                                  view: controller.session.view,
+                                  showPlacementPreview: true,
+                                ),
+                              ),
+                            ),
+                          );
                         },
-                      );
-                    },
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    key: const Key('offer-tray-frame'),
+                    height: 152,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                      child: ListenableBuilder(
+                        listenable: controller.session,
+                        builder: (context, _) {
+                          final live = controller.session.view;
+                          final locked =
+                              !live.acceptsInput ||
+                              controller.hasPendingCommand ||
+                              controller.moveInFlight ||
+                              controller.rankedWriterLocked ||
+                              controller.session.authoritativeOutcomeUnknown;
+                          return OfferTray(
+                            offers:
+                                live.canonicalState?.offers ??
+                                const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
+                            selectedIndex: live.selectedOfferIndex,
+                            enabled: !locked,
+                            selectionLabel: copy.selectPiece,
+                            onSelect: (index) {
+                              controller.session.selectOffer(index);
+                              controller.noteSelection();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Positioned(
+                top: 0,
+                left: 16,
+                right: 16,
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: _TournamentStatusHost(
+                    key: const Key('play-status-host'),
+                    controller: controller,
+                    copy: copy,
+                    notice: notice,
+                    syncing: false,
+                    infoBanners: false,
                   ),
                 ),
               ),

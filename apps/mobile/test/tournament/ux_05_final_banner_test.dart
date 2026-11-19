@@ -44,7 +44,7 @@ void main() {
       return _ok(method, path);
     });
     await _pumpHome(tester, api, directory);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     allowRefresh = true;
     final refresh = tester.widget<RefreshIndicator>(
@@ -52,9 +52,9 @@ void main() {
     );
     final pending = refresh.onRefresh();
     await tester.pump();
-    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
+    // UX-11: no blue "updating…" toast while pull is in flight.
+    expect(find.byKey(const Key('tournament-status-info')), findsNothing);
     expect(find.byKey(const Key('tournament-status-success')), findsNothing);
-    expect(_bannerAccent(tester), GameTokens.notifyInfo);
 
     gate.complete();
     await pending;
@@ -91,7 +91,7 @@ void main() {
     final dailyBefore = tester.getTopLeft(
       find.byKey(const Key('home-daily-card')),
     );
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
@@ -137,7 +137,7 @@ void main() {
     expect(tester.getTopLeft(find.byKey(const Key('home-title'))), title);
     expect(tester.getTopLeft(find.byKey(const Key('home-daily-card'))), daily);
     expect(tester.getTopLeft(find.byKey(const Key('practice'))), practice);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(tester.getTopLeft(find.byKey(const Key('home-title'))), title);
     expect(tester.getTopLeft(find.byKey(const Key('home-daily-card'))), daily);
@@ -157,7 +157,7 @@ void main() {
     });
     await _pumpHome(tester, api, directory);
     await _waitFor(tester, find.byKey(const Key('daily-offline-icon')));
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
 
@@ -213,7 +213,8 @@ void main() {
     final a = refresh.onRefresh();
     final b = refresh.onRefresh();
     await tester.pump();
-    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
+    // UX-11: in-flight pull does not show blue loading toast.
+    expect(find.byKey(const Key('tournament-status-info')), findsNothing);
     expect(sessions, 1);
     gate.complete();
     await Future.wait([a, b]);

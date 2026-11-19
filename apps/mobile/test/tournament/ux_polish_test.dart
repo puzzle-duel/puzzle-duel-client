@@ -31,7 +31,7 @@ void main() {
     expect(find.text('No internet connection.'), findsOneWidget);
     expect(find.byKey(const Key('tournament-retry')), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('No internet connection.'), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
@@ -107,7 +107,7 @@ void main() {
     );
     await _pumpHome(tester, api, directory);
     await _waitFor(tester, find.byKey(const Key('tournament-status')));
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);

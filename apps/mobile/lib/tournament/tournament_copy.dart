@@ -314,8 +314,8 @@ final class TournamentCopy {
     'İnternet bağlantısı yok.',
   );
   String get writerBlocked => pick(
-    'Today’s ranked challenge is locked to another session on this account. Practice stays available.',
-    'Bugünün sıralı mücadelesi bu hesapta başka bir oturuma kilitli. Pratik kullanılabilir.',
+    "Today's challenge is open in another session. Continue from the session where you started.",
+    'Günlük mücadele başka bir oturumda açık. Başladığın oturumdan devam edebilirsin.',
   );
   String get staleBoard => pick(
     'The board changed. Showing the latest position.',

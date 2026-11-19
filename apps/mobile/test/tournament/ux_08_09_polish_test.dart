@@ -43,7 +43,7 @@ void main() {
       return _ok(method, path);
     });
     await _pumpHome(tester, api, directory);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     allowRefresh = true;
     final refresh = tester.widget<RefreshIndicator>(
@@ -51,16 +51,18 @@ void main() {
     );
     final pending = refresh.onRefresh();
     await tester.pump();
-    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
-    final fill = _bannerFill(tester);
-    expect(fill.a, greaterThanOrEqualTo(0.90));
-    expect(fill.a, lessThanOrEqualTo(0.94));
-    expect(_bannerAccent(tester), GameTokens.notifyInfo);
+    // UX-11: no blue loading toast during pull.
+    expect(find.byKey(const Key('tournament-status-info')), findsNothing);
     final titleBefore = tester.getTopLeft(find.byKey(const Key('home-title')));
     gate.complete();
     await pending;
     await tester.pump();
     expect(find.text('Tournament info updated.'), findsOneWidget);
+    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
+    final fill = _bannerFill(tester);
+    expect(fill.a, greaterThanOrEqualTo(0.90));
+    expect(fill.a, lessThanOrEqualTo(0.94));
+    expect(_bannerAccent(tester), GameTokens.notifyInfo);
     expect(tester.getTopLeft(find.byKey(const Key('home-title'))), titleBefore);
   });
 
@@ -84,7 +86,7 @@ void main() {
     expect(find.byKey(const Key('tournament-retry')), findsNothing);
 
     final daily = tester.getTopLeft(find.byKey(const Key('home-daily-card')));
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);

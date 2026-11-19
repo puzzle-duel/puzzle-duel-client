@@ -75,14 +75,14 @@ void main() {
     expect(find.byKey(const Key('tournament-status-error')), findsOneWidget);
     expect(_bannerAccent(tester), GameTokens.notifyError);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);
     expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
     expect(find.byKey(const Key('practice')), findsOneWidget);
   });
 
-  testWidgets('pull-to-refresh shows blue loading then blue completion', (
+  testWidgets('pull-to-refresh shows blue completion without loading toast', (
     tester,
   ) async {
     final directory = Directory.systemTemp.createTempSync('pzd43-ux10-pull');
@@ -99,7 +99,7 @@ void main() {
       return _ok(method, path);
     });
     await _pumpHome(tester, api, directory);
-    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 4500));
     await tester.pump();
     ready = true;
     final refresh = tester.widget<RefreshIndicator>(
@@ -107,15 +107,9 @@ void main() {
     );
     final pending = refresh.onRefresh();
     await tester.pump();
-    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
-    expect(_bannerAccent(tester), GameTokens.notifyInfo);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('tournament-status')),
-        matching: find.text('Updating tournament info…'),
-      ),
-      findsOneWidget,
-    );
+    // UX-11: native spinner only while refreshing — no blue loading toast.
+    expect(find.byKey(const Key('tournament-status-info')), findsNothing);
+    expect(find.byKey(const Key('tournament-status')), findsNothing);
     gate.complete();
     await pending;
     await tester.pump();
@@ -126,6 +120,7 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(_bannerAccent(tester), GameTokens.notifyInfo);
     expect(find.byKey(const Key('daily-offline-icon')), findsNothing);
   });
 
@@ -178,7 +173,7 @@ void main() {
     );
     final joined = refresh.onRefresh();
     await tester.pump();
-    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
+    expect(find.byKey(const Key('tournament-status-info')), findsNothing);
     expect(sessions, 1);
     gate.complete();
     await joined;
@@ -246,11 +241,20 @@ void main() {
   test('writer copy is not a connectivity message', () {
     const en = TournamentCopy(Locale('en'));
     const tr = TournamentCopy(Locale('tr'));
+    expect(
+      en.writerBlocked,
+      "Today's challenge is open in another session. Continue from the session where you started.",
+    );
+    expect(
+      tr.writerBlocked,
+      'Günlük mücadele başka bir oturumda açık. Başladığın oturumdan devam edebilirsin.',
+    );
     for (final copy in [en, tr]) {
       final text = copy.forError('WRITER_NOT_AUTHORIZED').toLowerCase();
       expect(text.contains('internet'), isFalse);
       expect(text.contains('timed out'), isFalse);
       expect(text.contains('bağlantı yok'), isFalse);
+      expect(text.contains('writer_not_authorized'), isFalse);
       expect(copy.connectionUnavailable.toLowerCase().contains('internet') ||
           copy.connectionUnavailable.contains('bağlantı'), isTrue);
     }
