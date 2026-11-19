@@ -10,6 +10,7 @@ import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
+import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
@@ -69,11 +70,15 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
     stateDirectory: widget.stateDirectory,
     sfx: _sfx,
     settings: _settings,
-    haptics: widget.haptics ??
+    haptics:
+        widget.haptics ??
         DeviceTournamentHaptics(
           enabled: () => _settings.haptics,
-          successAllowed: () =>
-              !WidgetsBinding.instance.platformDispatcher.accessibilityFeatures.reduceMotion,
+          successAllowed: () => !WidgetsBinding
+              .instance
+              .platformDispatcher
+              .accessibilityFeatures
+              .reduceMotion,
         ),
   );
 
@@ -101,11 +106,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
         theme: PuzzleDuelTheme.dark(),
         locale: const Locale('en'),
         supportedLocales: const [Locale('en')],
-        localizationsDelegates: const [
-          TournamentCopyDelegate(),
-        ],
+        localizationsDelegates: const [TournamentCopyDelegate()],
         builder: (context, child) {
-          final requested = widget.locale ?? View.of(context).platformDispatcher.locale;
+          final requested =
+              widget.locale ?? View.of(context).platformDispatcher.locale;
           final copyLocale = requested.languageCode == 'tr'
               ? const Locale('tr')
               : const Locale('en');
@@ -156,7 +160,8 @@ final class _TournamentShell extends StatelessWidget {
       canPop: atHome && !controller.booting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (place == TournamentPlace.playing || place == TournamentPlace.transition) {
+        if (place == TournamentPlace.playing ||
+            place == TournamentPlace.transition) {
           _confirmLeave(context, controller);
           return;
         }
@@ -174,7 +179,8 @@ final class _TournamentShell extends StatelessWidget {
       TournamentPlace.playing => _PlayScreen(controller: controller),
       TournamentPlace.transition => _TransitionScreen(controller: controller),
       TournamentPlace.results => _ResultsScreen(controller: controller),
-      TournamentPlace.daily || TournamentPlace.weekly => TournamentLeaderboardView(controller: controller),
+      TournamentPlace.daily || TournamentPlace.weekly =>
+        TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
       TournamentPlace.home => _HomeScreen(controller: controller),
@@ -183,7 +189,11 @@ final class _TournamentShell extends StatelessWidget {
 }
 
 final class _PlayFeedback extends StatelessWidget {
-  const _PlayFeedback({required this.controller, required this.notice, required this.copy});
+  const _PlayFeedback({
+    required this.controller,
+    required this.notice,
+    required this.copy,
+  });
 
   final TournamentController controller;
   final String? notice;
@@ -193,7 +203,10 @@ final class _PlayFeedback extends StatelessWidget {
   Widget build(BuildContext context) {
     final delta = controller.scoreDelta;
     if (controller.hasPendingCommand) {
-      return TextButton(onPressed: controller.retryUnknown, child: Text(copy.retrySame));
+      return TextButton(
+        onPressed: controller.retryUnknown,
+        child: Text(copy.retrySame),
+      );
     }
     if (notice != null) {
       return Text(
@@ -207,11 +220,18 @@ final class _PlayFeedback extends StatelessWidget {
       return Text(
         '+$delta',
         key: const Key('score-delta'),
-        style: const TextStyle(color: GameTokens.success, fontWeight: FontWeight.w800, fontSize: 20),
+        style: const TextStyle(
+          color: GameTokens.success,
+          fontWeight: FontWeight.w800,
+          fontSize: 20,
+        ),
       );
     }
     if (controller.moveInFlight) {
-      return Text(copy.sending, style: const TextStyle(color: GameTokens.accent));
+      return Text(
+        copy.sending,
+        style: const TextStyle(color: GameTokens.accent),
+      );
     }
     return const SizedBox.shrink();
   }
@@ -225,16 +245,15 @@ void _openSettings(BuildContext context, TournamentController controller) {
   );
 }
 
-void _showProfileHold(BuildContext context) {
-  final copy = TournamentCopy.of(context);
-  showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(copy.profile),
-      content: Text(copy.profileLater),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(copy.back)),
-      ],
+void _openProfile(BuildContext context, TournamentController controller) {
+  controller.haptics.selection();
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      settings: const RouteSettings(name: 'player-profile'),
+      builder: (context) => PlayerProfileScreen(
+        controller: controller,
+        directory: controller.settings.file.parent,
+      ),
     ),
   );
 }
@@ -246,12 +265,16 @@ void _openPractice(BuildContext context, TournamentController controller) {
       builder: (context) => PracticeFlow(
         directory: controller.settings.file.parent,
         haptics: controller.haptics,
+        playerScope: controller.config.playerLabel,
       ),
     ),
   );
 }
 
-Future<void> _confirmLeave(BuildContext context, TournamentController controller) async {
+Future<void> _confirmLeave(
+  BuildContext context,
+  TournamentController controller,
+) async {
   final copy = TournamentCopy.of(context);
   final leave = await showDialog<bool>(
     context: context,
@@ -259,8 +282,14 @@ Future<void> _confirmLeave(BuildContext context, TournamentController controller
       title: Text(copy.leaveTitle),
       content: Text(copy.leaveBody),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(copy.stay)),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(copy.leave)),
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text(copy.stay),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(copy.leave),
+        ),
       ],
     ),
   );
@@ -302,14 +331,18 @@ final class _HomeScreen extends StatelessWidget {
     final day = controller.day;
     final phase = day?.phase ?? DayPhase.ready;
     final verified = tournamentInt(controller.results['all']);
-    final score = phase == DayPhase.completed ? verified ?? day?.seriesScore : day?.seriesScore;
+    final score = phase == DayPhase.completed
+        ? verified ?? day?.seriesScore
+        : day?.seriesScore;
     final scoreLabel = phase == DayPhase.completed && verified != null
         ? copy.verifiedScore
         : score == null
         ? copy.scoreUnavailable
         : copy.currentScore;
     final badge = phase == DayPhase.completed && controller.results.isNotEmpty
-        ? (controller.results['onTimeAwarded'] == true ? copy.onTime : copy.onTimeMissing)
+        ? (controller.results['onTimeAwarded'] == true
+              ? copy.onTime
+              : copy.onTimeMissing)
         : null;
     final primary = switch (phase) {
       DayPhase.completed => copy.viewResults,
@@ -338,10 +371,11 @@ final class _HomeScreen extends StatelessWidget {
                           key: const Key('home-title'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            letterSpacing: 1.6,
-                            fontWeight: FontWeight.w800,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                letterSpacing: 1.6,
+                                fontWeight: FontWeight.w800,
+                              ),
                         ),
                         Text(
                           copy.tagline,
@@ -355,7 +389,7 @@ final class _HomeScreen extends StatelessWidget {
                   IconButton(
                     key: const Key('profile'),
                     tooltip: copy.profile,
-                    onPressed: () => _showProfileHold(context),
+                    onPressed: () => _openProfile(context, controller),
                     icon: const Icon(Icons.person_rounded),
                   ),
                   IconButton(
@@ -376,7 +410,9 @@ final class _HomeScreen extends StatelessWidget {
                 badge: badge,
                 headline: headline,
                 action: primary,
-                onAction: phase == DayPhase.completed ? controller.openResults : controller.resume,
+                onAction: phase == DayPhase.completed
+                    ? controller.openResults
+                    : controller.resume,
               ),
               const SizedBox(height: 32),
               _HomeActions(controller: controller),
@@ -416,11 +452,7 @@ final class _HomeActions extends StatelessWidget {
     );
     if (stacked) {
       return Column(
-        children: [
-          leaderboard,
-          const SizedBox(height: 12),
-          practice,
-        ],
+        children: [leaderboard, const SizedBox(height: 12), practice],
       );
     }
     return IntrinsicHeight(
@@ -483,7 +515,11 @@ final class _ActionCard extends StatelessWidget {
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: GameTokens.textPrimary),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: GameTokens.textPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -529,7 +565,9 @@ final class _DailyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = day?.label ?? 'E1';
-    final tone = phase == DayPhase.completed ? GameTokens.success : _tone(label);
+    final tone = phase == DayPhase.completed
+        ? GameTokens.success
+        : _tone(label);
     final body = switch (phase) {
       DayPhase.completed => copy.completedBody,
       DayPhase.ready when day?.original == false => copy.alreadyClaimed,
@@ -563,16 +601,26 @@ final class _DailyCard extends StatelessWidget {
           children: [
             Text(
               copy.dailyChallenge.toUpperCase(),
-              style: TextStyle(color: tone, fontWeight: FontWeight.w800, letterSpacing: 1.1),
+              style: TextStyle(
+                color: tone,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.1,
+              ),
             ),
             const SizedBox(height: 8),
             Text(headline, style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 6),
             Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 14),
-            _Pips(completed: day?.completedGames ?? 0, current: phase == DayPhase.completed ? null : day?.ordinal),
+            _Pips(
+              completed: day?.completedGames ?? 0,
+              current: phase == DayPhase.completed ? null : day?.ordinal,
+            ),
             const SizedBox(height: 14),
-            Text(scoreLabel, style: const TextStyle(color: GameTokens.textMuted)),
+            Text(
+              scoreLabel,
+              style: const TextStyle(color: GameTokens.textMuted),
+            ),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
@@ -587,7 +635,10 @@ final class _DailyCard extends StatelessWidget {
             if (badge != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(badge!, style: TextStyle(fontWeight: FontWeight.w800, color: tone)),
+                child: Text(
+                  badge!,
+                  style: TextStyle(fontWeight: FontWeight.w800, color: tone),
+                ),
               ),
             const SizedBox(height: 16),
             SizedBox(
@@ -595,7 +646,12 @@ final class _DailyCard extends StatelessWidget {
               child: FilledButton(
                 key: const Key('primary-action'),
                 onPressed: onAction,
-                child: Text(action, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  action,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
@@ -636,7 +692,9 @@ final class _OverviewScreen extends StatelessWidget {
                 ? controller.openResults
                 : controller.resume,
             child: Text(
-              controller.day?.phase == DayPhase.completed ? copy.viewResults : copy.resume,
+              controller.day?.phase == DayPhase.completed
+                  ? copy.viewResults
+                  : copy.resume,
             ),
           ),
         ],
@@ -673,7 +731,10 @@ final class _GameRow extends StatelessWidget {
         child: ListTile(
           leading: CircleAvatar(
             backgroundColor: tone.withValues(alpha: 0.2),
-            child: Text(label, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+            child: Text(
+              label,
+              style: TextStyle(color: tone, fontWeight: FontWeight.w800),
+            ),
           ),
           title: Text(difficulty),
           trailing: Icon(
@@ -719,7 +780,11 @@ final class _PlayScreen extends StatelessWidget {
                       ),
                       Text(
                         day?.label ?? '',
-                        style: TextStyle(color: tone, fontWeight: FontWeight.w800, fontSize: 18),
+                        style: TextStyle(
+                          color: tone,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                        ),
                       ),
                       const Spacer(),
                       Text(
@@ -740,7 +805,12 @@ final class _PlayScreen extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      Expanded(child: _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal)),
+                      Expanded(
+                        child: _Pips(
+                          completed: day?.completedGames ?? 0,
+                          current: day?.ordinal,
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Text(copy.movesLeft(moves)),
                       const SizedBox(width: 8),
@@ -771,7 +841,13 @@ final class _PlayScreen extends StatelessWidget {
               SizedBox(
                 key: const Key('play-feedback'),
                 height: 44,
-                child: Center(child: _PlayFeedback(controller: controller, notice: notice, copy: copy)),
+                child: Center(
+                  child: _PlayFeedback(
+                    controller: controller,
+                    notice: notice,
+                    copy: copy,
+                  ),
+                ),
               ),
               Expanded(
                 child: Padding(
@@ -807,12 +883,14 @@ final class _PlayScreen extends StatelessWidget {
                     listenable: controller.session,
                     builder: (context, _) {
                       final live = controller.session.view;
-                      final locked = !live.acceptsInput ||
+                      final locked =
+                          !live.acceptsInput ||
                           controller.hasPendingCommand ||
                           controller.moveInFlight ||
                           controller.session.authoritativeOutcomeUnknown;
                       return OfferTray(
-                        offers: live.canonicalState?.offers ??
+                        offers:
+                            live.canonicalState?.offers ??
                             const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
                         selectedIndex: live.selectedOfferIndex,
                         enabled: !locked,
@@ -853,14 +931,20 @@ final class _TransitionScreen extends StatelessWidget {
         children: [
           Text(
             day?.label ?? '',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(color: tone, fontWeight: FontWeight.w800),
+            style: Theme.of(context).textTheme.displaySmall
+                ?.copyWith(color: tone, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(copy.finishReason(day?.terminalReason)),
           const SizedBox(height: 16),
           _ScoreHero(label: copy.gameScore, value: day?.gameScore, copy: copy),
           const SizedBox(height: 10),
-          _ScoreHero(label: copy.totalScore, value: day?.seriesScore, copy: copy, compact: true),
+          _ScoreHero(
+            label: copy.totalScore,
+            value: day?.seriesScore,
+            copy: copy,
+            compact: true,
+          ),
           const SizedBox(height: 16),
           _Pips(completed: day?.completedGames ?? 0, current: day?.ordinal),
           if (next != null) ...[
@@ -882,13 +966,20 @@ final class _TransitionScreen extends StatelessWidget {
           if (controller.noticeCode != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Text(copy.forError(controller.noticeCode), style: const TextStyle(color: GameTokens.danger)),
+              child: Text(
+                copy.forError(controller.noticeCode),
+                style: const TextStyle(color: GameTokens.danger),
+              ),
             ),
           const SizedBox(height: 20),
           FilledButton(
             key: const Key('continue-next'),
-            onPressed: controller.hasPendingCommand ? controller.retryUnknown : controller.advance,
-            child: Text(controller.hasPendingCommand ? copy.retrySame : copy.continueNext),
+            onPressed: controller.hasPendingCommand
+                ? controller.retryUnknown
+                : controller.advance,
+            child: Text(
+              controller.hasPendingCommand ? copy.retrySame : copy.continueNext,
+            ),
           ),
         ],
       ),
@@ -915,9 +1006,16 @@ final class _ResultsScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          const Icon(Icons.emoji_events_rounded, color: GameTokens.scoreGlow, size: 36),
+          const Icon(
+            Icons.emoji_events_rounded,
+            color: GameTokens.scoreGlow,
+            size: 36,
+          ),
           const SizedBox(height: 8),
-          Text(copy.verifiedScore, style: const TextStyle(color: GameTokens.textMuted)),
+          Text(
+            copy.verifiedScore,
+            style: const TextStyle(color: GameTokens.textMuted),
+          ),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -931,28 +1029,46 @@ final class _ResultsScreen extends StatelessWidget {
             ),
           ),
           if (!published)
-            Text(copy.resultsPending, style: const TextStyle(color: GameTokens.danger)),
+            Text(
+              copy.resultsPending,
+              style: const TextStyle(color: GameTokens.danger),
+            ),
           if (controller.resultsError != null)
-            Text(copy.forError(controller.resultsError), style: const TextStyle(color: GameTokens.textMuted)),
+            Text(
+              copy.forError(controller.resultsError),
+              style: const TextStyle(color: GameTokens.textMuted),
+            ),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: (onTime ? GameTokens.success : GameTokens.textMuted).withValues(alpha: 0.16),
+                color: (onTime ? GameTokens.success : GameTokens.textMuted)
+                    .withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 child: Text(
                   onTime ? copy.onTime : copy.onTimeMissing,
-                  style: TextStyle(fontWeight: FontWeight.w800, color: onTime ? GameTokens.success : GameTokens.textSecondary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: onTime
+                        ? GameTokens.success
+                        : GameTokens.textSecondary,
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(height: 14),
-          _Pips(completed: published ? 6 : controller.day?.completedGames ?? 0, current: null),
+          _Pips(
+            completed: published ? 6 : controller.day?.completedGames ?? 0,
+            current: null,
+          ),
           const SizedBox(height: 12),
           if (games is List)
             Wrap(
@@ -970,7 +1086,10 @@ final class _ResultsScreen extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           _ScoreLine(label: copy.easy, value: tournamentInt(results['easy'])),
-          _ScoreLine(label: copy.medium, value: tournamentInt(results['medium'])),
+          _ScoreLine(
+            label: copy.medium,
+            value: tournamentInt(results['medium']),
+          ),
           _ScoreLine(label: copy.hard, value: tournamentInt(results['hard'])),
           const SizedBox(height: 18),
           FilledButton(
@@ -996,7 +1115,6 @@ final class _ResultsScreen extends StatelessWidget {
   }
 }
 
-
 final class _RecoveryScreen extends StatelessWidget {
   const _RecoveryScreen({required this.controller});
 
@@ -1014,7 +1132,11 @@ final class _RecoveryScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(copy.appTitle, style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
+                Text(
+                  copy.appTitle,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 16),
                 Text(copy.forError(code), textAlign: TextAlign.center),
                 if (code != null && code.isNotEmpty) ...[
@@ -1028,7 +1150,11 @@ final class _RecoveryScreen extends StatelessWidget {
                 const Spacer(),
                 FilledButton(
                   onPressed: controller.recover,
-                  child: Text(controller.hasPendingCommand ? copy.retrySame : copy.tryAgain),
+                  child: Text(
+                    controller.hasPendingCommand
+                        ? copy.retrySame
+                        : copy.tryAgain,
+                  ),
                 ),
               ],
             ),
@@ -1096,7 +1222,10 @@ final class _Pips extends StatelessWidget {
                 children: [
                   Text(
                     tournamentOrdinalLabels[i] ?? '',
-                    style: const TextStyle(fontSize: 10, color: GameTokens.textMuted),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: GameTokens.textMuted,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Container(
@@ -1121,7 +1250,12 @@ final class _Pips extends StatelessWidget {
 }
 
 final class _ScoreHero extends StatelessWidget {
-  const _ScoreHero({required this.label, required this.value, required this.copy, this.compact = false});
+  const _ScoreHero({
+    required this.label,
+    required this.value,
+    required this.copy,
+    this.compact = false,
+  });
 
   final String label;
   final int? value;
@@ -1140,7 +1274,12 @@ final class _ScoreHero extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Expanded(child: Text(label, style: const TextStyle(color: GameTokens.textSecondary))),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: GameTokens.textSecondary),
+              ),
+            ),
             Text(
               value == null ? '—' : copy.groupedScore(value!),
               style: TextStyle(
@@ -1157,7 +1296,11 @@ final class _ScoreHero extends StatelessWidget {
 }
 
 final class _StageChip extends StatelessWidget {
-  const _StageChip({required this.label, required this.value, required this.copy});
+  const _StageChip({
+    required this.label,
+    required this.value,
+    required this.copy,
+  });
 
   final String label;
   final int? value;
@@ -1179,7 +1322,10 @@ final class _StageChip extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(color: tone, fontWeight: FontWeight.w800)),
+              Text(
+                label,
+                style: TextStyle(color: tone, fontWeight: FontWeight.w800),
+              ),
               Text(
                 value == null ? '—' : copy.groupedScore(value!),
                 style: const TextStyle(fontWeight: FontWeight.w800),

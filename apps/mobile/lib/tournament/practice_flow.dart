@@ -19,10 +19,12 @@ final class PracticeFlow extends StatefulWidget {
     super.key,
     required this.directory,
     required this.haptics,
+    this.playerScope = 'guest',
   });
 
   final Directory directory;
   final TournamentHaptics haptics;
+  final String playerScope;
 
   @override
   State<PracticeFlow> createState() => _PracticeFlowState();
@@ -30,7 +32,10 @@ final class PracticeFlow extends StatefulWidget {
 
 final class _PracticeFlowState extends State<PracticeFlow> {
   final GameSession _session = GameSession();
-  late final PracticeStore _store = PracticeStore(widget.directory);
+  late final PracticeStore _store = PracticeStore(
+    widget.directory,
+    playerScope: widget.playerScope,
+  );
   DifficultyProfile? _profile;
   int? _seed;
   bool _recorded = false;
@@ -58,7 +63,8 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         widget.haptics.accepted();
       }
     }
-    if (view.feedbackKind == MoveFeedbackKind.rejected && _seenFeedback != MoveFeedbackKind.rejected) {
+    if (view.feedbackKind == MoveFeedbackKind.rejected &&
+        _seenFeedback != MoveFeedbackKind.rejected) {
       widget.haptics.rejected();
       GameSfxScope.maybeOf(context)?.play(GameSfxEvent.reject);
     }
@@ -90,7 +96,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     final state = _session.view.canonicalState;
     final profile = _profile;
     final seed = _seed;
-    if (state == null || profile == null || seed == null || state.status != GameStatus.ended) {
+    if (state == null ||
+        profile == null ||
+        seed == null ||
+        state.status != GameStatus.ended) {
       return;
     }
     _recorded = true;
@@ -106,9 +115,14 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         score: state.score,
         terminalReason: state.terminalReason?.wire ?? 'ended',
         completedAt: when,
+        moveCount: state.turnsUsed,
       ),
     );
-    final best = _store.bestScore(profile.wire);
+    final best = _store.bestScore(
+      profile.wire,
+      rulesVersion: state.rulesVersion.id,
+      generatorVersion: GeneratorVersion.gen001V1.id,
+    );
     GameSfxScope.maybeOf(context)?.play(GameSfxEvent.roundEnd);
     widget.haptics.completed();
     if (mounted) setState(() => _deviceBest = best);
@@ -116,7 +130,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
 
   Future<void> _changeDifficulty() async {
     final state = _session.view.canonicalState;
-    final inProgress = state != null && state.turnsUsed > 0 && state.status != GameStatus.ended;
+    final inProgress =
+        state != null &&
+        state.turnsUsed > 0 &&
+        state.status != GameStatus.ended;
     if (inProgress) {
       final copy = TournamentCopy.of(context);
       final leave = await showDialog<bool>(
@@ -125,8 +142,14 @@ final class _PracticeFlowState extends State<PracticeFlow> {
           title: Text(copy.leaveTitle),
           content: Text(copy.leaveBody),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(copy.stay)),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(copy.changeDifficulty)),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(copy.stay),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(copy.changeDifficulty),
+            ),
           ],
         ),
       );
@@ -140,7 +163,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
 
   Future<void> _leave() async {
     final state = _session.view.canonicalState;
-    final inProgress = state != null && state.turnsUsed > 0 && state.status != GameStatus.ended;
+    final inProgress =
+        state != null &&
+        state.turnsUsed > 0 &&
+        state.status != GameStatus.ended;
     if (inProgress) {
       final copy = TournamentCopy.of(context);
       final leave = await showDialog<bool>(
@@ -149,8 +175,14 @@ final class _PracticeFlowState extends State<PracticeFlow> {
           title: Text(copy.leaveTitle),
           content: Text(copy.leaveBody),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(copy.stay)),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(copy.leave)),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(copy.stay),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(copy.leave),
+            ),
           ],
         ),
       );
@@ -215,7 +247,11 @@ final class _PracticeFlowState extends State<PracticeFlow> {
           );
         }
         if (state == null || _profile == null) {
-          return _PracticePicker(copy: copy, onPick: _start, onClose: () => Navigator.pop(context));
+          return _PracticePicker(
+            copy: copy,
+            onPick: _start,
+            onClose: () => Navigator.pop(context),
+          );
         }
         return _PracticePlay(
           copy: copy,
@@ -230,7 +266,11 @@ final class _PracticeFlowState extends State<PracticeFlow> {
 }
 
 final class _PracticePicker extends StatelessWidget {
-  const _PracticePicker({required this.copy, required this.onPick, required this.onClose});
+  const _PracticePicker({
+    required this.copy,
+    required this.onPick,
+    required this.onClose,
+  });
 
   final TournamentCopy copy;
   final void Function(DifficultyProfile profile) onPick;
@@ -252,11 +292,17 @@ final class _PracticePicker extends StatelessWidget {
                   icon: const Icon(Icons.arrow_back),
                 ),
               ),
-              Text(copy.practiceTitle, style: Theme.of(context).textTheme.headlineMedium),
+              Text(
+                copy.practiceTitle,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
               const SizedBox(height: 8),
               Text(copy.practiceBlurb),
               const SizedBox(height: 18),
-              Text(copy.chooseDifficulty, style: const TextStyle(fontWeight: FontWeight.w800)),
+              Text(
+                copy.chooseDifficulty,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
               const SizedBox(height: 12),
               _DifficultyButton(
                 keyName: 'practice-easy',
@@ -350,12 +396,18 @@ final class _PracticePlay extends StatelessWidget {
                       onPressed: () => onLeave(),
                       icon: const Icon(Icons.arrow_back),
                     ),
-                    Text(copy.practiceTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
+                    Text(
+                      copy.practiceTitle,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
                     const Spacer(),
                     Text(
                       '${state.score}',
                       key: const Key('practice-score'),
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 22,
+                      ),
                     ),
                     const SizedBox(width: 12),
                   ],
@@ -387,7 +439,11 @@ final class _PracticePlay extends StatelessWidget {
                           key: const Key('play-board'),
                           width: side,
                           height: side,
-                          child: AccessibleBoard(session: session, view: session.view, showPlacementPreview: true),
+                          child: AccessibleBoard(
+                            session: session,
+                            view: session.view,
+                            showPlacementPreview: true,
+                          ),
                         ),
                       );
                     },
@@ -452,17 +508,29 @@ final class PracticeResultView extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             children: [
-              Text(copy.practiceDone, style: Theme.of(context).textTheme.headlineMedium),
+              Text(
+                copy.practiceDone,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
               const SizedBox(height: 6),
               Text(
-                '${copy.difficultyOf(profile == DifficultyProfile.easy ? 'E1' : profile == DifficultyProfile.medium ? 'M1' : 'H1')} · ${copy.budgetLine(state.boardSize, state.moveLimit)}',
+                '${copy.difficultyOf(profile == DifficultyProfile.easy
+                    ? 'E1'
+                    : profile == DifficultyProfile.medium
+                    ? 'M1'
+                    : 'H1')} · ${copy.budgetLine(state.boardSize, state.moveLimit)}',
                 style: TextStyle(color: tone, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               Text(
                 copy.groupedScore(state.score),
                 key: const Key('practice-result-score'),
-                style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w800, color: GameTokens.scoreGlow, height: 1),
+                style: const TextStyle(
+                  fontSize: 64,
+                  fontWeight: FontWeight.w800,
+                  color: GameTokens.scoreGlow,
+                  height: 1,
+                ),
               ),
               const SizedBox(height: 8),
               Text(copy.finishReason(state.terminalReason?.wire)),
@@ -476,14 +544,32 @@ final class PracticeResultView extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              Text(copy.practiceLocal, style: const TextStyle(color: GameTokens.textSecondary)),
+              Text(
+                copy.practiceLocal,
+                style: const TextStyle(color: GameTokens.textSecondary),
+              ),
               const SizedBox(height: 22),
-              FilledButton(key: const Key('practice-new'), onPressed: onNew, child: Text(copy.newPuzzle)),
+              FilledButton(
+                key: const Key('practice-new'),
+                onPressed: onNew,
+                child: Text(copy.newPuzzle),
+              ),
               const SizedBox(height: 10),
-              OutlinedButton(key: const Key('practice-replay'), onPressed: onReplay, child: Text(copy.samePuzzle)),
+              OutlinedButton(
+                key: const Key('practice-replay'),
+                onPressed: onReplay,
+                child: Text(copy.samePuzzle),
+              ),
               const SizedBox(height: 4),
-              TextButton(onPressed: onDifficulty, child: Text(copy.changeDifficulty)),
-              TextButton(key: const Key('practice-home'), onPressed: onHome, child: Text(copy.homeAction)),
+              TextButton(
+                onPressed: onDifficulty,
+                child: Text(copy.changeDifficulty),
+              ),
+              TextButton(
+                key: const Key('practice-home'),
+                onPressed: onHome,
+                child: Text(copy.homeAction),
+              ),
             ],
           ),
         ),
