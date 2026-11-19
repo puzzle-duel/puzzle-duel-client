@@ -19,6 +19,18 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 /// Local features vs authoritative Tournament refresh.
 enum TournamentSyncState { idle, syncing, ready, degraded }
 
+/// Why a Tournament refresh was requested. Banner UX depends on this origin.
+enum TournamentRefreshOrigin {
+  /// Automatic launch refresh: silent on success; red banner on failure.
+  startup,
+
+  /// Explicit Home pull: blue loading/completed; red on failure.
+  pullToRefresh,
+
+  /// Other non-user refreshes: silent success; user-relevant errors only.
+  background,
+}
+
 /// Local UAT identity. The bearer is issued by the UAT server, not by the app.
 final class UatConfig {
   const UatConfig({
@@ -190,12 +202,16 @@ final class TournamentController extends ChangeNotifier {
   String? _pendingKey;
   int _tournamentEpoch = 0;
   Future<void>? _refreshInFlight;
+  TournamentRefreshOrigin _refreshOrigin = TournamentRefreshOrigin.background;
 
   bool get hasPendingCommand => _pending != null;
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
-  /// Confirmed offline/timeout preventing Tournament refresh (not auth errors).
+  /// Origin of the current or just-finished Tournament refresh (banner policy).
+  TournamentRefreshOrigin get tournamentRefreshOrigin => _refreshOrigin;
+
+  /// Confirmed offline/timeout preventing Tournament refresh (not auth/writer).
   bool get tournamentConnectivityLost {
     final code = tournamentNoticeCode;
     return code == 'OFFLINE' || code == 'TIMEOUT';
@@ -203,6 +219,10 @@ final class TournamentController extends ChangeNotifier {
 
   /// True while a ranked refresh Future is shared (pull-to-refresh dedupe).
   bool get tournamentRefreshInFlight => _refreshInFlight != null;
+
+  /// Info toasts only for explicit Home pull-to-refresh.
+  bool get tournamentInfoBannersEnabled =>
+      _refreshOrigin == TournamentRefreshOrigin.pullToRefresh;
 
   /// The exact command waiting for reconciliation. Retries send this object.
   Object? get pendingCommand => _pending;
@@ -220,9 +240,23 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Background ranked refresh. Failures stay in the Tournament area.
-  Future<void> refreshTournament() {
-    return _refreshInFlight ??= _refreshTournamentBody().whenComplete(() {
+  /// Ranked Home refresh. Failures stay in the Tournament area.
+  ///
+  /// Concurrent callers join one in-flight Future. A pull that joins startup
+  /// upgrades [_refreshOrigin] so the user still sees pull feedback.
+  Future<void> refreshTournament({
+    TournamentRefreshOrigin origin = TournamentRefreshOrigin.background,
+  }) {
+    if (_refreshInFlight != null) {
+      if (origin == TournamentRefreshOrigin.pullToRefresh &&
+          _refreshOrigin != TournamentRefreshOrigin.pullToRefresh) {
+        _refreshOrigin = TournamentRefreshOrigin.pullToRefresh;
+        notifyListeners();
+      }
+      return _refreshInFlight!;
+    }
+    _refreshOrigin = origin;
+    return _refreshInFlight = _refreshTournamentBody().whenComplete(() {
       _refreshInFlight = null;
     });
   }
@@ -250,7 +284,7 @@ final class TournamentController extends ChangeNotifier {
   /// Compatibility entry used by older tests: local ready then ranked refresh.
   Future<void> start() async {
     await beginLocal();
-    await refreshTournament();
+    await refreshTournament(origin: TournamentRefreshOrigin.startup);
   }
 
   /// Reads today's series. Opening Home after this does not claim again.
@@ -296,7 +330,7 @@ final class TournamentController extends ChangeNotifier {
     route = const TournamentRoute();
     notifyListeners();
     if (!tournamentReady && tournamentSync != TournamentSyncState.syncing) {
-      await refreshTournament();
+      await refreshTournament(origin: TournamentRefreshOrigin.background);
     }
   }
 
@@ -380,7 +414,7 @@ final class TournamentController extends ChangeNotifier {
     tournamentNoticeCode = null;
     route = const TournamentRoute();
     notifyListeners();
-    await refreshTournament();
+    await refreshTournament(origin: TournamentRefreshOrigin.background);
   }
 
   Future<void> advance() async {
@@ -488,8 +522,21 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
       sfx.play(GameSfxEvent.reject);
-      if (response.error == 'WRITER_NOT_AUTHORIZED' || response.status == 401) {
-        _fail(response.status == 401 ? 'UNAUTHENTICATED' : response.error);
+      if (response.status == 401) {
+        _fail('UNAUTHENTICATED', degradedOnFailure: localReady);
+        _haptic((feel) => feel.rejected());
+        return;
+      }
+      if (response.error == 'WRITER_NOT_AUTHORIZED') {
+        // Soft, non-network notice: do not auto-retry or invent scores.
+        _pending = null;
+        _pendingKey = null;
+        session.clearAuthoritativeUnknown();
+        noticeCode = 'WRITER_NOT_AUTHORIZED';
+        errorCode = null;
+        if (route.place == TournamentPlace.playing) {
+          session.showServerRejection('WRITER_NOT_AUTHORIZED');
+        }
         _haptic((feel) => feel.rejected());
         return;
       }

@@ -35,19 +35,38 @@ void main() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
     final gate = Completer<void>();
+    var allowRefresh = false;
     final api = ScriptedUatApi((method, path, body) async {
-      await gate.future;
+      if (!allowRefresh) return const UatHttpResult(0, {'error': 'OFFLINE'});
+      if (path.endsWith('/session') && method == 'POST') {
+        await gate.future;
+      }
       return _ok(method, path);
     });
     await _pumpHome(tester, api, directory);
-    gate.complete();
-    await _waitFor(tester, find.text('Updating tournament info…'));
+    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump();
+    allowRefresh = true;
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    final pending = refresh.onRefresh();
+    await tester.pump();
     expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
     expect(find.byKey(const Key('tournament-status-success')), findsNothing);
     expect(_bannerAccent(tester), GameTokens.notifyInfo);
 
-    await _waitFor(tester, find.text('Tournament info updated.'));
+    gate.complete();
+    await pending;
+    await tester.pump();
     expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tournament-status')),
+        matching: find.text('Tournament info updated.'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('tournament-status-success')), findsNothing);
     expect(_bannerAccent(tester), GameTokens.notifyInfo);
   });
@@ -188,14 +207,24 @@ void main() {
     expect(find.byKey(const Key('home-refresh')), findsOneWidget);
     expect(sessions, 1);
     // First boot refresh still in-flight; extra pulls must join it.
-    await _pullToRefresh(tester);
-    await _pullToRefresh(tester);
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    final a = refresh.onRefresh();
+    final b = refresh.onRefresh();
+    await tester.pump();
+    expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
     expect(sessions, 1);
     gate.complete();
-    for (var i = 0; i < 80; i++) {
-      if (find.text('Tournament info updated.').evaluate().isNotEmpty) break;
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await Future.wait([a, b]);
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tournament-status')),
+        matching: find.text('Tournament info updated.'),
+      ),
+      findsOneWidget,
+    );
     expect(claims, 1);
     expect(find.byKey(const Key('practice')), findsOneWidget);
   });
@@ -309,13 +338,11 @@ UatHttpResult _ok(String method, String path, {int seriesScore = 0}) {
 }
 
 Future<void> _pullToRefresh(WidgetTester tester) async {
-  await tester.fling(
-    find.byKey(const Key('home-scroll')),
-    const Offset(0, 400),
-    1000,
+  final refresh = tester.widget<RefreshIndicator>(
+    find.byKey(const Key('home-refresh')),
   );
+  await refresh.onRefresh();
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 100));
 }
 
 Future<void> _waitFor(WidgetTester tester, Finder finder) async {

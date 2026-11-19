@@ -34,12 +34,23 @@ void main() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
     final gate = Completer<void>();
+    var allowRefresh = false;
     final api = ScriptedUatApi((method, path, body) async {
-      await gate.future;
+      if (!allowRefresh) return const UatHttpResult(0, {'error': 'OFFLINE'});
+      if (path.endsWith('/session') && method == 'POST') {
+        await gate.future;
+      }
       return _ok(method, path);
     });
     await _pumpHome(tester, api, directory);
-    await _waitFor(tester, find.text('Updating tournament info…'));
+    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump();
+    allowRefresh = true;
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    final pending = refresh.onRefresh();
+    await tester.pump();
     expect(find.byKey(const Key('tournament-status-info')), findsOneWidget);
     final fill = _bannerFill(tester);
     expect(fill.a, greaterThanOrEqualTo(0.90));
@@ -47,10 +58,9 @@ void main() {
     expect(_bannerAccent(tester), GameTokens.notifyInfo);
     final titleBefore = tester.getTopLeft(find.byKey(const Key('home-title')));
     gate.complete();
-    for (var i = 0; i < 40; i++) {
-      if (find.text('Tournament info updated.').evaluate().isNotEmpty) break;
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await pending;
+    await tester.pump();
+    expect(find.text('Tournament info updated.'), findsOneWidget);
     expect(tester.getTopLeft(find.byKey(const Key('home-title'))), titleBefore);
   });
 

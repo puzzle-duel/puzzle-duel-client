@@ -108,7 +108,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
       }
       setState(() => _controller = controller);
       // Ranked refresh never gates Practice / Profile entry.
-      unawaited(controller.refreshTournament());
+      // Startup: silent info banners; failures still surface as red/offline.
+      unawaited(
+        controller.refreshTournament(origin: TournamentRefreshOrigin.startup),
+      );
       // Audio warm-up must not delay first tap.
       unawaited(_sfx.prepare());
     } catch (error) {
@@ -456,7 +459,9 @@ final class _HomeScreen extends StatelessWidget {
                 color: GameTokens.accent,
                 backgroundColor: GameTokens.surfaceHigh,
                 displacement: 36,
-                onRefresh: controller.refreshTournament,
+                onRefresh: () => controller.refreshTournament(
+                  origin: TournamentRefreshOrigin.pullToRefresh,
+                ),
                 child: ListView(
                   key: const Key('home-scroll'),
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -535,6 +540,7 @@ final class _HomeScreen extends StatelessWidget {
                     copy: copy,
                     notice: notice,
                     syncing: syncing,
+                    infoBanners: controller.tournamentInfoBannersEnabled,
                   ),
                 ),
               ),
@@ -555,12 +561,16 @@ final class _TournamentStatusHost extends StatefulWidget {
     required this.copy,
     required this.notice,
     required this.syncing,
+    required this.infoBanners,
   });
 
   final TournamentController controller;
   final TournamentCopy copy;
   final String? notice;
   final bool syncing;
+
+  /// When false (startup/background), suppress blue info toasts.
+  final bool infoBanners;
 
   @override
   State<_TournamentStatusHost> createState() => _TournamentStatusHostState();
@@ -684,6 +694,7 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
   void _apply({required bool fromSyncEdge}) {
     final reduceMotion = _reduceMotion;
     final notice = widget.notice;
+    final infoOk = widget.infoBanners;
     _NotifyKind? nextKind;
     String? nextText;
 
@@ -692,7 +703,7 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
       _dismissedSignature = null;
     }
 
-    if (widget.syncing) {
+    if (widget.syncing && infoOk) {
       nextKind = _NotifyKind.info;
       nextText = widget.copy.tournamentSyncing;
     } else if (notice == 'OFFLINE') {
@@ -701,14 +712,24 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     } else if (notice == 'TIMEOUT') {
       nextKind = _NotifyKind.error;
       nextText = widget.copy.timedOut;
-    } else if (notice != null) {
-      // Auth and other failures: transient error (not wifi/offline icon).
+    } else if (notice == 'UNAUTHENTICATED' ||
+        notice == 'WRITER_NOT_AUTHORIZED') {
+      // Auth/writer: red notice, never treat as wifi outage.
       nextKind = _NotifyKind.error;
       nextText = widget.copy.forError(notice);
-    } else if (fromSyncEdge && widget.controller.tournamentReady) {
-      // Tournament update completion stays info (blue), not success green.
+    } else if (notice != null) {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.forError(notice);
+    } else if (infoOk &&
+        fromSyncEdge &&
+        widget.controller.tournamentReady) {
+      // Pull-to-refresh completion stays info (blue), not success green.
       nextKind = _NotifyKind.info;
       nextText = widget.copy.tournamentRefreshSuccess;
+    } else if (widget.syncing && !infoOk) {
+      // Silent startup/background syncing: clear any leftover info toast.
+      nextKind = null;
+      nextText = null;
     }
 
     if (nextKind == null || nextText == null) {
