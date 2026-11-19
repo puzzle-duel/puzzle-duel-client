@@ -548,11 +548,28 @@ final class TournamentController extends ChangeNotifier {
             leaderboardReturn: route.leaderboardReturn ?? TournamentPlace.home,
           )
         : route.open(weekly ? TournamentPlace.weekly : TournamentPlace.daily);
+    // Commit tab/place before any await so the first painted frame matches
+    // the requested board (Home → Weekly must not flash Daily).
+    final switching = route.place != opened.place;
+    route = opened;
+    if (switching || fromHome) {
+      leaderboard = const {};
+      nextCursor = null;
+      weeklyFinal = false;
+    }
+    busy = true;
+    errorCode = null;
+    notifyListeners();
+
     if (weekly && weeks.isEmpty) {
       final listed = await api.get('/v1/tournament/leaderboards/weeks');
-      if (!_accepted(listed, const {200}, degradedOnFailure: true)) return;
+      if (!_accepted(listed, const {200}, degradedOnFailure: true)) {
+        busy = false;
+        notifyListeners();
+        return;
+      }
       weeks = [
-        for (final item in (listed.map['weeks'] as List<Object?>? ?? const []))
+        for (final item in (listed.map['weeks'] as List? ?? const []))
           item.toString(),
       ];
       weekStart ??= weeks.isEmpty ? null : weeks.first;
@@ -563,20 +580,22 @@ final class TournamentController extends ChangeNotifier {
     if (weekly && (selectedWeek == null || selectedWeek.isEmpty)) {
       leaderboard = const {'rows': []};
       weeklyFinal = false;
-      route = opened;
-      errorCode = null;
+      busy = false;
       notifyListeners();
       return;
     }
     final path = _leaderboardPath(weekly: weekly, week: selectedWeek);
     final response = await api.get(path);
-    if (!_accepted(response, const {200}, degradedOnFailure: true)) return;
+    if (!_accepted(response, const {200}, degradedOnFailure: true)) {
+      busy = false;
+      notifyListeners();
+      return;
+    }
     leaderboard = response.map;
     nextCursor = _cursor(response.map['nextCursor']);
     weeklyFinal = response.map['state'] == 'FINAL';
-    route = opened;
-    errorCode = null;
     tournamentNoticeCode = null;
+    busy = false;
     notifyListeners();
   }
 

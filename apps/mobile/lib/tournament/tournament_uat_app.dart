@@ -773,6 +773,11 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     final kind = _kind;
     if (text == null || kind == null) return const SizedBox.shrink();
     final accent = _accent;
+    // Near-opaque tinted navy so Home header/icons cannot read through.
+    final fill = Color.alphaBlend(
+      accent.withValues(alpha: 0.42),
+      GameTokens.surface,
+    ).withValues(alpha: 0.94);
     return SlideTransition(
       position: _slide,
       child: FadeTransition(
@@ -785,9 +790,9 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
           child: DecoratedBox(
             key: const Key('tournament-status'),
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.16),
+              color: fill,
               borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-              border: Border.all(color: accent.withValues(alpha: 0.55)),
+              border: Border.all(color: accent.withValues(alpha: 0.72)),
             ),
             child: Semantics(
               liveRegion: true,
@@ -798,9 +803,9 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
                 child: Text(
                   text,
                   key: const Key('tournament-status-text'),
-                  style: TextStyle(
-                    color: GameTokens.textPrimary.withValues(alpha: 0.95),
-                    fontWeight: FontWeight.w600,
+                  style: const TextStyle(
+                    color: GameTokens.textPrimary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
