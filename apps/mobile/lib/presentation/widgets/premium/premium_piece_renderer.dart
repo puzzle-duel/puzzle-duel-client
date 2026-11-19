@@ -451,6 +451,12 @@ final class PremiumPieceRenderer extends CustomPainter {
 
   // —— L11 recessed chevron ——
   void _paintChevron(Canvas canvas, Offset c, double r, double side) {
+    if (shape == Shape.triangle) {
+      _paintTriangleChevron(canvas, c, r, side);
+      return;
+    }
+
+    // Circle / diamond — keep the established cavity treatment byte-stable.
     final origin = ProtoShapeGeometry.glyphOrigin(c, r, shape);
     final stroke = math.max(3.2, side * 0.078) * tier.chevronScale;
     final glyph = ProtoShapeGeometry.chevron(
@@ -462,14 +468,11 @@ final class PremiumPieceRenderer extends CustomPainter {
     );
     final cavity = ProtoMaterialPalette.chevron(shape);
 
-    // Lower occlusion.
     canvas.drawPath(
       glyph.filled.shift(Offset(side * 0.01, side * 0.014)),
       Paint()..color = Colors.black.withValues(alpha: 0.45),
     );
-    // Deep cavity fill.
     canvas.drawPath(glyph.filled, Paint()..color = cavity);
-    // Inner wall shade.
     canvas.save();
     canvas.clipPath(glyph.filled);
     canvas.drawPath(
@@ -477,7 +480,6 @@ final class PremiumPieceRenderer extends CustomPainter {
       Paint()..color = Colors.black.withValues(alpha: 0.35),
     );
     canvas.restore();
-    // Light-facing rim lip.
     canvas.drawPath(
       glyph.spine.shift(Offset(-side * 0.008, -side * 0.01)),
       Paint()
@@ -487,7 +489,6 @@ final class PremiumPieceRenderer extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..color = ProtoMaterialPalette.rimLip,
     );
-    // Spine reinforcement.
     canvas.drawPath(
       glyph.spine,
       Paint()
@@ -497,6 +498,69 @@ final class PremiumPieceRenderer extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..color = cavity,
     );
+  }
+
+  /// Triangle-only optical layout; circle/diamond path above is untouched.
+  void _paintTriangleChevron(Canvas canvas, Offset c, double r, double side) {
+    final faceInset = 1.0 - tier.bevelFrac * 1.35;
+    final face = ProtoShapeGeometry.facePath(c, r, shape, faceInset);
+    final stroke =
+        math.max(3.4, side * 0.086) *
+        tier.chevronScale *
+        (tier == ProtoOpticalTier.board ? 1.06 : 1.0);
+    final glyph = ProtoShapeGeometry.triangleChevron(
+      bodyCenter: c,
+      bodyRadius: r,
+      direction: direction,
+      stroke: stroke,
+      scale: tier.chevronScale * (tier == ProtoOpticalTier.board ? 0.92 : 0.96),
+      tier: tier,
+    );
+    final cavity = ProtoMaterialPalette.chevron(Shape.triangle);
+
+    canvas.save();
+    canvas.clipPath(face);
+
+    // Lower-right occlusion.
+    canvas.drawPath(
+      glyph.filled.shift(Offset(side * 0.011, side * 0.015)),
+      Paint()..color = Colors.black.withValues(alpha: 0.52),
+    );
+    // Deep cavity.
+    canvas.drawPath(glyph.filled, Paint()..color = cavity);
+    // Inner bevel + UL cavity highlight.
+    canvas.save();
+    canvas.clipPath(glyph.filled);
+    canvas.drawPath(
+      glyph.filled.shift(Offset(side * 0.008, side * 0.01)),
+      Paint()..color = Colors.black.withValues(alpha: 0.40),
+    );
+    canvas.drawPath(
+      glyph.filled.shift(Offset(-side * 0.006, -side * 0.008)),
+      Paint()..color = Colors.white.withValues(alpha: 0.12),
+    );
+    canvas.restore();
+    // Upper-left rim lip.
+    canvas.drawPath(
+      glyph.spine.shift(Offset(-side * 0.009, -side * 0.011)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.2, stroke * 0.30)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = const Color(0xAAFFFFFF),
+    );
+    canvas.drawPath(
+      glyph.spine,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke * 0.36
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = cavity,
+    );
+
+    canvas.restore();
   }
 
   @override

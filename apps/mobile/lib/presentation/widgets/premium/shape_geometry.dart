@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium/optical_tier.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Pure geometry helpers for the PZD-47 prototype renderer.
@@ -39,17 +40,50 @@ abstract final class ProtoShapeGeometry {
     bottomLeft: Offset(c.dx - r * 0.95, c.dy + r * 0.82),
   );
 
-  /// Optical balance point (triangle uses centroid).
+  /// Optical balance point (triangle uses face centroid of the usable inset).
   static Offset glyphOrigin(Offset c, double r, Shape shape) => switch (shape) {
-    Shape.triangle => () {
-      final v = triangleVertices(c, r);
-      return Offset(
-        (v.apex.dx + v.bottomRight.dx + v.bottomLeft.dx) / 3,
-        (v.apex.dy + v.bottomRight.dy + v.bottomLeft.dy) / 3,
-      );
-    }(),
+    Shape.triangle => triangleCentroid(c, r),
     Shape.circle || Shape.diamond => c,
   };
+
+  /// Centroid of the upright triangle silhouette at radius [r].
+  static Offset triangleCentroid(Offset c, double r) {
+    final v = triangleVertices(c, r);
+    return Offset(
+      (v.apex.dx + v.bottomRight.dx + v.bottomLeft.dx) / 3,
+      (v.apex.dy + v.bottomRight.dy + v.bottomLeft.dy) / 3,
+    );
+  }
+
+  /// Inset usable face for chevron placement (inside bevel / extrusion).
+  static double triangleSafeFaceFrac(ProtoOpticalTier? tier) => switch (tier) {
+    ProtoOpticalTier.board => 0.70,
+    ProtoOpticalTier.tray => 0.72,
+    ProtoOpticalTier.hero || null => 0.74,
+  };
+
+  /// Direction-specific optical origin inside the upright triangle face.
+  ///
+  /// Body silhouette stays apex-up; only the chevron rotates. Offsets keep the
+  /// glyph inside the safe face without a single global vertical nudge.
+  static Offset triangleChevronOrigin(
+    Offset c,
+    double r, {
+    required Direction direction,
+    ProtoOpticalTier? tier,
+  }) {
+    final faceR = r * triangleSafeFaceFrac(tier);
+    final base = triangleCentroid(c, faceR);
+    // Optical nudges as fractions of face radius — tuned per direction so
+    // tip/wings clear the bevel without looking off-center.
+    final nudge = switch (direction) {
+      Direction.up => Offset(0, faceR * 0.10),
+      Direction.down => Offset(0, -faceR * 0.06),
+      Direction.left => Offset(faceR * 0.05, faceR * 0.04),
+      Direction.right => Offset(-faceR * 0.05, faceR * 0.04),
+    };
+    return base + nudge;
+  }
 
   static Path roundedPolygon(List<Offset> points, double cornerRadius) {
     final path = Path();
@@ -78,12 +112,17 @@ abstract final class ProtoShapeGeometry {
   }
 
   /// Filled chevron cavity (independent of body rotation).
+  ///
+  /// [compact] tightens tip/wing proportions (triangle face). [armThick]
+  /// multiplies cavity half-width for thicker recessed arms.
   static ({Path filled, Path spine}) chevron({
     required Offset origin,
     required double radius,
     required Direction direction,
     required double stroke,
     required double scale,
+    bool compact = false,
+    double armThick = 1.0,
   }) {
     final unit = switch (direction) {
       Direction.up => const Offset(0, -1),
@@ -91,25 +130,51 @@ abstract final class ProtoShapeGeometry {
       Direction.down => const Offset(0, 1),
       Direction.left => const Offset(-1, 0),
     };
-    final tipLen = radius * 0.50 * scale;
-    final wingDepth = tipLen * 0.80;
-    final wingSpread = tipLen * 0.58;
+    final tipLen = radius * (compact ? 0.40 : 0.50) * scale;
+    final wingDepth = tipLen * (compact ? 0.72 : 0.80);
+    final wingSpread = tipLen * (compact ? 0.50 : 0.58);
     final tip = origin + unit * tipLen;
     final back = tip - unit * wingDepth;
     final perp = Offset(-unit.dy, unit.dx);
     final left = back + perp * wingSpread;
     final right = back - perp * wingSpread;
 
-    // Inflate V into a thick filled cavity via stroke outline approximation.
     final spine = Path()
       ..moveTo(left.dx, left.dy)
       ..lineTo(tip.dx, tip.dy)
       ..lineTo(right.dx, right.dy);
 
-    final half = stroke * 0.55;
+    final half = stroke * 0.55 * armThick;
     final filled = _strokeToFilled(left, tip, right, half);
 
     return (filled: filled, spine: spine);
+  }
+
+  /// Triangle-specific compact chevron inside the safe face.
+  static ({Path filled, Path spine}) triangleChevron({
+    required Offset bodyCenter,
+    required double bodyRadius,
+    required Direction direction,
+    required double stroke,
+    required double scale,
+    ProtoOpticalTier? tier,
+  }) {
+    final origin = triangleChevronOrigin(
+      bodyCenter,
+      bodyRadius,
+      direction: direction,
+      tier: tier,
+    );
+    final faceR = bodyRadius * triangleSafeFaceFrac(tier);
+    return chevron(
+      origin: origin,
+      radius: faceR,
+      direction: direction,
+      stroke: stroke,
+      scale: scale,
+      compact: true,
+      armThick: 1.18,
+    );
   }
 
   static Path _strokeToFilled(Offset left, Offset tip, Offset right, double half) {

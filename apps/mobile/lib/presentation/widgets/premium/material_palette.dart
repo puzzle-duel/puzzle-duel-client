@@ -49,7 +49,8 @@ abstract final class ProtoMaterialPalette {
   static const Color triangleBevelLo = Color(0xFF8A3E08);
   static const Color triangleExtrusion = Color(0xFF6A2E06);
   static const Color triangleShade = Color(0xFF4A1E04);
-  static const Color triangleChevron = Color(0xFF451500);
+  /// Dark cavity (parity with circle/diamond depth; avoid muddy mid-brown).
+  static const Color triangleChevron = Color(0xFF140A02);
   static const Color triangleBounce = Color(0x66E8B020);
 
   static const Color rimLip = Color(0x88FFFFFF);

@@ -1,1 +1,4 @@
 .dart-sdk/
+
+apps/mobile/test/visual/failures/
+apps/mobile/test/presentation/failures/
