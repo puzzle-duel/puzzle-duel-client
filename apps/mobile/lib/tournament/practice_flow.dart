@@ -59,6 +59,10 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       GameSfxScope.maybeOf(context)?.play(GameSfxEvent.reject);
     }
     _seenFeedback = view.feedbackKind;
+    // Ended rounds need a State rebuild outside the play ListenableBuilder.
+    if (view.canonicalState?.status == GameStatus.ended) {
+      setState(() {});
+    }
   }
 
   @override
@@ -202,61 +206,60 @@ final class _PracticeFlowState extends State<PracticeFlow> {
   @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
+    final state = _session.view.canonicalState;
+    if (_review && _finished != null && _profile != null) {
+      return PracticeResultView(
+        copy: copy,
+        state: _finished!,
+        profile: _profile!,
+        onReplay: () => _start(_profile!, seed: _seed, replay: true),
+        onNew: () => _start(_profile!),
+        onDifficulty: () => setState(() {
+          _review = false;
+          _profile = null;
+          _seed = null;
+        }),
+        onHome: () => Navigator.pop(context),
+        deviceBest: _deviceBest,
+      );
+    }
+    if (state != null && state.status == GameStatus.ended) {
+      if (!_recorded) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_maybeRecord());
+        });
+      }
+      return PracticeResultView(
+        copy: copy,
+        state: state,
+        profile: _profile!,
+        onReplay: () => _start(_profile!, seed: _seed, replay: true),
+        onNew: () => _start(_profile!),
+        onDifficulty: () => setState(() {
+          _profile = null;
+          _seed = null;
+        }),
+        onHome: () => Navigator.pop(context),
+        deviceBest: _deviceBest,
+      );
+    }
+    if (state == null || _profile == null) {
+      return _PracticePicker(
+        copy: copy,
+        onPick: _start,
+        onClose: () => Navigator.pop(context),
+      );
+    }
+    // Only the live board listens to session ticks — picker/results stay static.
     return ListenableBuilder(
       listenable: _session,
-      builder: (context, _) {
-        final state = _session.view.canonicalState;
-        if (_review && _finished != null && _profile != null) {
-          return PracticeResultView(
-            copy: copy,
-            state: _finished!,
-            profile: _profile!,
-            onReplay: () => _start(_profile!, seed: _seed, replay: true),
-            onNew: () => _start(_profile!),
-            onDifficulty: () => setState(() {
-              _review = false;
-              _profile = null;
-              _seed = null;
-            }),
-            onHome: () => Navigator.pop(context),
-            deviceBest: _deviceBest,
-          );
-        }
-        if (state != null && state.status == GameStatus.ended) {
-          if (!_recorded) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) unawaited(_maybeRecord());
-            });
-          }
-          return PracticeResultView(
-            copy: copy,
-            state: state,
-            profile: _profile!,
-            onReplay: () => _start(_profile!, seed: _seed, replay: true),
-            onNew: () => _start(_profile!),
-            onDifficulty: () => setState(() {
-              _profile = null;
-              _seed = null;
-            }),
-            onHome: () => Navigator.pop(context),
-            deviceBest: _deviceBest,
-          );
-        }
-        if (state == null || _profile == null) {
-          return _PracticePicker(
-            copy: copy,
-            onPick: _start,
-            onClose: () => Navigator.pop(context),
-          );
-        }
-        return _PracticePlay(
-          copy: copy,
-          session: _session,
-          haptics: widget.controller.haptics,
-          onLeave: _leave,
-          onChangeDifficulty: _changeDifficulty,
-        );
-      },
+      builder: (context, _) => _PracticePlay(
+        copy: copy,
+        session: _session,
+        haptics: widget.controller.haptics,
+        onLeave: _leave,
+        onChangeDifficulty: _changeDifficulty,
+      ),
     );
   }
 }

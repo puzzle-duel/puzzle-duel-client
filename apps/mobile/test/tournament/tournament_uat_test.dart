@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
@@ -39,11 +40,17 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump();
+    for (var i = 0; i < 40; i++) {
+      if (find.byKey(const Key('practice')).evaluate().isNotEmpty) break;
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    // Expired bearer must not block Practice behind a global recovery shell.
+    expect(find.byKey(const Key('practice')), findsOneWidget);
+    expect(find.byKey(const Key('home-title')), findsOneWidget);
+    expect(find.byKey(const Key('tournament-status')), findsOneWidget);
     expect(
       find.text('Unauthorized. Issue a new UAT bearer and relaunch.'),
       findsOneWidget,
     );
-    expect(find.textContaining('score'), findsNothing);
   });
 }

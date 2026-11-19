@@ -2,10 +2,13 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late Directory directory;
   late PracticeIdentityStore identity;
 
@@ -20,7 +23,7 @@ void main() {
   });
 
   PracticeStore store() => PracticeStore(
-    directory: directory,
+    store: DirectoryKvStore(directory),
     scope: identity.activeScope,
     identity: identity,
   );

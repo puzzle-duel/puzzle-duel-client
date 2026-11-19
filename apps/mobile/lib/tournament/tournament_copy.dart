@@ -277,6 +277,16 @@ final class TournamentCopy {
   String get finalLabel => pick('Final', 'Kesinleşti');
   String get tryAgain => pick('Try again', 'Yeniden dene');
   String get loading => pick('Loading the tournament…', 'Turnuva yükleniyor…');
+  String get tournamentSyncing =>
+      pick('Updating tournament…', 'Turnuva güncelleniyor…');
+  String get cachedTournamentHeadline => pick(
+    'Last known tournament (cached)',
+    'Son bilinen turnuva (önbellek)',
+  );
+  String get cachedTournamentBody => pick(
+    'Showing a saved summary. It may be outdated until the server responds.',
+    'Kayıtlı özet gösteriliyor. Sunucu yanıtlayana kadar eski olabilir.',
+  );
   String get boardLoading =>
       pick('Loading verified scores…', 'Doğrulanmış puanlar yükleniyor…');
   String get reference => pick('Reference', 'Referans');

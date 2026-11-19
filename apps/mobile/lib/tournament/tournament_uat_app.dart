@@ -99,13 +99,17 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
                   .reduceMotion,
             ),
       );
-      await controller.start();
+      await controller.beginLocal();
       if (!mounted) {
         controller.session.dispose();
         controller.dispose();
         return;
       }
       setState(() => _controller = controller);
+      // Ranked refresh never gates Practice / Profile entry.
+      unawaited(controller.refreshTournament());
+      // Audio warm-up must not delay first tap.
+      unawaited(_sfx.prepare());
     } catch (error) {
       if (mounted) setState(() => _bootError = error.toString());
     }
@@ -209,7 +213,9 @@ final class _TournamentShell extends StatelessWidget {
   }
 
   Widget _body(BuildContext context, TournamentPlace place) {
-    if (controller.booting || (controller.busy && controller.day == null)) {
+    // Local Home is available as soon as beginLocal completes. Tournament
+    // syncing never replaces the whole shell with a blocking spinner.
+    if (!controller.localReady && controller.booting) {
       return _Loading(label: TournamentCopy.of(context).loading);
     }
     return switch (place) {
@@ -360,6 +366,10 @@ final class _HomeScreen extends StatelessWidget {
     final copy = TournamentCopy.of(context);
     final day = controller.day;
     final phase = day?.phase ?? DayPhase.ready;
+    final syncing =
+        controller.tournamentSync == TournamentSyncState.syncing;
+    final stale = controller.homeSnapshotStale && !controller.tournamentReady;
+    final notice = controller.tournamentNoticeCode;
     final verified = tournamentInt(controller.results['all']);
     final score = phase == DayPhase.completed
         ? verified ?? day?.seriesScore
@@ -374,16 +384,32 @@ final class _HomeScreen extends StatelessWidget {
               ? copy.onTime
               : copy.onTimeMissing)
         : null;
-    final primary = switch (phase) {
-      DayPhase.completed => copy.viewResults,
-      DayPhase.betweenGames || DayPhase.inProgress => copy.continueTournament,
-      _ => copy.playToday,
-    };
-    final headline = switch (phase) {
-      DayPhase.completed => copy.completedHeadline,
-      DayPhase.inProgress || DayPhase.betweenGames => copy.progressHeadline,
-      _ => copy.readyHeadline,
-    };
+    final primary = syncing
+        ? copy.tournamentSyncing
+        : switch (phase) {
+            DayPhase.completed => copy.viewResults,
+            DayPhase.betweenGames || DayPhase.inProgress =>
+              copy.continueTournament,
+            _ => copy.playToday,
+          };
+    final headline = stale
+        ? copy.cachedTournamentHeadline
+        : switch (phase) {
+            DayPhase.completed => copy.completedHeadline,
+            DayPhase.inProgress || DayPhase.betweenGames =>
+              copy.progressHeadline,
+            _ => copy.readyHeadline,
+          };
+    VoidCallback? onPrimary;
+    if (syncing) {
+      onPrimary = null;
+    } else if (!controller.tournamentReady) {
+      onPrimary = controller.refreshTournament;
+    } else if (phase == DayPhase.completed) {
+      onPrimary = controller.openResults;
+    } else {
+      onPrimary = controller.resume;
+    }
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
@@ -430,6 +456,17 @@ final class _HomeScreen extends StatelessWidget {
                   ),
                 ],
               ),
+              if (stale || notice != null) ...[
+                const SizedBox(height: 12),
+                _TournamentStatusBanner(
+                  key: const Key('tournament-status'),
+                  text: notice != null
+                      ? copy.forError(notice)
+                      : copy.cachedTournamentBody,
+                  onRetry: controller.refreshTournament,
+                  retryLabel: copy.tryAgain,
+                ),
+              ],
               const SizedBox(height: 12),
               _DailyCard(
                 copy: copy,
@@ -440,14 +477,52 @@ final class _HomeScreen extends StatelessWidget {
                 badge: badge,
                 headline: headline,
                 action: primary,
-                onAction: phase == DayPhase.completed
-                    ? controller.openResults
-                    : controller.resume,
+                onAction: onPrimary,
               ),
               const SizedBox(height: 32),
               _HomeActions(controller: controller),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _TournamentStatusBanner extends StatelessWidget {
+  const _TournamentStatusBanner({
+    super.key,
+    required this.text,
+    required this.onRetry,
+    required this.retryLabel,
+  });
+
+  final String text;
+  final VoidCallback onRetry;
+  final String retryLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: GameTokens.surface.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                key: const Key('tournament-status-text'),
+                style: const TextStyle(color: GameTokens.textMuted),
+              ),
+            ),
+            TextButton(
+              key: const Key('tournament-retry'),
+              onPressed: onRetry,
+              child: Text(retryLabel),
+            ),
+          ],
         ),
       ),
     );
@@ -590,7 +665,7 @@ final class _DailyCard extends StatelessWidget {
   final String? badge;
   final String headline;
   final String action;
-  final VoidCallback onAction;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1185,6 +1260,15 @@ final class _RecoveryScreen extends StatelessWidget {
                         ? copy.retrySame
                         : copy.tryAgain,
                   ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  key: const Key('recovery-practice'),
+                  onPressed: () {
+                    controller.showHome();
+                    _openPractice(context, controller);
+                  },
+                  child: Text(copy.practice),
                 ),
               ],
             ),

@@ -37,7 +37,7 @@ void main() {
       await _pumpHome(tester, api, directory);
 
       await tester.tap(find.byKey(const Key('practice')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       expect(find.byKey(const Key('practice-easy')), findsOneWidget);
       expect(find.byKey(const Key('practice-medium')), findsOneWidget);
       expect(find.byKey(const Key('practice-hard')), findsOneWidget);
@@ -48,14 +48,14 @@ void main() {
       expect(find.textContaining('5×5 board, 15 moves'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('practice-change')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('practice-medium')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.textContaining('6×6 board, 12 moves'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('practice-change')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('practice-hard')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
@@ -85,7 +85,7 @@ void main() {
       expect(find.byKey(const Key('practice')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('practice')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('practice-hard')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
@@ -123,12 +123,16 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('On-Time'), findsNothing);
-      await tester.pump();
-      final recordFiles = directory
-          .listSync()
-          .whereType<File>()
-          .where((f) => f.path.contains('practice-records-player_'))
-          .toList();
+      List<File> recordFiles = const [];
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        recordFiles = directory
+            .listSync()
+            .whereType<File>()
+            .where((f) => f.path.contains('practice-records-player_'))
+            .toList();
+        if (recordFiles.length == 1) break;
+      }
       expect(recordFiles, hasLength(1));
       final records = jsonDecode(recordFiles.single.readAsStringSync()) as List;
       final record = records.single as Map;
@@ -154,7 +158,7 @@ void main() {
       );
 
       await tester.tap(find.byKey(const Key('nav-back')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       expect(find.byKey(const Key('practice-new')), findsOneWidget);
       await tester.tap(find.byKey(const Key('practice-new')));
       await tester.pump();
@@ -187,7 +191,7 @@ void main() {
         scrollable: find.byType(Scrollable).hitTestable(),
       );
       await tester.tap(find.byKey(const Key('leaderboard')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       expect(find.textContaining('no verified rank'), findsOneWidget);
       expect(find.text('Player'), findsNothing);
       expect(api.claimPosts, 1);
@@ -204,7 +208,7 @@ void main() {
       );
       await _pumpHome(tester, api, directory);
       await tester.tap(find.byKey(const Key('practice')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('practice-easy')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
@@ -370,3 +374,11 @@ Future<void> _pumpHome(
   }
   await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
 }
+
+Future<void> _pumpFrames(WidgetTester tester, [int frames = 20]) async {
+  await tester.pump();
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+

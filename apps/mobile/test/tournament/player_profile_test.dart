@@ -35,7 +35,7 @@ void main() {
     await _pumpHome(tester, api, directory);
 
     await tester.tap(find.byKey(const Key('profile')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
     expect(find.byKey(const Key('profile-best-easy')), findsOneWidget);
     expect(find.byKey(const Key('profile-best-medium')), findsOneWidget);
@@ -44,15 +44,15 @@ void main() {
     expect(find.text('No record yet.'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('profile')), findsOneWidget);
     expect(find.byKey(const Key('profile-header')), findsNothing);
 
     await tester.tap(find.byKey(const Key('profile')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
     await tester.tap(find.byKey(const Key('nav-back')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('profile-header')), findsNothing);
   });
 
@@ -114,7 +114,7 @@ void main() {
 
     await _pumpHome(tester, api, directory);
     await tester.tap(find.byKey(const Key('profile')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
 
     expect(find.textContaining('42'), findsWidgets);
     expect(find.text('No record yet.'), findsNWidgets(2));
@@ -128,11 +128,11 @@ void main() {
     expect(find.text('Locked'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('badge-tile-on_time')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('badge-detail-title')), findsOneWidget);
     expect(find.textContaining('Server-authoritative'), findsOneWidget);
     await tester.tap(find.byKey(const Key('badge-detail-close')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
 
     await tester.scrollUntilVisible(
       find.byKey(const Key('badge-retry')),
@@ -140,7 +140,7 @@ void main() {
       scrollable: find.byType(Scrollable).hitTestable(),
     );
     await tester.tap(find.byKey(const Key('badge-retry')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.byKey(const Key('badge-status-banner')), findsOneWidget);
   });
 
@@ -193,7 +193,7 @@ void main() {
 
     await _pumpHome(tester, api, directory, locale: const Locale('tr'));
     await tester.tap(find.byKey(const Key('profile')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     expect(find.text('Profil'), findsWidgets);
     expect(find.text('2 kez kazanıldı'), findsOneWidget);
     expect(find.text('Henüz rekorun yok.'), findsWidgets);
@@ -209,7 +209,7 @@ void main() {
       surfaceSize: const Size(320, 700),
     );
     await tester.tap(find.byKey(const Key('profile')));
-    await tester.pumpAndSettle();
+    await _pumpProfile(tester);
     await tester.scrollUntilVisible(
       find.byKey(const Key('profile-best-hard')),
       200,
@@ -268,6 +268,13 @@ ScriptedUatApi _api() {
     }
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});
   });
+}
+
+Future<void> _pumpProfile(WidgetTester tester) async {
+  await tester.pump();
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
 }
 
 Future<void> _pumpHome(
