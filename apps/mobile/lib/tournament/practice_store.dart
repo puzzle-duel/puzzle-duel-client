@@ -376,9 +376,8 @@ final class PracticeStore {
     file.parent.createSync(recursive: true);
     final tmp = File('${file.path}.tmp');
     tmp.writeAsStringSync(contents, flush: true);
-    if (file.existsSync()) {
-      file.deleteSync();
-    }
+    // On iOS/Android, rename replaces the destination atomically on the same
+    // filesystem. Never delete the last valid file before replacement.
     tmp.renameSync(file.path);
   }
 
