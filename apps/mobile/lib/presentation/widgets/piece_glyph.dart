@@ -1,10 +1,16 @@
 import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-/// Premium geometric piece: silhouette + deep shade + bold chevron.
+/// Canonical premium piece glyph (PZD-47).
+///
+/// Board and tray share [PiecePainter], which consumes
+/// [PremiumShapeMaterials] so gameplay pieces match the approved app-icon
+/// shapes. Direction comes from gameplay state and is independent of the
+/// diamond's 45° body rotation.
 final class PieceGlyph extends StatelessWidget {
   const PieceGlyph({
     super.key,
@@ -38,6 +44,7 @@ final class PieceGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final alpha = muted ? 0.35 : 1.0;
     return Semantics(
       label: semanticsLabel(piece),
       excludeSemantics: true,
@@ -49,13 +56,11 @@ final class PieceGlyph extends StatelessWidget {
           size: Size.square(size),
           painter: PiecePainter(
             piece: piece,
-            fill: muted
-                ? GameTokens.pieceFill(piece.shape).withValues(alpha: 0.35)
-                : GameTokens.pieceFill(piece.shape),
-            deep: muted
-                ? GameTokens.pieceDeep(piece.shape).withValues(alpha: 0.35)
-                : GameTokens.pieceDeep(piece.shape),
-            stroke: selected ? GameTokens.textPrimary : const Color(0xFF061018),
+            fill: PremiumShapeMaterials.fill(piece.shape).withValues(alpha: alpha),
+            deep: PremiumShapeMaterials.deep(piece.shape).withValues(alpha: alpha),
+            stroke: selected
+                ? GameTokens.textPrimary
+                : PremiumShapeMaterials.directionInset,
             selected: selected,
           ),
         ),
@@ -84,74 +89,131 @@ final class PiecePainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.shortestSide * 0.42;
     final path = shapePath(center, radius, piece.shape);
+    final side = size.shortestSide;
+    final shape = piece.shape;
 
-    // Soft lift shadow without MaskFilter.blur (avoids first-frame blur
-    // shader compilation hitch on iOS during early interactions).
+    // Soft lift / contact shadow without MaskFilter.blur (avoids first-frame
+    // blur shader compilation hitch on iOS during early interactions).
     canvas.drawPath(
-      path.shift(const Offset(1.2, 2.8)),
+      path.shift(Offset(side * 0.028, side * 0.055)),
       Paint()
-        ..color = Colors.black.withValues(alpha: selected ? 0.34 : 0.22)
+        ..color = PremiumShapeMaterials.contactShadow.withValues(
+          alpha: selected ? 0.42 : 0.30,
+        )
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
-      path.shift(const Offset(0.4, 1.2)),
+      path.shift(Offset(side * 0.012, side * 0.024)),
       Paint()
-        ..color = Colors.black.withValues(alpha: selected ? 0.18 : 0.12)
+        ..color = Colors.black.withValues(alpha: selected ? 0.22 : 0.14)
         ..style = PaintingStyle.fill,
     );
 
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final shader = LinearGradient(
+    final bounds = Rect.fromCircle(center: center, radius: radius);
+    final bodyShader = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [fill, deep],
-    ).createShader(rect);
+      colors: [
+        PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
+        fill,
+        PremiumShapeMaterials.mid(shape).withValues(alpha: fill.a),
+        deep,
+      ],
+      stops: const [0.0, 0.28, 0.62, 1.0],
+    ).createShader(bounds);
 
+    // Outer bevel shell (slightly deeper).
     canvas.drawPath(
       path,
       Paint()
-        ..shader = shader
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
+            deep,
+          ],
+        ).createShader(bounds)
         ..style = PaintingStyle.fill,
     );
 
-    // Inner highlight rim (not hue-only cue)
+    // Raised face — inset silhouette matching icon extrusion depth.
+    final face = shapePath(center, radius * 0.86, shape);
+    canvas.drawPath(
+      face,
+      Paint()
+        ..shader = bodyShader
+        ..style = PaintingStyle.fill,
+    );
+
+    // Specular highlight (top-left light), clipped to body — no blur.
+    canvas.save();
+    canvas.clipPath(path);
+    final highlightCenter = center.translate(-radius * 0.28, -radius * 0.34);
+    final highlightRect = Rect.fromCenter(
+      center: highlightCenter,
+      width: radius * 1.15,
+      height: radius * 0.72,
+    );
+    canvas.drawOval(
+      highlightRect,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.85 * fill.a),
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.22 * fill.a),
+            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.45, 1.0],
+        ).createShader(highlightRect),
+    );
+    // Bright rim catch-light along the upper-left silhouette.
     canvas.drawPath(
       path,
       Paint()
-        ..color = Colors.white.withValues(alpha: 0.22)
+        ..color = Colors.white.withValues(alpha: 0.34 * fill.a)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.2, size.shortestSide * 0.03),
+        ..strokeWidth = math.max(1.4, side * 0.038),
     );
+    canvas.restore();
 
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = stroke
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = selected
-            ? math.max(2.8, size.shortestSide * 0.07)
-            : math.max(1.8, size.shortestSide * 0.045),
-    );
+    if (selected) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = stroke.withValues(alpha: 0.95)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = math.max(2.6, side * 0.065),
+      );
+    }
 
-    // Unified direction language across circle / diamond / triangle.
-    final arrowStroke = directionArrowStroke(size.shortestSide);
+    // Direction glyph is composited independently of diamond body rotation.
+    final arrowStroke = directionArrowStroke(side);
     final glyph = directionGlyph(
-      shape: piece.shape,
+      shape: shape,
       shapeCenter: center,
       radius: radius,
       direction: piece.direction,
       strokeWidth: arrowStroke,
     );
+    final inset = PremiumShapeMaterials.directionInset.withValues(alpha: fill.a);
+    // Engraved depth: slight offset shadow then solid cutout.
+    canvas.drawPath(
+      glyph.filled.shift(Offset(0, side * 0.012)),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.35 * fill.a)
+        ..style = PaintingStyle.fill,
+    );
     canvas.drawPath(
       glyph.filled,
       Paint()
-        ..color = stroke
+        ..color = inset
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
       glyph.path,
       Paint()
-        ..color = stroke
+        ..color = inset
         ..style = PaintingStyle.stroke
         ..strokeWidth = arrowStroke
         ..strokeCap = StrokeCap.round
@@ -437,21 +499,47 @@ final class PiecePainter extends CustomPainter {
       case Shape.circle:
         return Path()..addOval(Rect.fromCircle(center: c, radius: r));
       case Shape.diamond:
+        // Square rotated 45° about Z with soft corners (icon diamond).
         final v = diamondVertices(c, r);
-        return Path()
-          ..moveTo(v.north.dx, v.north.dy)
-          ..lineTo(v.east.dx, v.east.dy)
-          ..lineTo(v.south.dx, v.south.dy)
-          ..lineTo(v.west.dx, v.west.dy)
-          ..close();
+        return roundedPolygon(
+          [v.north, v.east, v.south, v.west],
+          r * 0.22,
+        );
       case Shape.triangle:
         final v = triangleVertices(c, r);
-        return Path()
-          ..moveTo(v.apex.dx, v.apex.dy)
-          ..lineTo(v.bottomRight.dx, v.bottomRight.dy)
-          ..lineTo(v.bottomLeft.dx, v.bottomLeft.dy)
-          ..close();
+        return roundedPolygon(
+          [v.apex, v.bottomRight, v.bottomLeft],
+          r * 0.20,
+        );
     }
+  }
+
+  /// Rounded polygon used by icon-faithful diamond / triangle silhouettes.
+  static Path roundedPolygon(List<Offset> points, double cornerRadius) {
+    assert(points.length >= 3);
+    final path = Path();
+    final n = points.length;
+    for (var i = 0; i < n; i++) {
+      final prev = points[(i - 1 + n) % n];
+      final curr = points[i];
+      final next = points[(i + 1) % n];
+      final toPrev = prev - curr;
+      final toNext = next - curr;
+      final lenPrev = toPrev.distance;
+      final lenNext = toNext.distance;
+      if (lenPrev < 1e-6 || lenNext < 1e-6) continue;
+      final r = math.min(cornerRadius, math.min(lenPrev, lenNext) * 0.45);
+      final p1 = curr + (toPrev / lenPrev) * r;
+      final p2 = curr + (toNext / lenNext) * r;
+      if (i == 0) {
+        path.moveTo(p1.dx, p1.dy);
+      } else {
+        path.lineTo(p1.dx, p1.dy);
+      }
+      path.quadraticBezierTo(curr.dx, curr.dy, p2.dx, p2.dy);
+    }
+    path.close();
+    return path;
   }
 
   static bool _barycentricInside(Offset p, Offset a, Offset b, Offset c) {
