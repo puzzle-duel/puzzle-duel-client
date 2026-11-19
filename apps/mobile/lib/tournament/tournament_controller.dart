@@ -607,7 +607,7 @@ final class TournamentController extends ChangeNotifier {
       jsonEncode({'secret': api.sessionSecret}),
       flush: true,
     );
-    if (_stateFile.existsSync()) _stateFile.deleteSync();
+    // Preserve the last valid session until its replacement is durable.
     tmp.renameSync(_stateFile.path);
   }
 
