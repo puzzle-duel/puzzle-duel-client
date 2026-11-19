@@ -195,6 +195,15 @@ final class TournamentController extends ChangeNotifier {
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
+  /// Confirmed offline/timeout preventing Tournament refresh (not auth errors).
+  bool get tournamentConnectivityLost {
+    final code = tournamentNoticeCode;
+    return code == 'OFFLINE' || code == 'TIMEOUT';
+  }
+
+  /// True while a ranked refresh Future is shared (pull-to-refresh dedupe).
+  bool get tournamentRefreshInFlight => _refreshInFlight != null;
+
   /// The exact command waiting for reconciliation. Retries send this object.
   Object? get pendingCommand => _pending;
 

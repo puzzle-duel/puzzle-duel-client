@@ -17,6 +17,13 @@ abstract final class GameTokens {
   static const Color success = Color(0xFF5CFFB0);
   static const Color scoreGlow = Color(0xFFFFD166);
 
+  /// Floating notification accents (dark arcade palette).
+  /// Tournament sync/update uses [notifyInfo]; reserve [notifySuccess] for
+  /// explicit future success actions (e.g. profile saved).
+  static const Color notifyInfo = Color(0xFF5B9CFF);
+  static const Color notifyError = Color(0xFFFF6B7A);
+  static const Color notifySuccess = Color(0xFF5CFFB0);
+
   static const Color cellEmpty = Color(0xFF18253D);
   static const Color cellBlocked = Color(0xFF0A101C);
   static const Color cellFlash = Color(0xFFFFF1A8);

@@ -16,7 +16,7 @@ import 'tournament_command_test.dart' show ScriptedUatApi;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('offline status stays visible and uses friendly copy', (
+  testWidgets('offline status uses friendly copy then auto-dismisses', (
     tester,
   ) async {
     final directory = Directory.systemTemp.createTempSync('pzd43-ux-offline');
@@ -28,16 +28,13 @@ void main() {
     );
     await _pumpHome(tester, api, directory);
     await _waitFor(tester, find.byKey(const Key('tournament-status')));
-    expect(
-      find.text('No connection. You can keep practicing.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('tournament-retry')), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    expect(
-      find.text('No connection. You can keep practicing.'),
-      findsOneWidget,
-    );
+    expect(find.text('No internet connection.'), findsOneWidget);
+    expect(find.byKey(const Key('tournament-retry')), findsNothing);
+    expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('No internet connection.'), findsNothing);
+    expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
   });
 
   testWidgets('success status fades away under normal motion', (tester) async {
@@ -74,9 +71,13 @@ void main() {
       return const UatHttpResult(404, {'error': 'NOT_FOUND'});
     });
     await _pumpHome(tester, api, directory);
-    await _waitFor(tester, find.byKey(const Key('tournament-retry')));
+    await _waitFor(tester, find.byKey(const Key('daily-offline-icon')));
     online = true;
-    await tester.tap(find.byKey(const Key('tournament-retry')));
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    await refresh.onRefresh();
+    await tester.pump();
     await _waitFor(tester, find.text('Tournament info updated.'));
     expect(find.text('Tournament info updated.'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 2800));
@@ -84,7 +85,7 @@ void main() {
     expect(find.text('Tournament info updated.'), findsNothing);
   });
 
-  testWidgets('reduced motion keeps offline status without fade hold', (
+  testWidgets('reduced motion auto-dismisses offline banner after hold', (
     tester,
   ) async {
     TestWidgetsFlutterBinding.ensureInitialized()
@@ -106,8 +107,10 @@ void main() {
     );
     await _pumpHome(tester, api, directory);
     await _waitFor(tester, find.byKey(const Key('tournament-status')));
-    await tester.pump(const Duration(seconds: 3));
-    expect(find.byKey(const Key('tournament-status')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 3600));
+    await tester.pump();
+    expect(find.byKey(const Key('tournament-status')), findsNothing);
+    expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
   });
 
   testWidgets('home leaderboard uses pushed route and pops to home', (
@@ -249,10 +252,9 @@ void main() {
     expect(tr.tournamentSyncing, 'Turnuva bilgileri güncelleniyor…');
     expect(tr.tournamentRefreshSuccess, 'Turnuva bilgileri güncellendi.');
     expect(tr.cachedTournamentBody, 'Son turnuva bilgilerin gösteriliyor.');
-    expect(
-      tr.connectionUnavailable,
-      'Bağlantı yok. Pratik yapmaya devam edebilirsin.',
-    );
+    expect(tr.connectionUnavailable, 'İnternet bağlantısı yok.');
+    expect(tr.timedOut, 'Bağlantı zaman aşımına uğradı.');
+    expect(tr.noConnection, 'Bağlantı yok');
   });
 
   testWidgets('opaque backdrop + page route composition (UX-03)', (

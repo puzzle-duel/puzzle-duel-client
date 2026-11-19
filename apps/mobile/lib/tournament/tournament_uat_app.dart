@@ -403,6 +403,7 @@ final class _HomeScreen extends StatelessWidget {
         controller.tournamentSync == TournamentSyncState.syncing;
     final stale = controller.homeSnapshotStale && !controller.tournamentReady;
     final notice = controller.tournamentNoticeCode;
+    final connectivityLost = controller.tournamentConnectivityLost;
     final verified = tournamentInt(controller.results['all']);
     final score = phase == DayPhase.completed
         ? verified ?? day?.seriesScore
@@ -437,7 +438,7 @@ final class _HomeScreen extends StatelessWidget {
     if (syncing) {
       onPrimary = null;
     } else if (!controller.tournamentReady) {
-      onPrimary = controller.refreshTournament;
+      onPrimary = null;
     } else if (phase == DayPhase.completed) {
       onPrimary = controller.openResults;
     } else {
@@ -450,80 +451,91 @@ final class _HomeScreen extends StatelessWidget {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              ListView(
-                key: const Key('home-scroll'),
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                children: [
-                  Row(
-                    key: const Key('home-header-row'),
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              copy.appTitle.toUpperCase(),
-                              key: const Key('home-title'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(
-                                    letterSpacing: 1.6,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                            ),
-                            Text(
-                              copy.tagline,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: GameTokens.accent),
-                            ),
-                          ],
+              RefreshIndicator(
+                key: const Key('home-refresh'),
+                color: GameTokens.accent,
+                backgroundColor: GameTokens.surfaceHigh,
+                displacement: 36,
+                onRefresh: controller.refreshTournament,
+                child: ListView(
+                  key: const Key('home-scroll'),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  children: [
+                    Row(
+                      key: const Key('home-header-row'),
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                copy.appTitle.toUpperCase(),
+                                key: const Key('home-title'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      letterSpacing: 1.6,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              ),
+                              Text(
+                                copy.tagline,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: GameTokens.accent),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        key: const Key('profile'),
-                        tooltip: copy.profile,
-                        onPressed: () => _openProfile(context, controller),
-                        icon: const Icon(Icons.person_rounded),
-                      ),
-                      IconButton(
-                        key: const Key('settings'),
-                        tooltip: copy.settingsTitle,
-                        onPressed: () => _openSettings(context, controller),
-                        icon: const Icon(Icons.settings_rounded),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _DailyCard(
-                    key: const Key('home-daily-card'),
-                    copy: copy,
-                    day: day,
-                    score: score,
-                    scoreLabel: scoreLabel,
-                    phase: phase,
-                    badge: badge,
-                    headline: headline,
-                    action: primary,
-                    onAction: onPrimary,
-                  ),
-                  const SizedBox(height: 32),
-                  _HomeActions(controller: controller),
-                ],
+                        IconButton(
+                          key: const Key('profile'),
+                          tooltip: copy.profile,
+                          onPressed: () => _openProfile(context, controller),
+                          icon: const Icon(Icons.person_rounded),
+                        ),
+                        IconButton(
+                          key: const Key('settings'),
+                          tooltip: copy.settingsTitle,
+                          onPressed: () => _openSettings(context, controller),
+                          icon: const Icon(Icons.settings_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _DailyCard(
+                      key: const Key('home-daily-card'),
+                      copy: copy,
+                      day: day,
+                      score: score,
+                      scoreLabel: scoreLabel,
+                      phase: phase,
+                      badge: badge,
+                      headline: headline,
+                      action: primary,
+                      onAction: onPrimary,
+                      connectivityLost: connectivityLost,
+                    ),
+                    const SizedBox(height: 32),
+                    _HomeActions(controller: controller),
+                  ],
+                ),
               ),
               // Floating status: does not participate in ListView layout.
               Positioned(
                 top: 0,
                 left: 16,
                 right: 16,
-                child: _TournamentStatusHost(
-                  key: const Key('tournament-status-host'),
-                  controller: controller,
-                  copy: copy,
-                  stale: stale,
-                  notice: notice,
-                  syncing: syncing,
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: _TournamentStatusHost(
+                    key: const Key('tournament-status-host'),
+                    controller: controller,
+                    copy: copy,
+                    notice: notice,
+                    syncing: syncing,
+                  ),
                 ),
               ),
             ],
@@ -534,21 +546,19 @@ final class _HomeScreen extends StatelessWidget {
   }
 }
 
-enum _StatusTone { syncing, success, persistent }
+enum _NotifyKind { info, error, success }
 
 final class _TournamentStatusHost extends StatefulWidget {
   const _TournamentStatusHost({
     super.key,
     required this.controller,
     required this.copy,
-    required this.stale,
     required this.notice,
     required this.syncing,
   });
 
   final TournamentController controller;
   final TournamentCopy copy;
-  final bool stale;
   final String? notice;
   final bool syncing;
 
@@ -559,7 +569,8 @@ final class _TournamentStatusHost extends StatefulWidget {
 final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     with SingleTickerProviderStateMixin {
   static const _slideIn = Duration(milliseconds: 240);
-  static const _hold = Duration(milliseconds: 2500);
+  static const _infoHold = Duration(milliseconds: 2500);
+  static const _errorHold = Duration(milliseconds: 3500);
   static const _slideOut = Duration(milliseconds: 280);
 
   late final AnimationController _motion = AnimationController(
@@ -575,9 +586,11 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
     curve: Curves.easeOut,
   );
   Timer? _dismiss;
-  _StatusTone? _tone;
+  int _motionEpoch = 0;
+  _NotifyKind? _kind;
   String? _text;
-  var _showRetry = false;
+  String? _activeSignature;
+  String? _dismissedSignature;
   var _wasSyncing = false;
   var _didDepend = false;
 
@@ -625,69 +638,115 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
             .reduceMotion;
   }
 
-  void _clearBanner() {
+  Color get _accent => switch (_kind) {
+    _NotifyKind.info => GameTokens.notifyInfo,
+    _NotifyKind.error => GameTokens.notifyError,
+    _NotifyKind.success => GameTokens.notifySuccess,
+    null => GameTokens.notifyInfo,
+  };
+
+  void _clearBanner({required String? dismissedFor}) {
     setState(() {
-      _tone = null;
+      _kind = null;
       _text = null;
-      _showRetry = false;
+      _activeSignature = null;
+      _dismissedSignature = dismissedFor;
+    });
+  }
+
+  void _scheduleDismiss({
+    required _NotifyKind kind,
+    required String signature,
+    required bool reduceMotion,
+  }) {
+    final hold = kind == _NotifyKind.error ? _errorHold : _infoHold;
+    final epoch = ++_motionEpoch;
+    _dismiss?.cancel();
+    _dismiss = Timer(hold, () {
+      if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
+        return;
+      }
+      if (reduceMotion) {
+        _motion.value = 0;
+        _clearBanner(dismissedFor: signature);
+        return;
+      }
+      _motion.duration = _slideOut;
+      _motion.reverse().whenComplete(() {
+        if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
+          return;
+        }
+        _clearBanner(dismissedFor: signature);
+      });
     });
   }
 
   void _apply({required bool fromSyncEdge}) {
     final reduceMotion = _reduceMotion;
     final notice = widget.notice;
-    _StatusTone? nextTone;
+    _NotifyKind? nextKind;
     String? nextText;
-    var nextRetry = false;
 
-    if (widget.syncing) {
-      nextTone = _StatusTone.syncing;
-      nextText = widget.copy.tournamentSyncing;
-    } else if (notice == 'OFFLINE') {
-      nextTone = _StatusTone.persistent;
-      nextText = widget.copy.connectionUnavailable;
-      nextRetry = true;
-    } else if (notice == 'TIMEOUT') {
-      nextTone = _StatusTone.persistent;
-      nextText = widget.copy.timedOut;
-      nextRetry = true;
-    } else if (notice != null) {
-      nextTone = _StatusTone.persistent;
-      nextText = widget.copy.forError(notice);
-      nextRetry = true;
-    } else if (fromSyncEdge && widget.controller.tournamentReady) {
-      nextTone = _StatusTone.success;
-      nextText = widget.copy.tournamentRefreshSuccess;
-    } else if (widget.stale) {
-      nextTone = _StatusTone.persistent;
-      nextText = widget.copy.cachedTournamentBody;
-      nextRetry = true;
+    // A new refresh episode may re-announce the same offline copy.
+    if (widget.syncing || fromSyncEdge) {
+      _dismissedSignature = null;
     }
 
-    _dismiss?.cancel();
-    _dismiss = null;
+    if (widget.syncing) {
+      nextKind = _NotifyKind.info;
+      nextText = widget.copy.tournamentSyncing;
+    } else if (notice == 'OFFLINE') {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.connectionUnavailable;
+    } else if (notice == 'TIMEOUT') {
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.timedOut;
+    } else if (notice != null) {
+      // Auth and other failures: transient error (not wifi/offline icon).
+      nextKind = _NotifyKind.error;
+      nextText = widget.copy.forError(notice);
+    } else if (fromSyncEdge && widget.controller.tournamentReady) {
+      // Tournament update completion stays info (blue), not success green.
+      nextKind = _NotifyKind.info;
+      nextText = widget.copy.tournamentRefreshSuccess;
+    }
 
-    if (nextTone == null || nextText == null) {
+    if (nextKind == null || nextText == null) {
+      _dismiss?.cancel();
+      _dismiss = null;
       if (_text != null) {
+        final epoch = ++_motionEpoch;
+        final leaving = _activeSignature;
         if (reduceMotion) {
           _motion.value = 0;
-          _clearBanner();
+          _clearBanner(dismissedFor: leaving);
         } else {
           _motion.duration = _slideOut;
           _motion.reverse().whenComplete(() {
-            if (!mounted) return;
-            _clearBanner();
+            if (!mounted || epoch != _motionEpoch) return;
+            _clearBanner(dismissedFor: leaving);
           });
         }
       }
       return;
     }
 
-    final changed = nextText != _text || nextTone != _tone;
+    final signature = '${nextKind.name}|$nextText';
+    if (signature == _activeSignature) {
+      return;
+    }
+    if (signature == _dismissedSignature) {
+      return;
+    }
+
+    _dismiss?.cancel();
+    _dismiss = null;
+    final changed = nextText != _text || nextKind != _kind;
     setState(() {
-      _tone = nextTone;
+      _kind = nextKind;
       _text = nextText;
-      _showRetry = nextRetry;
+      _activeSignature = signature;
+      _dismissedSignature = null;
     });
     if (reduceMotion) {
       _motion.value = 1;
@@ -698,61 +757,52 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
       _motion.forward();
     }
 
-    if (nextTone == _StatusTone.success) {
-      _dismiss = Timer(_hold, () {
-        if (!mounted || _tone != _StatusTone.success) return;
-        if (reduceMotion) {
-          _motion.value = 0;
-          _clearBanner();
-          return;
-        }
-        _motion.duration = _slideOut;
-        _motion.reverse().whenComplete(() {
-          if (!mounted || _tone != _StatusTone.success) return;
-          _clearBanner();
-        });
-      });
+    // Syncing stays until replaced; info completion + errors auto-dismiss.
+    if (!widget.syncing) {
+      _scheduleDismiss(
+        kind: nextKind,
+        signature: signature,
+        reduceMotion: reduceMotion,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final text = _text;
-    if (text == null) return const SizedBox.shrink();
-    final live =
-        _tone == _StatusTone.persistent || _tone == _StatusTone.syncing;
+    final kind = _kind;
+    if (text == null || kind == null) return const SizedBox.shrink();
+    final accent = _accent;
     return SlideTransition(
       position: _slide,
       child: FadeTransition(
         opacity: _fade,
         child: Material(
-          key: const Key('tournament-status'),
-          elevation: 8,
-          shadowColor: Colors.black54,
-          color: GameTokens.surface.withValues(alpha: 0.97),
-          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-          child: Semantics(
-            liveRegion: live,
-            container: true,
-            label: text,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      text,
-                      key: const Key('tournament-status-text'),
-                      style: const TextStyle(color: GameTokens.textMuted),
-                    ),
+          key: Key('tournament-status-${kind.name}'),
+          color: Colors.transparent,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          child: DecoratedBox(
+            key: const Key('tournament-status'),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+              border: Border.all(color: accent.withValues(alpha: 0.55)),
+            ),
+            child: Semantics(
+              liveRegion: true,
+              container: true,
+              label: text,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Text(
+                  text,
+                  key: const Key('tournament-status-text'),
+                  style: TextStyle(
+                    color: GameTokens.textPrimary.withValues(alpha: 0.95),
+                    fontWeight: FontWeight.w600,
                   ),
-                  if (_showRetry)
-                    TextButton(
-                      key: const Key('tournament-retry'),
-                      onPressed: widget.controller.refreshTournament,
-                      child: Text(widget.copy.tryAgain),
-                    ),
-                ],
+                ),
               ),
             ),
           ),
@@ -889,6 +939,7 @@ final class _DailyCard extends StatelessWidget {
     required this.headline,
     required this.action,
     required this.onAction,
+    required this.connectivityLost,
   });
 
   final TournamentCopy copy;
@@ -900,6 +951,7 @@ final class _DailyCard extends StatelessWidget {
   final String headline;
   final String action;
   final VoidCallback? onAction;
+  final bool connectivityLost;
 
   @override
   Widget build(BuildContext context) {
@@ -933,68 +985,87 @@ final class _DailyCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              copy.dailyChallenge.toUpperCase(),
-              style: TextStyle(
-                color: tone,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
-              ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  copy.dailyChallenge.toUpperCase(),
+                  style: TextStyle(
+                    color: tone,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(headline, style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 14),
+                _Pips(
+                  completed: day?.completedGames ?? 0,
+                  current: phase == DayPhase.completed ? null : day?.ordinal,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  scoreLabel,
+                  style: const TextStyle(color: GameTokens.textMuted),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    score == null ? '—' : copy.groupedScore(score!),
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      color: GameTokens.scoreGlow,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (badge != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      badge!,
+                      style: TextStyle(fontWeight: FontWeight.w800, color: tone),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('primary-action'),
+                    onPressed: onAction,
+                    child: Text(
+                      action,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(headline, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 14),
-            _Pips(
-              completed: day?.completedGames ?? 0,
-              current: phase == DayPhase.completed ? null : day?.ordinal,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              scoreLabel,
-              style: const TextStyle(color: GameTokens.textMuted),
-            ),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                score == null ? '—' : copy.groupedScore(score!),
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  color: GameTokens.scoreGlow,
-                  fontWeight: FontWeight.w800,
+          ),
+          if (connectivityLost)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Tooltip(
+                message: copy.noConnection,
+                child: Icon(
+                  Icons.wifi_off_rounded,
+                  key: const Key('daily-offline-icon'),
+                  size: 20,
+                  color: GameTokens.notifyError,
+                  semanticLabel: copy.noConnection,
                 ),
               ),
             ),
-            if (badge != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  badge!,
-                  style: TextStyle(fontWeight: FontWeight.w800, color: tone),
-                ),
-              ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                key: const Key('primary-action'),
-                onPressed: onAction,
-                child: Text(
-                  action,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

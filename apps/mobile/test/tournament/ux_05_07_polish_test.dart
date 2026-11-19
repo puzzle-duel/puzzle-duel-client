@@ -75,7 +75,11 @@ void main() {
     expect(find.byKey(const Key('tournament-status')), findsOneWidget);
 
     online = true;
-    await tester.tap(find.byKey(const Key('tournament-retry')));
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    await refresh.onRefresh();
+    await tester.pump();
     for (var i = 0; i < 80; i++) {
       await tester.pump(const Duration(milliseconds: 50));
       if (find.text('Tournament info updated.').evaluate().isNotEmpty) break;

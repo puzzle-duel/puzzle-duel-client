@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
@@ -54,7 +54,8 @@ void main() {
     await _pumpUntilPractice(tester, api, directory);
     expect(find.textContaining('timed out'), findsOneWidget);
     expect(find.byKey(const Key('practice')), findsOneWidget);
-    expect(find.text('Try again'), findsWidgets);
+    expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
+    expect(find.byKey(const Key('tournament-retry')), findsNothing);
   });
 
   testWidgets('offline practice easy completes and persists after restart', (
@@ -233,33 +234,25 @@ void main() {
     });
     await _pumpUntilPractice(tester, api, directory);
     expect(find.byKey(const Key('tournament-status')), findsOneWidget);
-    expect(
-      find.text('No connection. You can keep practicing.'),
-      findsOneWidget,
-    );
+    expect(find.text('No internet connection.'), findsOneWidget);
+    expect(find.byKey(const Key('daily-offline-icon')), findsOneWidget);
     online = true;
-    await tester.tap(find.byKey(const Key('tournament-retry')));
+    final refresh = tester.widget<RefreshIndicator>(
+      find.byKey(const Key('home-refresh')),
+    );
+    await refresh.onRefresh();
     await tester.pump();
-    // primary-action exists offline too (retry CTA) — wait for notice clear.
     for (var i = 0; i < 80; i++) {
-      if (find
-          .text('No connection. You can keep practicing.')
-          .evaluate()
-          .isEmpty) {
+      if (find.text('No internet connection.').evaluate().isEmpty) {
         break;
       }
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byKey(const Key('practice')), findsOneWidget);
-    expect(
-      find.text('No connection. You can keep practicing.'),
-      findsNothing,
-    );
-    expect(
-      find.text('Tournament info updated.'),
-      findsOneWidget,
-    );
-    // Reduced-motion success banner dismisses after the hold without layout shift.
+    expect(find.text('No internet connection.'), findsNothing);
+    expect(find.text('Tournament info updated.'), findsOneWidget);
+    expect(find.byKey(const Key('daily-offline-icon')), findsNothing);
+    // Reduced-motion info banner dismisses after the hold without layout shift.
     await tester.pump(const Duration(milliseconds: 2600));
     await tester.pump();
     expect(find.byKey(const Key('tournament-status')), findsNothing);

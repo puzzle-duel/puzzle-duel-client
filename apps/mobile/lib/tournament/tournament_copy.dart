@@ -294,9 +294,10 @@ final class TournamentCopy {
     'Son turnuva bilgilerin gösteriliyor.',
   );
   String get connectionUnavailable => pick(
-    'No connection. You can keep practicing.',
-    'Bağlantı yok. Pratik yapmaya devam edebilirsin.',
+    'No internet connection.',
+    'İnternet bağlantısı yok.',
   );
+  String get noConnection => pick('No connection', 'Bağlantı yok');
   String get boardLoading =>
       pick('Loading verified scores…', 'Doğrulanmış puanlar yükleniyor…');
   String get reference => pick('Reference', 'Referans');
@@ -305,12 +306,12 @@ final class TournamentCopy {
     'Turnuva bilgilerini güncellemek için yeniden oturum aç.',
   );
   String get timedOut => pick(
-    'Connection timed out. You can keep practicing.',
-    'Bağlantı zaman aşımına uğradı. Pratik yapmaya devam edebilirsin.',
+    'Connection timed out.',
+    'Bağlantı zaman aşımına uğradı.',
   );
   String get offline => pick(
-    'No connection. You can keep practicing.',
-    'Bağlantı yok. Pratik yapmaya devam edebilirsin.',
+    'No internet connection.',
+    'İnternet bağlantısı yok.',
   );
   String get writerBlocked => pick(
     'This device is not the active writer. Continue on the device that claimed today.',
@@ -339,8 +340,8 @@ final class TournamentCopy {
   String get genericFailure =>
       pick('Something went wrong.', 'Bir şeyler ters gitti.');
   String get boardUnreadable => pick(
-    'The server board could not be shown.',
-    'Sunucu tahtası gösterilemedi.',
+    'The board could not be shown.',
+    'Tahta gösterilemedi.',
   );
 
   String objective(int moves, int size) => pick(
