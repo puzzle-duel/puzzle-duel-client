@@ -180,9 +180,8 @@ final class PracticeIdentityStore {
     });
     final tmp = File('${_file.path}.tmp');
     tmp.writeAsStringSync(payload, flush: true);
-    if (_file.existsSync()) {
-      _file.deleteSync();
-    }
+    // Preserve the last valid identity if the process exits before rename.
+    // App-support files reside on the same filesystem on iOS/Android.
     tmp.renameSync(_file.path);
   }
 
