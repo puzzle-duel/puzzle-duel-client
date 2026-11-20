@@ -27,6 +27,9 @@ final class ScriptedUatApi extends UatApi {
   Future<UatHttpResult> get(String path) => onRequest('GET', path, null);
 
   @override
+  Future<UatHttpResult> patch(String path) => onRequest('PATCH', path, null);
+
+  @override
   Future<UatHttpResult> post(String path, [Object? body]) {
     if (path.endsWith('/commands')) commandBodies.add(body);
     if (path.endsWith('/claims/daily')) claimPosts += 1;
@@ -146,8 +149,16 @@ void main() {
       expect(api.commandBodies, hasLength(2));
       expect(identical(api.commandBodies[0], api.commandBodies[1]), isTrue);
       expect(identical(api.commandBodies[0], first), isTrue);
-      expect(controller.session.applyMoveCallCount, 0);
+      // Local apply is used only to arm AnimationScript; ranked score is server.
+      expect(controller.session.applyMoveCallCount, 1);
+      expect(controller.session.view.phase, GameScreenPhase.resolving);
       expect(controller.scoreDelta, 300);
+      expect(controller.session.view.score, 300);
+      final script = controller.session.view.activeScript!;
+      controller.session.completeResolution(
+        generation: script.generation,
+        resolutionId: script.resolutionId,
+      );
       expect(controller.session.view.score, 300);
     },
   );
@@ -168,7 +179,7 @@ void main() {
         return const UatHttpResult(200, {
           'seriesId': '11111111-1111-4111-8111-111111111111',
           'status': 'ACTIVE',
-          'original': false,
+          'original': true,
         });
       }
       if (path.endsWith('/board')) {

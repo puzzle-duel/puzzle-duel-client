@@ -66,6 +66,8 @@ class UatApi {
 
   Future<UatHttpResult> get(String path) => _send('GET', path);
 
+  Future<UatHttpResult> patch(String path) => _send('PATCH', path);
+
   Future<UatHttpResult> post(String path, [Object? body]) =>
       _send('POST', path, body);
 
@@ -132,6 +134,7 @@ class UatApi {
         endpoint: path,
         status: response.statusCode,
         category: category,
+        errorCode: json is Map ? json['error']?.toString() : null,
       );
       return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
@@ -221,11 +224,39 @@ class UatApi {
     required String endpoint,
     required int status,
     required UatFailureCategory category,
+    String? errorCode,
   }) {
+    final safeError = diagnosticErrorCode(errorCode);
     _perfLog(
       'http.done operation=$operation endpoint=$endpoint '
-      'status=$status category=${category.name}',
+      'status=$status category=${category.name}'
+      '${safeError == null ? '' : ' error=$safeError'}',
     );
+  }
+
+  /// Only known protocol error codes may enter diagnostics. Never log an
+  /// arbitrary response string (which could accidentally contain secrets).
+  static String? diagnosticErrorCode(String? code) {
+    if (code == null) return null;
+    return const {
+      'SERIES_NOT_OWNED',
+      'RECOVERY_NOT_ELIGIBLE',
+      'RECOVERY_PROOF_INVALID',
+      'WRITER_STILL_ACTIVE',
+      'STALE_WRITER',
+      'SERIES_TERMINAL',
+      'IDLE_EXPIRED',
+      'HARD_CUTOFF_EXPIRED',
+      'SERIES_STATE_INCONSISTENT',
+      'WRITER_NOT_AUTHORIZED',
+      'UNAUTHENTICATED',
+      'STATE_CONFLICT',
+      'CLAIM_WINDOW_CLOSED',
+      'TIMEOUT',
+      'OFFLINE',
+      'MALFORMED_REQUEST',
+      'REQUEST_FAILED',
+    }.contains(code) ? code : null;
   }
 
   static void _perfLog(String message) {
