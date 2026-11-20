@@ -56,7 +56,10 @@ abstract final class PremiumAppIconComposer {
     for (final slot in layout) {
       final center = Offset(slot.norm.dx * size, slot.norm.dy * size);
       if (slot.shape == null) {
-        _paintTrophy(canvas, center, pieceSize, trophy);
+        // Optical lift: cup silhouette sits lower than filled gems at the same
+        // slot center — nudge up so BR trophy aligns with BL hexagon.
+        final trophyCenter = center.translate(0, -pieceSize * 0.05);
+        _paintTrophy(canvas, trophyCenter, pieceSize, trophy);
         continue;
       }
       _paintCanonicalPiece(canvas, center, pieceSize, slot.shape!);
