@@ -508,12 +508,16 @@ final class TournamentController extends ChangeNotifier {
 
   Future<void> advance() async {
     if (!tournamentReady || rankedWriterLocked || moveInFlight ||
-        hasPendingCommand || _renewingWriter) return;
+        hasPendingCommand || _renewingWriter) {
+      return;
+    }
     final originalSeries = seriesId;
     final originalOrdinal = day?.ordinal;
     if (!await _ensureLiveWriterSession()) return;
     if (!tournamentReady || rankedWriterLocked ||
-        originalSeries != seriesId || originalOrdinal != day?.ordinal) return;
+        originalSeries != seriesId || originalOrdinal != day?.ordinal) {
+      return;
+    }
     final id = seriesId;
     final ordinal = day?.ordinal;
     if (id == null || ordinal == null) return;
