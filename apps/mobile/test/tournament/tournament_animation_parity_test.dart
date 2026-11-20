@@ -69,6 +69,7 @@ ScriptedUatApi _boardApi({
   bool awaitAdvanceAfter = false,
   bool resultsPublishedAfter = false,
   int ordinal = 1,
+  Future<void>? resultsGate,
 }) {
   var posts = 0;
   return ScriptedUatApi((method, path, body) async {
@@ -103,6 +104,7 @@ ScriptedUatApi _boardApi({
       });
     }
     if (path.endsWith('/results')) {
+      if (resultsGate != null) await resultsGate;
       return const UatHttpResult(200, {
         'all': true,
         'onTimeAwarded': true,
@@ -443,4 +445,103 @@ void main() {
     expect(applied!.scoreDelta, 0);
     expect(session.view.activeScript!.applied.scoreDelta, 0);
   });
+  test('leaving Play during completion beat cannot navigate back', () async {
+    final resolved = _localResolve('V3-02-single-wave.json');
+    final directory = Directory.systemTemp.createTempSync('pzd-anim-leave');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final controller = await _boot(
+      api: _boardApi(
+        initialState: () => resolved.initial.toJson(),
+        finalState: () => resolved.applied.finalState.toJson(),
+        commandStatus: () => 200,
+        awaitAdvanceAfter: true,
+      ),
+      directory: directory,
+    );
+    addTearDown(controller.dispose);
+    controller.session.selectOffer(resolved.offer);
+    expect(controller.session.submitTap(resolved.tap), isTrue);
+    await _awaitMoveSettled(controller);
+    final script = controller.session.view.activeScript!;
+    controller.session.completeResolution(
+      generation: script.generation,
+      resolutionId: script.resolutionId,
+    );
+    await controller.back();
+    final leftPlace = controller.route.place;
+    await Future<void>.delayed(kResolutionCompletionBeat);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.route.place, leftPlace);
+    expect(controller.route.place, isNot(TournamentPlace.transition));
+  });
+
+  test('results response after leaving Play is ignored', () async {
+    final resolved = _localResolve('V3-02-single-wave.json');
+    final directory = Directory.systemTemp.createTempSync('pzd-anim-async');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final resultsGate = Completer<void>();
+    final controller = await _boot(
+      api: _boardApi(
+        initialState: () => resolved.initial.toJson(),
+        finalState: () => resolved.applied.finalState.toJson(),
+        commandStatus: () => 200,
+        resultsPublishedAfter: true,
+        ordinal: 6,
+        resultsGate: resultsGate.future,
+      ),
+      directory: directory,
+    );
+    addTearDown(controller.dispose);
+    controller.session.selectOffer(resolved.offer);
+    expect(controller.session.submitTap(resolved.tap), isTrue);
+    for (var i = 0; i < 40 && controller.session.view.activeScript == null; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.session.view.activeScript, isNotNull);
+    controller.showOverview();
+    resultsGate.complete();
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.route.place, TournamentPlace.overview);
+    expect(controller.results, isEmpty);
+    expect(controller.awaitingResolutionNavigation, isFalse);
+  });
+
+  test('leaving Play invalidates the Reduce Motion completion route', () async {
+    final resolved = _localResolve('V3-02-single-wave.json');
+    final directory = Directory.systemTemp.createTempSync('pzd-anim-rm-leave');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final controller = await _boot(
+      api: _boardApi(
+        initialState: () => resolved.initial.toJson(),
+        finalState: () => resolved.applied.finalState.toJson(),
+        commandStatus: () => 200,
+        awaitAdvanceAfter: true,
+      ),
+      directory: directory,
+      reduceMotion: () => true,
+    );
+    addTearDown(controller.dispose);
+    controller.session.selectOffer(resolved.offer);
+    expect(controller.session.submitTap(resolved.tap), isTrue);
+    await _awaitMoveSettled(controller);
+    controller.returnToHomeShell();
+    final script = controller.session.view.activeScript;
+    if (script != null) {
+      controller.session.completeResolution(
+        generation: script.generation,
+        resolutionId: script.resolutionId,
+      );
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.route.place, TournamentPlace.home);
+  });
+
 }
