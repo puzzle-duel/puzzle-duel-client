@@ -217,7 +217,7 @@ final class PremiumPieceRenderer extends CustomPainter {
       case Shape.diamond:
         _diamondSpecular(canvas, c, r);
       case Shape.triangle:
-        _triangleSpecular(canvas, c, r);
+        _hexagonSpecular(canvas, c, r);
     }
     canvas.restore();
   }
@@ -334,29 +334,25 @@ final class PremiumPieceRenderer extends CustomPainter {
     }
   }
 
-  void _triangleSpecular(Canvas canvas, Offset c, double r) {
-    // Broad streak down upper-left slope.
-    canvas.save();
-    canvas.translate(c.dx, c.dy);
-    canvas.rotate(-0.55);
-    final streak = Rect.fromCenter(
-      center: Offset(-r * 0.05, -r * 0.22),
-      width: r * 1.4,
-      height: r * 0.36,
+  void _hexagonSpecular(Canvas canvas, Offset c, double r) {
+    // Broad UL soft bloom across flat-top face.
+    final main = Rect.fromCenter(
+      center: c.translate(-r * 0.18, -r * 0.28),
+      width: r * 1.25,
+      height: r * 0.72,
     );
     canvas.drawOval(
-      streak,
+      main,
       Paint()
         ..shader = RadialGradient(
           colors: [
             Colors.white.withValues(alpha: 0.9),
-            const Color(0xFFFFF3C0).withValues(alpha: 0.35),
+            const Color(0xFFFFF8D0).withValues(alpha: 0.38),
             Colors.transparent,
           ],
-          stops: const [0.0, 0.4, 1.0],
-        ).createShader(streak),
+          stops: const [0.0, 0.42, 1.0],
+        ).createShader(main),
     );
-    canvas.restore();
 
     if (tier.drawSecondarySpecular) {
       final base = Rect.fromCenter(
@@ -436,8 +432,8 @@ final class PremiumPieceRenderer extends CustomPainter {
         c.translate(r * 0.55, r * 0.35),
       ],
       Shape.triangle => [
-        c.translate(-r * 0.05, -r * 0.72),
-        c.translate(-r * 0.55, r * 0.35),
+        c.translate(-r * 0.28, -r * 0.42),
+        c.translate(r * 0.42, r * 0.18),
       ],
     };
     for (final p in spots) {
@@ -449,118 +445,31 @@ final class PremiumPieceRenderer extends CustomPainter {
     }
   }
 
-  // —— L11 recessed chevron ——
+  // —— L11 direction arrow: ONE solid chevron stroke (no cavity / rim / glow)
   void _paintChevron(Canvas canvas, Offset c, double r, double side) {
-    if (shape == Shape.triangle) {
-      _paintTriangleChevron(canvas, c, r, side);
-      return;
-    }
-
-    // Circle / diamond — keep the established cavity treatment byte-stable.
-    final origin = ProtoShapeGeometry.glyphOrigin(c, r, shape);
-    final stroke = math.max(3.2, side * 0.078) * tier.chevronScale;
-    final glyph = ProtoShapeGeometry.chevron(
-      origin: origin,
-      radius: r,
-      direction: direction,
-      stroke: stroke,
-      scale: tier.chevronScale,
-    );
-    final cavity = ProtoMaterialPalette.chevron(shape);
-
-    canvas.drawPath(
-      glyph.filled.shift(Offset(side * 0.01, side * 0.014)),
-      Paint()..color = Colors.black.withValues(alpha: 0.45),
-    );
-    canvas.drawPath(glyph.filled, Paint()..color = cavity);
-    canvas.save();
-    canvas.clipPath(glyph.filled);
-    canvas.drawPath(
-      glyph.filled.shift(Offset(side * 0.008, side * 0.01)),
-      Paint()..color = Colors.black.withValues(alpha: 0.35),
-    );
-    canvas.restore();
-    canvas.drawPath(
-      glyph.spine.shift(Offset(-side * 0.008, -side * 0.01)),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.1, stroke * 0.28)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = ProtoMaterialPalette.rimLip,
-    );
-    canvas.drawPath(
-      glyph.spine,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke * 0.35
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = cavity,
-    );
-  }
-
-  /// Triangle-only optical layout; circle/diamond path above is untouched.
-  void _paintTriangleChevron(Canvas canvas, Offset c, double r, double side) {
-    final faceInset = 1.0 - tier.bevelFrac * 1.35;
-    final face = ProtoShapeGeometry.facePath(c, r, shape, faceInset);
-    final stroke =
-        math.max(3.4, side * 0.086) *
-        tier.chevronScale *
-        (tier == ProtoOpticalTier.board ? 1.06 : 1.0);
-    final glyph = ProtoShapeGeometry.triangleChevron(
+    final layout = ProtoShapeGeometry.chevronLayout(
       bodyCenter: c,
       bodyRadius: r,
+      shape: shape,
       direction: direction,
-      stroke: stroke,
-      scale: tier.chevronScale * (tier == ProtoOpticalTier.board ? 0.92 : 0.96),
       tier: tier,
     );
-    final cavity = ProtoMaterialPalette.chevron(Shape.triangle);
-
-    canvas.save();
-    canvas.clipPath(face);
-
-    // Lower-right occlusion.
-    canvas.drawPath(
-      glyph.filled.shift(Offset(side * 0.011, side * 0.015)),
-      Paint()..color = Colors.black.withValues(alpha: 0.52),
-    );
-    // Deep cavity.
-    canvas.drawPath(glyph.filled, Paint()..color = cavity);
-    // Inner bevel + UL cavity highlight.
-    canvas.save();
-    canvas.clipPath(glyph.filled);
-    canvas.drawPath(
-      glyph.filled.shift(Offset(side * 0.008, side * 0.01)),
-      Paint()..color = Colors.black.withValues(alpha: 0.40),
+    final path = ProtoShapeGeometry.chevronSpine(
+      origin: layout.origin,
+      radius: layout.radius,
+      direction: direction,
+      scale: 1.0,
     );
     canvas.drawPath(
-      glyph.filled.shift(Offset(-side * 0.006, -side * 0.008)),
-      Paint()..color = Colors.white.withValues(alpha: 0.12),
-    );
-    canvas.restore();
-    // Upper-left rim lip.
-    canvas.drawPath(
-      glyph.spine.shift(Offset(-side * 0.009, -side * 0.011)),
+      path,
       Paint()
+        ..color = ProtoShapeGeometry.directionInk
         ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.2, stroke * 0.30)
+        ..strokeWidth = ProtoShapeGeometry.chevronStrokeWidth(side, tier)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0xAAFFFFFF),
+        ..isAntiAlias = true,
     );
-    canvas.drawPath(
-      glyph.spine,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke * 0.36
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = cavity,
-    );
-
-    canvas.restore();
   }
 
   @override

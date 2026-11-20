@@ -1,15 +1,15 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-/// Sampled material tokens from
-/// `PZD-47-premium-shapes-reference.png`
-/// SHA-256 `e1ad23104bdff8302434bdbcfbcec81d7ccbd70f9bfa02387ed8d94a70992cb6`.
+/// Material tokens for the owner-approved identity:
+/// green circle / purple diamond / golden hexagon
+/// (`docs/features/pzd-47/reference/hexagon-icon-visual-reference.png`).
 ///
-/// Production PZD-47 premium material tokens (owner-approved prototype).
+/// Domain note: golden hexagon paints for serialized [Shape.triangle].
 abstract final class ProtoMaterialPalette {
   static const String referenceSha256 =
-      'e1ad23104bdff8302434bdbcfbcec81d7ccbd70f9bfa02387ed8d94a70992cb6';
-  static const String version = 'pzd47-premium-material-v1';
+      'dff57723ed17a469f5bd437a589c0f51e5ef970c657248d59638de77c99b689c';
+  static const String version = 'pzd47-hexagon-identity-v1';
 
   static const Color bgPlate = Color(0xFF120D31);
 
@@ -39,19 +39,18 @@ abstract final class ProtoMaterialPalette {
   static const Color diamondChevron = Color(0xFF1C0045);
   static const Color diamondBounce = Color(0x66B533E9);
 
-  // —— Triangle ——
-  static const Color triangleFaceUl = Color(0xFFFFF0A8);
+  // —— Hexagon (domain Shape.triangle) ——
+  static const Color triangleFaceUl = Color(0xFFFFF4B0);
   static const Color triangleFace = Color(0xFFFFC22A);
-  static const Color triangleFaceUr = Color(0xFFE08A00);
+  static const Color triangleFaceUr = Color(0xFFE89A10);
   static const Color triangleFaceLl = Color(0xFFFFB400);
   static const Color triangleFaceLr = Color(0xFFFF8A00);
-  static const Color triangleBevelHi = Color(0xFFFFF3C0);
-  static const Color triangleBevelLo = Color(0xFF8A3E08);
-  static const Color triangleExtrusion = Color(0xFF6A2E06);
+  static const Color triangleBevelHi = Color(0xFFFFF8D0);
+  static const Color triangleBevelLo = Color(0xFF9A4A08);
+  static const Color triangleExtrusion = Color(0xFF7A3206);
   static const Color triangleShade = Color(0xFF4A1E04);
-  /// Dark cavity (parity with circle/diamond depth; avoid muddy mid-brown).
-  static const Color triangleChevron = Color(0xFF140A02);
-  static const Color triangleBounce = Color(0x66E8B020);
+  static const Color triangleChevron = Color(0xFF18201F);
+  static const Color triangleBounce = Color(0x66FFC22A);
 
   static const Color rimLip = Color(0x88FFFFFF);
 

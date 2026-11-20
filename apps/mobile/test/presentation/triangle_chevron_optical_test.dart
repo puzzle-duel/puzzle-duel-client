@@ -1,69 +1,58 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium/optical_tier.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium/shape_geometry.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 void main() {
-  group('triangle chevron optical layout', () {
+  group('hexagon presentation + shared chevron', () {
     const c = Offset(50, 50);
     const r = 40.0;
 
-    test('silhouette stays apex-up for all chevron directions', () {
-      final v = ProtoShapeGeometry.triangleVertices(c, r);
-      expect(v.apex.dy, lessThan(v.bottomLeft.dy));
-      expect(v.apex.dy, lessThan(v.bottomRight.dy));
-      expect(v.apex.dx, closeTo(c.dx, 1e-9));
+    test('domain triangle paints as flat-top hexagon (6 vertices)', () {
+      final pts = ProtoShapeGeometry.flatTopHexagon(c, r);
+      expect(pts.length, 6);
+      // Top edge is horizontal.
+      expect(pts[0].dy, closeTo(pts[1].dy, 1e-9));
+      // Bottom edge is horizontal.
+      expect(pts[3].dy, closeTo(pts[4].dy, 1e-9));
+      expect(pts[0].dy, lessThan(pts[3].dy));
     });
 
-    test('direction origins are not a single shared vertical offset', () {
-      final origins = {
-        for (final d in Direction.values)
-          d: ProtoShapeGeometry.triangleChevronOrigin(
-            c,
-            r,
-            direction: d,
-            tier: ProtoOpticalTier.board,
-          ),
-      };
-      expect(origins[Direction.up]!.dy, isNot(origins[Direction.down]!.dy));
-      expect(origins[Direction.left]!.dx, isNot(origins[Direction.right]!.dx));
-      // Distinct pair-wise positions.
-      final pts = origins.values.toSet();
-      expect(pts.length, 4);
+    test('outerPath for Shape.triangle is hexagon, not triangle', () {
+      final path = ProtoShapeGeometry.outerPath(c, r, Shape.triangle);
+      final bounds = path.getBounds();
+      // Hexagon is wider than a tall triangle at same r.
+      expect(bounds.width, greaterThan(bounds.height * 0.95));
     });
 
-    test('filled chevron stays inside inset face for all dirs × tiers', () {
-      for (final tier in ProtoOpticalTier.values) {
-        for (final d in Direction.values) {
-          final faceFrac = ProtoShapeGeometry.triangleSafeFaceFrac(tier);
-          final face = ProtoShapeGeometry.facePath(c, r, Shape.triangle, faceFrac);
-          final stroke = 4.0 * tier.chevronScale;
-          final glyph = ProtoShapeGeometry.triangleChevron(
-            bodyCenter: c,
-            bodyRadius: r,
-            direction: d,
-            stroke: stroke,
-            scale: tier.chevronScale * 0.94,
-            tier: tier,
-          );
-          final bounds = glyph.filled.getBounds();
-          // Sample corners of the chevron AABB must lie in/near the face.
-          final samples = <Offset>[
-            bounds.center,
-            bounds.topCenter,
-            bounds.bottomCenter,
-            bounds.centerLeft,
-            bounds.centerRight,
-          ];
-          for (final p in samples) {
-            expect(
-              face.contains(p),
-              isTrue,
-              reason: 'tier=$tier dir=$d sample=$p outside face',
+    test('spine has clear V opening for all shapes × dirs × tiers', () {
+      for (final shape in Shape.values) {
+        for (final tier in ProtoOpticalTier.values) {
+          for (final d in Direction.values) {
+            final layout = ProtoShapeGeometry.chevronLayout(
+              bodyCenter: c,
+              bodyRadius: r,
+              shape: shape,
+              direction: d,
+              tier: tier,
             );
+            final path = ProtoShapeGeometry.chevronSpine(
+              origin: layout.origin,
+              radius: layout.radius,
+              direction: d,
+            );
+            final len = path
+                .computeMetrics()
+                .fold<double>(0, (a, m) => a + m.length);
+            expect(len, greaterThan(layout.radius * 0.7));
           }
         }
       }
+    });
+
+    test('single shared ink color', () {
+      expect(ProtoShapeGeometry.directionInk, const Color(0xFF18201F));
     });
   });
 }

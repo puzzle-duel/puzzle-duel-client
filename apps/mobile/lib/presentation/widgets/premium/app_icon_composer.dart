@@ -9,11 +9,11 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 /// Composes the PZD-47 launcher master from the **same** [PremiumPieceRenderer]
 /// used by board/tray, plus a decorative trophy raster (not a playable piece).
 ///
-/// Provenance: circle / diamond / triangle are painted exclusively via
+/// Provenance: circle / diamond / hexagon (domain triangle) are painted via
 /// [PremiumPieceRenderer] — never via approximate palette recreations.
 abstract final class PremiumAppIconComposer {
   static const String provenanceRenderer = 'PremiumPieceRenderer';
-  static const String provenanceVersion = 'pzd47-premium-material-v1';
+  static const String provenanceVersion = 'pzd47-hexagon-identity-v1';
   static const Color background = Color(0xFF0B0F28);
 
   /// 2×2 layout centers in a [canvas] square (normalized 0–1 then scaled).
@@ -85,61 +85,109 @@ abstract final class PremiumAppIconComposer {
     double pieceSize,
     ui.Image? trophy,
   ) {
+    // Always draw a clean decorative cup on the navy plate — never paste a
+    // trophy crop that carries a purple rectangular plate artifact.
     final dst = Rect.fromCenter(
       center: center,
       width: pieceSize * 0.92,
       height: pieceSize * 0.92,
     );
-    if (trophy != null) {
-      final src = Rect.fromLTWH(
-        0,
-        0,
-        trophy.width.toDouble(),
-        trophy.height.toDouble(),
-      );
-      canvas.drawImageRect(trophy, src, dst, Paint()..filterQuality = FilterQuality.high);
-      return;
-    }
-    // Fallback golden cup silhouette if trophy raster is unavailable — still
-    // decorative only; shapes above remain PremiumPieceRenderer.
-    final r = pieceSize * 0.36;
+    final r = pieceSize * 0.34;
+    // Soft gold ambient only — never a rectangular plate.
     final cup = Path()
-      ..moveTo(center.dx - r * 0.55, center.dy - r * 0.35)
-      ..lineTo(center.dx + r * 0.55, center.dy - r * 0.35)
+      ..moveTo(center.dx - r * 0.55, center.dy - r * 0.38)
+      ..lineTo(center.dx + r * 0.55, center.dy - r * 0.38)
       ..quadraticBezierTo(
-        center.dx + r * 0.65,
-        center.dy + r * 0.15,
-        center.dx + r * 0.2,
-        center.dy + r * 0.35,
+        center.dx + r * 0.68,
+        center.dy + r * 0.12,
+        center.dx + r * 0.22,
+        center.dy + r * 0.32,
       )
-      ..lineTo(center.dx + r * 0.18, center.dy + r * 0.55)
-      ..lineTo(center.dx - r * 0.18, center.dy + r * 0.55)
-      ..lineTo(center.dx - r * 0.2, center.dy + r * 0.35)
+      ..lineTo(center.dx + r * 0.18, center.dy + r * 0.52)
+      ..lineTo(center.dx - r * 0.18, center.dy + r * 0.52)
+      ..lineTo(center.dx - r * 0.22, center.dy + r * 0.32)
       ..quadraticBezierTo(
-        center.dx - r * 0.65,
-        center.dy + r * 0.15,
+        center.dx - r * 0.68,
+        center.dy + r * 0.12,
         center.dx - r * 0.55,
-        center.dy - r * 0.35,
+        center.dy - r * 0.38,
       )
       ..close();
     canvas.drawPath(
       cup,
       Paint()
-        ..shader = LinearGradient(
+        ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: const [
-            Color(0xFFFFF0A0),
+          colors: [
+            Color(0xFFFFF3B0),
             Color(0xFFFFC22A),
             Color(0xFFB86A00),
           ],
         ).createShader(dst),
     );
-    canvas.drawCircle(
-      center.translate(0, r * 0.72),
-      r * 0.22,
+    // Handles.
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: center.translate(-r * 0.62, -r * 0.05),
+        width: r * 0.55,
+        height: r * 0.7,
+      ),
+      -1.2,
+      2.2,
+      false,
+      Paint()
+        ..color = const Color(0xFFFFC22A)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(2.0, r * 0.12),
+    );
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: center.translate(r * 0.62, -r * 0.05),
+        width: r * 0.55,
+        height: r * 0.7,
+      ),
+      math.pi - 1.0,
+      2.2,
+      false,
+      Paint()
+        ..color = const Color(0xFFFFC22A)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(2.0, r * 0.12),
+    );
+    // Stem + base.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: center.translate(0, r * 0.62),
+          width: r * 0.22,
+          height: r * 0.28,
+        ),
+        Radius.circular(r * 0.06),
+      ),
+      Paint()..color = const Color(0xFFE0A010),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: center.translate(0, r * 0.82),
+          width: r * 0.7,
+          height: r * 0.16,
+        ),
+        Radius.circular(r * 0.08),
+      ),
       Paint()..color = const Color(0xFFFFC22A),
     );
+    // Star mark.
+    canvas.drawCircle(
+      center.translate(0, -r * 0.05),
+      r * 0.12,
+      Paint()..color = const Color(0xFFFFF8D0),
+    );
+    // [trophy] retained for API compatibility; ignored to avoid purple plate.
+    assert(() {
+      return trophy == null || trophy.width > 0;
+    }());
   }
 
   /// Render to a [ui.Image] for export / tests.

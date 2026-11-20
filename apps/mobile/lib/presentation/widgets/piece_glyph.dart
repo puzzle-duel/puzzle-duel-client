@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium/optical_tier.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium/premium_piece_renderer.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium/shape_geometry.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
@@ -33,7 +34,8 @@ final class PieceGlyph extends StatelessWidget {
   static String _shapeLabel(Shape shape) => switch (shape) {
     Shape.circle => 'circle',
     Shape.diamond => 'diamond',
-    Shape.triangle => 'triangle',
+    // Domain wire remains `triangle`; presentation identity is hexagon.
+    Shape.triangle => 'hexagon',
   };
 
   static String _directionLabel(Direction direction) => switch (direction) {
@@ -408,10 +410,10 @@ final class PiecePainter extends CustomPainter {
           r * 0.22,
         );
       case Shape.triangle:
-        final v = triangleVertices(c, r);
+        // Presentation: golden flat-top hexagon (domain wire still `triangle`).
         return roundedPolygon(
-          [v.apex, v.bottomRight, v.bottomLeft],
-          r * 0.20,
+          ProtoShapeGeometry.flatTopHexagon(c, r),
+          r * 0.14,
         );
     }
   }

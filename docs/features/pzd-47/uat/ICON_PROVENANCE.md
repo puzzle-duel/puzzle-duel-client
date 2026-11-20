@@ -4,10 +4,15 @@
 | --- | --- |
 | Composer | `PremiumAppIconComposer` |
 | Shape painter | `PremiumPieceRenderer` |
-| Material version | `pzd47-premium-material-v1` |
+| Material version | `pzd47-hexagon-identity-v1` |
+| Owner reference | `docs/features/pzd-47/reference/hexagon-icon-visual-reference.png` |
 | Master | `apps/mobile/assets/branding/app_icon_master_1024.png` |
-| Circle / diamond / triangle | Painted by `PremiumPieceRenderer` with `Direction.up` |
-| Trophy | Decorative raster only (not a playable piece) |
-| Export | `PZD47_EXPORT_ICON=1 flutter test test/presentation/premium_app_icon_composer_test.dart` |
+| Top-left | Green circle (`Shape.circle`) Up |
+| Top-right | Purple diamond (`Shape.diamond`) Up |
+| Bottom-left | Golden hexagon (`Shape.triangle` → hexagon presentation) Up |
+| Bottom-right | Clean Canvas trophy (no rectangular plate) |
+| Direction glyph | One shared dark stroke chevron (`ProtoShapeGeometry.directionInk`) |
+| Export | `PZD47_EXPORT_CHEVRON_EVIDENCE=1 flutter test test/presentation/simple_chevron_evidence_test.dart` |
+| Platform icons | `python3 tools/pzd47/generate_app_icons.py` |
 
-This file asserts **shared implementation**, not mere palette similarity.
+Shared implementation — not palette-only parity. See `DOMAIN_VISUAL_MAPPING.md`.

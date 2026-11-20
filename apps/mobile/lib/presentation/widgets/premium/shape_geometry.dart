@@ -14,12 +14,27 @@ abstract final class ProtoShapeGeometry {
         final v = diamondVertices(c, r);
         return roundedPolygon([v.north, v.east, v.south, v.west], r * 0.18);
       case Shape.triangle:
-        final v = triangleVertices(c, r);
-        return roundedPolygon(
-          [v.apex, v.bottomRight, v.bottomLeft],
-          r * 0.22,
-        );
+        // Presentation mapping: domain `Shape.triangle` → golden flat-top hexagon.
+        return roundedPolygon(flatTopHexagon(c, r), r * 0.14);
     }
+  }
+
+  /// Flat-top regular hexagon (fixed orientation; does not rotate with direction).
+  ///
+  /// Top and bottom edges are horizontal. Vertex order clockwise from top-left.
+  static List<Offset> flatTopHexagon(Offset c, double r) {
+    // Flat-top: width = 2R, height = √3·R where R is center→vertex distance.
+    final R = r * 0.95;
+    final w = R;
+    final h = R * math.sqrt(3) / 2;
+    return [
+      Offset(c.dx - w * 0.5, c.dy - h), // top-left
+      Offset(c.dx + w * 0.5, c.dy - h), // top-right
+      Offset(c.dx + w, c.dy), // right
+      Offset(c.dx + w * 0.5, c.dy + h), // bottom-right
+      Offset(c.dx - w * 0.5, c.dy + h), // bottom-left
+      Offset(c.dx - w, c.dy), // left
+    ];
   }
 
   static Path facePath(Offset c, double r, Shape shape, double inset) =>
@@ -40,11 +55,8 @@ abstract final class ProtoShapeGeometry {
     bottomLeft: Offset(c.dx - r * 0.95, c.dy + r * 0.82),
   );
 
-  /// Optical balance point (triangle uses face centroid of the usable inset).
-  static Offset glyphOrigin(Offset c, double r, Shape shape) => switch (shape) {
-    Shape.triangle => triangleCentroid(c, r),
-    Shape.circle || Shape.diamond => c,
-  };
+  /// Optical balance point — hexagon/circle/diamond use geometric center.
+  static Offset glyphOrigin(Offset c, double r, Shape shape) => c;
 
   /// Centroid of the upright triangle silhouette at radius [r].
   static Offset triangleCentroid(Offset c, double r) {
@@ -56,10 +68,11 @@ abstract final class ProtoShapeGeometry {
   }
 
   /// Inset usable face for chevron placement (inside bevel / extrusion).
+  /// Keep close to body radius so arms stay as long as circle/diamond.
   static double triangleSafeFaceFrac(ProtoOpticalTier? tier) => switch (tier) {
-    ProtoOpticalTier.board => 0.70,
-    ProtoOpticalTier.tray => 0.72,
-    ProtoOpticalTier.hero || null => 0.74,
+    ProtoOpticalTier.board => 0.82,
+    ProtoOpticalTier.tray => 0.84,
+    ProtoOpticalTier.hero || null => 0.86,
   };
 
   /// Direction-specific optical origin inside the upright triangle face.
@@ -111,10 +124,64 @@ abstract final class ProtoShapeGeometry {
     return path;
   }
 
-  /// Filled chevron cavity (independent of body rotation).
+  /// Shared dark chevron ink (one stroke for all shapes).
+  static const Color directionInk = Color(0xFF18201F);
+
+  /// Canonical V-spine for one clean stroke — no filled cavity.
   ///
-  /// [compact] tightens tip/wing proportions (triangle face). [armThick]
-  /// multiplies cavity half-width for thicker recessed arms.
+  /// Proportions are identical across circle / diamond / triangle so the arrow
+  /// language stays recognizable; only [origin] / usable [radius] vary.
+  static Path chevronSpine({
+    required Offset origin,
+    required double radius,
+    required Direction direction,
+    double scale = 1.0,
+  }) {
+    final unit = switch (direction) {
+      Direction.up => const Offset(0, -1),
+      Direction.right => const Offset(1, 0),
+      Direction.down => const Offset(0, 1),
+      Direction.left => const Offset(-1, 0),
+    };
+    // Long readable arms with a clear V opening (not a collapsed blob).
+    final tipLen = radius * 0.48 * scale;
+    final wingDepth = tipLen * 0.74;
+    final wingSpread = tipLen * 0.62;
+    final tip = origin + unit * tipLen;
+    final back = tip - unit * wingDepth;
+    final perp = Offset(-unit.dy, unit.dx);
+    final left = back + perp * wingSpread;
+    final right = back - perp * wingSpread;
+    return Path()
+      ..moveTo(left.dx, left.dy)
+      ..lineTo(tip.dx, tip.dy)
+      ..lineTo(right.dx, right.dy);
+  }
+
+  /// Stroke width for the single chevron ink path.
+  /// Board stays slightly thinner so the V opening remains readable at 7×7.
+  static double chevronStrokeWidth(double side, ProtoOpticalTier tier) {
+    final base = math.max(2.2, side * 0.065);
+    return switch (tier) {
+      ProtoOpticalTier.hero => base * 1.02,
+      ProtoOpticalTier.tray => base * 1.05,
+      ProtoOpticalTier.board => base * 1.0,
+    };
+  }
+
+  /// Origin + usable radius for the shared spine on any shape.
+  static ({Offset origin, double radius}) chevronLayout({
+    required Offset bodyCenter,
+    required double bodyRadius,
+    required Shape shape,
+    required Direction direction,
+    ProtoOpticalTier? tier,
+  }) {
+    // All three presentation silhouettes are centered; direction-only chevron.
+    return (origin: bodyCenter, radius: bodyRadius * 0.95);
+  }
+
+  /// Legacy filled helper retained for geometry/containment tests only.
   static ({Path filled, Path spine}) chevron({
     required Offset origin,
     required double radius,
@@ -124,61 +191,32 @@ abstract final class ProtoShapeGeometry {
     bool compact = false,
     double armThick = 1.0,
   }) {
+    final spine = chevronSpine(
+      origin: origin,
+      radius: radius * (compact ? 0.88 : 1.0),
+      direction: direction,
+      scale: scale,
+    );
+    // Approximate fill metrics for older containment probes.
     final unit = switch (direction) {
       Direction.up => const Offset(0, -1),
       Direction.right => const Offset(1, 0),
       Direction.down => const Offset(0, 1),
       Direction.left => const Offset(-1, 0),
     };
-    final tipLen = radius * (compact ? 0.40 : 0.50) * scale;
-    final wingDepth = tipLen * (compact ? 0.72 : 0.80);
-    final wingSpread = tipLen * (compact ? 0.50 : 0.58);
+    final tipLen = radius * (compact ? 0.40 : 0.46) * scale;
+    final wingDepth = tipLen * 0.78;
+    final wingSpread = tipLen * 0.56;
     final tip = origin + unit * tipLen;
     final back = tip - unit * wingDepth;
     final perp = Offset(-unit.dy, unit.dx);
     final left = back + perp * wingSpread;
     final right = back - perp * wingSpread;
-
-    final spine = Path()
-      ..moveTo(left.dx, left.dy)
-      ..lineTo(tip.dx, tip.dy)
-      ..lineTo(right.dx, right.dy);
-
     final half = stroke * 0.55 * armThick;
-    final filled = _strokeToFilled(left, tip, right, half);
-
-    return (filled: filled, spine: spine);
-  }
-
-  /// Triangle-specific compact chevron inside the safe face.
-  static ({Path filled, Path spine}) triangleChevron({
-    required Offset bodyCenter,
-    required double bodyRadius,
-    required Direction direction,
-    required double stroke,
-    required double scale,
-    ProtoOpticalTier? tier,
-  }) {
-    final origin = triangleChevronOrigin(
-      bodyCenter,
-      bodyRadius,
-      direction: direction,
-      tier: tier,
-    );
-    final faceR = bodyRadius * triangleSafeFaceFrac(tier);
-    return chevron(
-      origin: origin,
-      radius: faceR,
-      direction: direction,
-      stroke: stroke,
-      scale: scale,
-      compact: true,
-      armThick: 1.18,
-    );
+    return (filled: _strokeToFilled(left, tip, right, half), spine: spine);
   }
 
   static Path _strokeToFilled(Offset left, Offset tip, Offset right, double half) {
-    // Build a rounded chevron polygon around the V centerline.
     Offset n(Offset a, Offset b) {
       final d = b - a;
       final len = d.distance;

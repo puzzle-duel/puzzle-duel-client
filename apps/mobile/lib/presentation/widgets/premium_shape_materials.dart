@@ -9,7 +9,7 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 /// tokens. Body painting is owned by [PremiumPieceRenderer].
 abstract final class PremiumShapeMaterials {
   static const String sourceAsset =
-      'docs/features/pzd-47/prototype/reference/PZD-47-premium-shapes-reference.png';
+      'docs/features/pzd-47/reference/hexagon-icon-visual-reference.png';
   static const String sourceSha256 = ProtoMaterialPalette.referenceSha256;
   static const String version = ProtoMaterialPalette.version;
 

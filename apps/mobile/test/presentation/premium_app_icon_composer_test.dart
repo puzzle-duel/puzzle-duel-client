@@ -15,7 +15,7 @@ void main() {
     );
     expect(
       PremiumAppIconComposer.provenanceVersion,
-      'pzd47-premium-material-v1',
+      'pzd47-hexagon-identity-v1',
     );
     // Compile-time / type-level link: compositor imports the live painter.
     expect(PremiumPieceRenderer, isNotNull);

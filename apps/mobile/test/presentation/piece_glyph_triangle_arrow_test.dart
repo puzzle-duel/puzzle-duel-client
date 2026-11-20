@@ -112,13 +112,19 @@ void main() {
       expect(v.apex.dx, closeTo(c.dx, 1e-9));
     });
 
-    test('semantics labels unchanged', () {
+    test('semantics labels use presentation names', () {
       for (final shape in Shape.values) {
         for (final d in Direction.values) {
           final label = PieceGlyph.semanticsLabel(
             Piece(shape: shape, direction: d),
           );
-          expect(label, contains(shape.wire));
+          final presentation = switch (shape) {
+            Shape.circle => 'circle',
+            Shape.diamond => 'diamond',
+            // Domain wire remains triangle; UI presents hexagon.
+            Shape.triangle => 'hexagon',
+          };
+          expect(label, contains(presentation));
           expect(label, contains(d.wire));
           expect(label, contains('pointing'));
         }
