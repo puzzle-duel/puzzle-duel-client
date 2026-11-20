@@ -1,16 +1,18 @@
 import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium/optical_tier.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium/premium_piece_renderer.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium/shape_geometry.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Canonical premium piece glyph (PZD-47).
 ///
-/// Board and tray share [PiecePainter], which consumes
-/// [PremiumShapeMaterials] so gameplay pieces match the approved app-icon
-/// shapes. Direction comes from gameplay state and is independent of the
-/// diamond's 45° body rotation.
+/// Board and tray share [PiecePainter], which paints via the owner-approved
+/// [PremiumPieceRenderer]. Direction comes from gameplay state and is
+/// independent of the diamond's 45° body rotation.
 final class PieceGlyph extends StatelessWidget {
   const PieceGlyph({
     super.key,
@@ -32,7 +34,8 @@ final class PieceGlyph extends StatelessWidget {
   static String _shapeLabel(Shape shape) => switch (shape) {
     Shape.circle => 'circle',
     Shape.diamond => 'diamond',
-    Shape.triangle => 'triangle',
+    // Domain wire remains `triangle`; presentation identity is hexagon.
+    Shape.triangle => 'hexagon',
   };
 
   static String _directionLabel(Direction direction) => switch (direction) {
@@ -86,139 +89,40 @@ final class PiecePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide * 0.42;
-    final path = shapePath(center, radius, piece.shape);
     final side = size.shortestSide;
-    final shape = piece.shape;
-
-    // Soft lift / contact shadow without MaskFilter.blur (avoids first-frame
-    // blur shader compilation hitch on iOS during early interactions).
-    canvas.drawPath(
-      path.shift(Offset(side * 0.028, side * 0.055)),
-      Paint()
-        ..color = PremiumShapeMaterials.contactShadow.withValues(
-          alpha: selected ? 0.42 : 0.30,
-        )
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawPath(
-      path.shift(Offset(side * 0.012, side * 0.024)),
-      Paint()
-        ..color = Colors.black.withValues(alpha: selected ? 0.22 : 0.14)
-        ..style = PaintingStyle.fill,
+    final renderer = PremiumPieceRenderer(
+      shape: piece.shape,
+      direction: piece.direction,
+      tier: ProtoOpticalTierX.forSize(side),
     );
 
-    final bounds = Rect.fromCircle(center: center, radius: radius);
-    final bodyShader = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
-        fill,
-        PremiumShapeMaterials.mid(shape).withValues(alpha: fill.a),
-        deep,
-      ],
-      stops: const [0.0, 0.28, 0.62, 1.0],
-    ).createShader(bounds);
+    void drawPremium() => renderer.paint(canvas, size);
 
-    // Outer bevel shell (slightly deeper).
-    canvas.drawPath(
-      path,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            PremiumShapeMaterials.bevel(shape).withValues(alpha: fill.a),
-            deep,
-          ],
-        ).createShader(bounds)
-        ..style = PaintingStyle.fill,
-    );
-
-    // Raised face — inset silhouette matching icon extrusion depth.
-    final face = shapePath(center, radius * 0.86, shape);
-    canvas.drawPath(
-      face,
-      Paint()
-        ..shader = bodyShader
-        ..style = PaintingStyle.fill,
-    );
-
-    // Specular highlight (top-left light), clipped to body — no blur.
-    canvas.save();
-    canvas.clipPath(path);
-    final highlightCenter = center.translate(-radius * 0.28, -radius * 0.34);
-    final highlightRect = Rect.fromCenter(
-      center: highlightCenter,
-      width: radius * 1.15,
-      height: radius * 0.72,
-    );
-    canvas.drawOval(
-      highlightRect,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.85 * fill.a),
-            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.22 * fill.a),
-            PremiumShapeMaterials.highlight(shape).withValues(alpha: 0.0),
-          ],
-          stops: const [0.0, 0.45, 1.0],
-        ).createShader(highlightRect),
-    );
-    // Bright rim catch-light along the upper-left silhouette.
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.34 * fill.a)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.4, side * 0.038),
-    );
-    canvas.restore();
+    // Honour muted alpha from tray/board callers without baking it into the
+    // premium material stack.
+    if (fill.a < 0.999) {
+      canvas.saveLayer(
+        Offset.zero & size,
+        Paint()..color = Color.fromRGBO(255, 255, 255, fill.a),
+      );
+      drawPremium();
+      canvas.restore();
+    } else {
+      drawPremium();
+    }
 
     if (selected) {
+      final center = Offset(size.width / 2, size.height / 2);
+      final radius = side * 0.38;
+      final path = shapePath(center, radius, piece.shape);
       canvas.drawPath(
         path,
         Paint()
-          ..color = stroke.withValues(alpha: 0.95)
+          ..color = stroke.withValues(alpha: 0.95 * fill.a)
           ..style = PaintingStyle.stroke
           ..strokeWidth = math.max(2.6, side * 0.065),
       );
     }
-
-    // Direction glyph is composited independently of diamond body rotation.
-    final arrowStroke = directionArrowStroke(side);
-    final glyph = directionGlyph(
-      shape: shape,
-      shapeCenter: center,
-      radius: radius,
-      direction: piece.direction,
-      strokeWidth: arrowStroke,
-    );
-    final inset = PremiumShapeMaterials.directionInset.withValues(alpha: fill.a);
-    // Engraved depth: slight offset shadow then solid cutout.
-    canvas.drawPath(
-      glyph.filled.shift(Offset(0, side * 0.012)),
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.35 * fill.a)
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawPath(
-      glyph.filled,
-      Paint()
-        ..color = inset
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawPath(
-      glyph.path,
-      Paint()
-        ..color = inset
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = arrowStroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
   }
 
   /// Shared stroke scale for the direction family (Hard 7×7 readable).
@@ -229,12 +133,15 @@ final class PiecePainter extends CustomPainter {
   static double triangleArrowStroke(double side) => directionArrowStroke(side);
 
   /// Visual balance point for the direction mark inside [shape].
-  static Offset glyphOrigin(Offset c, double r, Shape shape) => switch (shape) {
-    Shape.triangle => triangleCentroid(c, r),
-    Shape.circle || Shape.diamond => c,
-  };
+  ///
+  /// Presentation silhouettes (including domain [Shape.triangle] → hexagon)
+  /// are optically centered; only the chevron rotates with [Direction].
+  static Offset glyphOrigin(Offset c, double r, Shape shape) => c;
 
-  /// Equilateral-ish upright triangle matching [shapePath] for [Shape.triangle].
+  /// Legacy upright-triangle vertices (historical API / tests only).
+  ///
+  /// Presentation silhouette for [Shape.triangle] is [ProtoShapeGeometry.flatTopHexagon]
+  /// via [shapePath] — do not use these vertices for containment or ray probes.
   static ({Offset apex, Offset bottomRight, Offset bottomLeft}) triangleVertices(
     Offset c,
     double r,
@@ -258,7 +165,7 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
-  /// Barycenter of the upright triangle (visual balance point for the arrow).
+  /// Legacy barycenter of [triangleVertices] (not used by hexagon presentation).
   static Offset triangleCentroid(Offset c, double r) {
     final v = triangleVertices(c, r);
     return Offset(
@@ -278,11 +185,12 @@ final class PiecePainter extends CustomPainter {
         final dy = (p.dy - c.dy).abs() / r;
         return dx + dy <= 1 + 1e-6;
       case Shape.triangle:
-        return pointInTriangle(p, c, r);
+        // Domain wire `triangle` → flat-top hexagon presentation.
+        return shapePath(c, r, Shape.triangle).contains(p);
     }
   }
 
-  /// True when [p] lies inside or on the triangle defined by [shapePath].
+  /// Legacy helper: true when [p] lies inside the historical triangle vertices.
   static bool pointInTriangle(Offset p, Offset c, double r) {
     final v = triangleVertices(c, r);
     return _barycentricInside(p, v.apex, v.bottomRight, v.bottomLeft);
@@ -506,10 +414,10 @@ final class PiecePainter extends CustomPainter {
           r * 0.22,
         );
       case Shape.triangle:
-        final v = triangleVertices(c, r);
+        // Presentation: golden flat-top hexagon (domain wire still `triangle`).
         return roundedPolygon(
-          [v.apex, v.bottomRight, v.bottomLeft],
-          r * 0.20,
+          ProtoShapeGeometry.flatTopHexagon(c, r),
+          r * 0.14,
         );
     }
   }
@@ -594,12 +502,17 @@ final class PiecePainter extends CustomPainter {
           (v.west, v.north),
         ], fallback: radius * 0.4);
       case Shape.triangle:
-        final v = triangleVertices(shapeCenter, radius);
-        return _rayDistanceToEdges(origin, unit, [
-          (v.apex, v.bottomRight),
-          (v.bottomRight, v.bottomLeft),
-          (v.bottomLeft, v.apex),
-        ], fallback: radius * 0.4);
+        final pts = ProtoShapeGeometry.flatTopHexagon(shapeCenter, radius);
+        final edges = <(Offset, Offset)>[
+          for (var i = 0; i < pts.length; i++)
+            (pts[i], pts[(i + 1) % pts.length]),
+        ];
+        return _rayDistanceToEdges(
+          origin,
+          unit,
+          edges,
+          fallback: radius * 0.4,
+        );
     }
   }
 
@@ -658,11 +571,10 @@ final class PiecePainter extends CustomPainter {
           _distancePointToSegment(p, v.west, v.north),
         ].reduce(math.min);
       case Shape.triangle:
-        final v = triangleVertices(c, r);
+        final pts = ProtoShapeGeometry.flatTopHexagon(c, r);
         return [
-          _distancePointToSegment(p, v.apex, v.bottomRight),
-          _distancePointToSegment(p, v.bottomRight, v.bottomLeft),
-          _distancePointToSegment(p, v.bottomLeft, v.apex),
+          for (var i = 0; i < pts.length; i++)
+            _distancePointToSegment(p, pts[i], pts[(i + 1) % pts.length]),
         ].reduce(math.min);
     }
   }

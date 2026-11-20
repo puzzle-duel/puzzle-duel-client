@@ -4,7 +4,7 @@ import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-/// Board Flame path into the same canonical [PiecePainter] used by the tray.
+/// Board Flame path into the same premium [PiecePainter] used by the tray.
 void paintPieceGlyph(
   Canvas canvas, {
   required Offset center,

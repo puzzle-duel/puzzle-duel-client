@@ -170,12 +170,63 @@ final class GameSession extends ChangeNotifier {
   void showServerRejection(String code) {
     _authoritativeBusy = false;
     authoritativeOutcomeUnknown = false;
+    _invalidateResolutions();
     _feedbackKind = MoveFeedbackKind.rejected;
     _feedbackCode = code;
     if (_canonical != null && _canonical!.status != GameStatus.ended) {
       _phase = GameScreenPhase.playing;
     }
     notifyListeners();
+  }
+
+  /// Adopts a server-accepted move using the same [AnimationScript] path as
+  /// local Practice, only when a local resolve matches [authoritative].
+  ///
+  /// Ranked scores always come from [authoritative]. On mismatch or local
+  /// reject, settles to [authoritative] with no fabricated success animation.
+  /// Returns the presentation [MoveApplied] when an animation script was armed.
+  MoveApplied? applyAuthoritativeResolution({
+    required GameState preState,
+    required int offerIndex,
+    required Coordinate tap,
+    required GameState authoritative,
+  }) {
+    _authoritativeBusy = false;
+    authoritativeOutcomeUnknown = false;
+    _selectedOffer = null;
+    _clearFeedback();
+    _generationFailure = null;
+
+    final placedPiece = preState.offers[offerIndex].pieceOrNull;
+    if (placedPiece == null) {
+      showAuthoritative(authoritative);
+      return null;
+    }
+
+    final move = Move(offerIndex: offerIndex, tap: tap);
+    applyMoveCallCount += 1;
+    final apply = applyMoveOverride ?? applyMove;
+    final result = apply(preState, move);
+    if (result is! MoveApplied || result.finalState != authoritative) {
+      // Do not animate a locally invented path that disagrees with the server.
+      showAuthoritative(authoritative);
+      return null;
+    }
+
+    _resolutionSeq += 1;
+    _activeResolutionId = _resolutionSeq;
+    // Canonical board is always the server snapshot.
+    _canonical = authoritative;
+    _script = AnimationScript(
+      generation: _generation,
+      resolutionId: _activeResolutionId,
+      preState: preState,
+      applied: result,
+      placedPiece: placedPiece,
+    );
+    _phase = GameScreenPhase.resolving;
+    notifyListeners();
+    return result;
   }
 
   /// Starts a new in-memory round from the accepted generator.

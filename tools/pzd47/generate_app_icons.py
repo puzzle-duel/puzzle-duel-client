@@ -3,8 +3,14 @@
 
 Source of truth:
   apps/mobile/assets/branding/app_icon_master_1024.png
-derived from Jira attachment 10000 (Neon Puzzle Trophy Icon.png) with
-center circular arrows already absent (verified in center crop).
+
+That master is produced by Flutter `PremiumAppIconComposer` /
+`PremiumPieceRenderer` (shared with board/tray). Export:
+
+  PZD47_EXPORT_ICON=1 flutter test \\
+    test/presentation/premium_app_icon_composer_test.dart
+
+Do not treat the master as a sprite sheet for extracting gameplay shapes.
 """
 
 from __future__ import annotations

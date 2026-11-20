@@ -8,9 +8,14 @@ import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-bool get _skipGoldensOnCi =>
-    Platform.environment['CI'] == 'true' ||
-    Platform.environment['GITHUB_ACTIONS'] == 'true';
+/// See `pzd47_golden_artifacts_test.dart` for always-on CI coverage.
+bool get _skipCiPixelGoldens {
+  final force = Platform.environment['PZD47_FORCE_GOLDENS'] == '1';
+  final onCi =
+      Platform.environment['CI'] == 'true' ||
+      Platform.environment['GITHUB_ACTIONS'] == 'true';
+  return onCi && !force;
+}
 
 Widget _matrixCell(Piece piece, double size) {
   return Directionality(
@@ -28,10 +33,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('canonical materials version and source hash are pinned', () {
-    expect(PremiumShapeMaterials.version, 'pzd47-canonical-shapes-v1');
+    expect(PremiumShapeMaterials.version, 'pzd47-hexagon-identity-v1');
     expect(
       PremiumShapeMaterials.sourceSha256,
-      '32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b',
+      'dff57723ed17a469f5bd437a589c0f51e5ef970c657248d59638de77c99b689c',
     );
   });
 
@@ -118,7 +123,7 @@ void main() {
               'goldens/pzd47_${shape.wire}_${direction.wire}.png',
             ),
           );
-        }, skip: _skipGoldensOnCi);
+        }, skip: _skipCiPixelGoldens);
       }
     }
 
@@ -177,7 +182,7 @@ void main() {
         find.byType(RepaintBoundary).first,
         matchesGoldenFile('goldens/pzd47_direction_matrix_3x4.png'),
       );
-    }, skip: _skipGoldensOnCi);
+    }, skip: _skipCiPixelGoldens);
   });
 
   testWidgets('piece painter paints within bounds (no overflow)', (tester) async {

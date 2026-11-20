@@ -64,7 +64,8 @@ final class TournamentUatApp extends StatefulWidget {
   State<TournamentUatApp> createState() => _TournamentUatAppState();
 }
 
-final class _TournamentUatAppState extends State<TournamentUatApp> {
+final class _TournamentUatAppState extends State<TournamentUatApp>
+    with WidgetsBindingObserver {
   late final GameSfx _sfx = widget.sfx ?? SilentGameSfx();
   TournamentController? _controller;
   String? _bootError;
@@ -72,7 +73,14 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    _controller?.setAppForeground(foreground);
   }
 
   Future<void> _bootstrap() async {
@@ -121,6 +129,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     final controller = _controller;
     controller?.session.dispose();
     controller?.dispose();
@@ -253,32 +262,42 @@ final class _PlayFeedback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final delta = controller.scoreDelta;
     if (controller.hasPendingCommand) {
       return TextButton(
         onPressed: controller.retryUnknown,
         child: Text(copy.retrySame),
       );
     }
-    // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
-    if (delta != null && delta > 0) {
-      return Text(
-        '+$delta',
-        key: const Key('score-delta'),
-        style: const TextStyle(
-          color: GameTokens.success,
-          fontWeight: FontWeight.w800,
-          fontSize: 20,
-        ),
-      );
-    }
-    if (controller.moveInFlight) {
-      return Text(
-        copy.sending,
-        style: const TextStyle(color: GameTokens.accent),
-      );
-    }
-    return const SizedBox.shrink();
+    // Same Practice timing: positive move delta only while resolving.
+    return ListenableBuilder(
+      listenable: controller.session,
+      builder: (context, _) {
+        final view = controller.session.view;
+        final scriptDelta = view.activeScript?.applied.scoreDelta;
+        final delta = (view.isResolving && scriptDelta != null && scriptDelta > 0)
+            ? scriptDelta
+            : controller.scoreDelta;
+        // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
+        if (delta != null && delta > 0 && view.isResolving) {
+          return Text(
+            '+$delta',
+            key: const Key('score-delta'),
+            style: const TextStyle(
+              color: GameTokens.success,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+            ),
+          );
+        }
+        if (controller.moveInFlight && view.activeScript == null) {
+          return Text(
+            copy.sending,
+            style: const TextStyle(color: GameTokens.accent),
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
   }
 }
 
