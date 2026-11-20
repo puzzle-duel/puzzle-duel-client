@@ -673,7 +673,9 @@ final class TournamentController extends ChangeNotifier {
       if (epoch != _resolutionNavEpoch ||
           tournamentEpoch != _tournamentEpoch ||
           currentSeries != seriesId ||
-          route.place != TournamentPlace.playing) return;
+          route.place != TournamentPlace.playing) {
+        return;
+      }
       _armPendingResolutionNav(TournamentPlace.results);
     } else if (day?.awaitAdvance == true) {
       _armPendingResolutionNav(TournamentPlace.transition);
@@ -734,10 +736,14 @@ final class TournamentController extends ChangeNotifier {
       if (_resolutionNavEpoch != epoch ||
           _pendingAfterResolution != expected ||
           _pendingResolutionId != resolutionId ||
-          route.place != TournamentPlace.playing) return;
+          route.place != TournamentPlace.playing) {
+        return;
+      }
       final currentScript = session.view.activeScript;
       if (currentScript != null &&
-          currentScript.resolutionId != resolutionId) return;
+          currentScript.resolutionId != resolutionId) {
+        return;
+      }
       if (session.view.phase == GameScreenPhase.resolving) {
         _awaitingResolutionNav = false;
         _onSessionResolution();
@@ -750,7 +756,9 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _commitPendingResolutionNav(int epoch, int? resolutionId) async {
     if (_resolutionNavEpoch != epoch ||
         _pendingResolutionId != resolutionId ||
-        route.place != TournamentPlace.playing) return;
+        route.place != TournamentPlace.playing) {
+      return;
+    }
     final pending = _pendingAfterResolution;
     _pendingAfterResolution = null;
     _pendingResolutionId = null;
