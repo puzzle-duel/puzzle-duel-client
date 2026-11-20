@@ -215,6 +215,10 @@ final class TournamentController extends ChangeNotifier {
   bool _sameDeviceRegistered = false;
   int? _sessionExpiresAtMs;
   bool _renewingWriter = false;
+  Timer? _sessionRenewalTimer;
+  Future<bool>? _sessionRenewalInFlight;
+  bool _appForeground = true;
+  bool _disposed = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
   GameState? _pendingPreState;
   int? _pendingOfferIndex;
@@ -262,6 +266,8 @@ final class TournamentController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _sessionRenewalTimer?.cancel();
     _cancelPendingResolutionNav();
     session.removeListener(_onSessionResolution);
     super.dispose();
@@ -394,6 +400,7 @@ final class TournamentController extends ChangeNotifier {
     tournamentSync = recoveryDenial == null
         ? TournamentSyncState.ready
         : TournamentSyncState.degraded;
+    if (recoveryDenial == null) _scheduleSessionRenewal();
     if (presentHome) route = const TournamentRoute();
     InteractionPerf.mark(recoveryDenial == null
         ? 'tournament.refresh.ready'
@@ -596,20 +603,95 @@ final class TournamentController extends ChangeNotifier {
     );
   }
 
-  /// Existing writer remains entitled until its server session expires.
-  /// Device recovery is intentionally not attempted early: backend rejects
-  /// writer takeover while the old session is still active.
+  /// Called by the host app on foreground/background transitions.
+  void setAppForeground(bool foreground) {
+    _appForeground = foreground;
+    _sessionRenewalTimer?.cancel();
+    if (foreground) {
+      unawaited(_renewActiveSession());
+    }
+  }
+
+  /// Schedule before expiry, independently of any player input. An in-place
+  /// extension cannot change session, device, writer binding or generation.
+  void _scheduleSessionRenewal() {
+    _sessionRenewalTimer?.cancel();
+    final expiry = _sessionExpiresAtMs;
+    if (!_appForeground || _disposed || expiry == null ||
+        api.sessionSecret == null) return;
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final remaining = expiry - now;
+    // Refresh with enough time for a normal network round-trip; the 45s UAT
+    // profile renews about 12s before expiration.
+    final lead = remaining > 24000 ? 12000 : (remaining ~/ 3).clamp(1000, 12000);
+    final wait = (remaining - lead).clamp(0, 1800000);
+    _sessionRenewalTimer = Timer(Duration(milliseconds: wait), () {
+      unawaited(_renewActiveSession());
+    });
+  }
+
+  Future<bool> _renewActiveSession() {
+    if (_sessionRenewalInFlight != null) return _sessionRenewalInFlight!;
+    final operation = _renewActiveSessionBody();
+    _sessionRenewalInFlight = operation;
+    return operation.whenComplete(() => _sessionRenewalInFlight = null);
+  }
+
+  Future<bool> _renewActiveSessionBody() async {
+    if (_disposed || !_appForeground || api.sessionSecret == null) return false;
+    if (_refreshInFlight != null || moveInFlight || _renewingWriter) {
+      _sessionRenewalTimer?.cancel();
+      _sessionRenewalTimer = Timer(const Duration(milliseconds: 500), () {
+        unawaited(_renewActiveSession());
+      });
+      return false;
+    }
+    final originalSecret = api.sessionSecret;
+    final originalSessionId = _verifiedSessionId;
+    final originalPlayerId = _verifiedSessionPlayerId;
+    if (originalSessionId == null || originalPlayerId == null) return false;
+    InteractionPerf.mark('tournament.session.renew.proactive');
+    final response = await api.patch('/v1/tournament/session');
+    if (_disposed || originalSecret != api.sessionSecret ||
+        originalSessionId != _verifiedSessionId) return false;
+    if (response.status == 200 &&
+        response.map['sessionId'] == originalSessionId &&
+        response.map['playerId'] == originalPlayerId) {
+      final nextExpiry = tournamentInt(response.map['expiresAtMs']);
+      if (nextExpiry == null ||
+          nextExpiry <= DateTime.now().toUtc().millisecondsSinceEpoch) return false;
+      _sessionExpiresAtMs = nextExpiry;
+      InteractionPerf.mark('tournament.session.renew.proactive.ready');
+      _scheduleSessionRenewal();
+      return true;
+    }
+    // Do not create a second writer or replay a command from a timer.
+    // An expired/revoked session is handled by explicit signed recovery.
+    if (response.status == 401) _sessionExpiresAtMs = null;
+    _sessionRenewalTimer?.cancel();
+    if (response.status != 401 && _appForeground) {
+      _sessionRenewalTimer = Timer(const Duration(seconds: 2), () {
+        unawaited(_renewActiveSession());
+      });
+    }
+    return false;
+  }
+
+  /// Last-resort recovery if the proactive timer could not run (suspended
+  /// background app, lost connectivity or device-clock drift).
   Future<bool> _ensureLiveWriterSession() async {
     final expiry = _sessionExpiresAtMs;
     if (expiry == null) return true; // Legacy mocked UAT sessions.
     final now = DateTime.now().toUtc().millisecondsSinceEpoch;
     if (now < expiry - 1500) return true;
     if (_renewingWriter) return false;
+    final renewed = await _renewActiveSession();
+    if (renewed) return true;
     _renewingWriter = true;
     notifyListeners();
     try {
-      // Small expiry-boundary buffer. Never force writer takeover early.
-      final remaining = expiry + 150 - now;
+      // The backend forbids writer handoff before the old session expires.
+      final remaining = expiry + 150 - DateTime.now().toUtc().millisecondsSinceEpoch;
       if (remaining > 0) {
         await Future<void>.delayed(Duration(milliseconds: remaining));
       }
@@ -1158,6 +1240,7 @@ final class TournamentController extends ChangeNotifier {
       );
       if (current.status == 200) {
         _sessionExpiresAtMs = tournamentInt(current.map['expiresAtMs']);
+        _scheduleSessionRenewal();
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
@@ -1233,6 +1316,7 @@ final class TournamentController extends ChangeNotifier {
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
     _sessionExpiresAtMs = tournamentInt(opened.map['expiresAtMs']);
+    _scheduleSessionRenewal();
     _verifiedSessionPlayerId = opened.map['playerId']?.toString();
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
