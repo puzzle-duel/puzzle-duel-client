@@ -340,21 +340,29 @@ final class TournamentController extends ChangeNotifier {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
       return;
     }
-    // Recovery is server-authoritative and never replays a rejected command.
-    // An absent/disabled recovery endpoint leaves existing writer fencing intact.
-    if (_openedFreshSession &&
-        _sameDeviceRegistered &&
-        claim.map['original'] == false &&
-        _verifiedSessionPlayerId != null &&
-        _verifiedSessionId != null) {
-      await _deviceRecovery.recover(
-        api: api,
-        playerId: _verifiedSessionPlayerId!,
-        newSessionId: _verifiedSessionId!,
-        origin: UatApi.apiOrigin(config.baseUrl),
-        seriesId: id,
-      );
-      if (activeEpoch != _tournamentEpoch) return;
+    // A readable board is not proof of writer entitlement. A fresh session
+    // attempting an existing claim must recover via the pinned device proof.
+    // On any denial keep the board readable, but disable ranked commands.
+    String? recoveryDenial;
+    if (_openedFreshSession && claim.map['original'] == false) {
+      if (_sameDeviceRegistered &&
+          _verifiedSessionPlayerId != null &&
+          _verifiedSessionId != null) {
+        final attempt = await _deviceRecovery.recoverDetailed(
+          api: api,
+          playerId: _verifiedSessionPlayerId!,
+          newSessionId: _verifiedSessionId!,
+          origin: UatApi.apiOrigin(config.baseUrl),
+          seriesId: id,
+        );
+        if (activeEpoch != _tournamentEpoch) return;
+        if (!attempt.succeeded) {
+          recoveryDenial = UatApi.diagnosticErrorCode(attempt.errorCode) ??
+              'RECOVERY_NOT_ELIGIBLE';
+        }
+      } else {
+        recoveryDenial = 'RECOVERY_NOT_ELIGIBLE';
+      }
     }
     _openedFreshSession = false;
     final view = await api.get('/v1/tournament/series/$id/board');
@@ -370,10 +378,15 @@ final class TournamentController extends ChangeNotifier {
     busy = false;
     booting = false;
     errorCode = null;
-    tournamentNoticeCode = null;
-    tournamentSync = TournamentSyncState.ready;
+    rankedWriterLocked = recoveryDenial != null;
+    tournamentNoticeCode = recoveryDenial;
+    tournamentSync = recoveryDenial == null
+        ? TournamentSyncState.ready
+        : TournamentSyncState.degraded;
     if (presentHome) route = const TournamentRoute();
-    InteractionPerf.mark('tournament.refresh.ready');
+    InteractionPerf.mark(recoveryDenial == null
+        ? 'tournament.refresh.ready'
+        : 'tournament.refresh.recovery_denied');
     notifyListeners();
   }
 
@@ -406,6 +419,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> resume() {
+    if (!tournamentReady || rankedWriterLocked) return Future<void>.value();
     _cancelPendingResolutionNav();
     return _reload(reveal: true, followGameplay: false);
   }
@@ -482,7 +496,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> advance() async {
-    if (rankedWriterLocked || moveInFlight || hasPendingCommand) return;
+    if (!tournamentReady || rankedWriterLocked || moveInFlight || hasPendingCommand) return;
     final id = seriesId;
     final ordinal = day?.ordinal;
     if (id == null || ordinal == null) return;
@@ -513,7 +527,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
-    if (rankedWriterLocked ||
+    if (!tournamentReady || rankedWriterLocked ||
         moveInFlight ||
         hasPendingCommand ||
         session.authoritativeOutcomeUnknown) {
