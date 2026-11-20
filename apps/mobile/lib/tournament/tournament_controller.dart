@@ -346,7 +346,11 @@ final class TournamentController extends ChangeNotifier {
     // attempting an existing claim must recover via the pinned device proof.
     // On any denial keep the board readable, but disable ranked commands.
     String? recoveryDenial;
-    if (_openedFreshSession && claim.map['original'] == false) {
+    // Completed series are read-only: results and leaderboards must remain
+    // accessible after session rotation without a writer takeover.
+    if (_openedFreshSession &&
+        claim.map['original'] == false &&
+        claim.map['status'] != 'COMPLETED') {
       if (_sameDeviceRegistered &&
           _verifiedSessionPlayerId != null &&
           _verifiedSessionId != null) {
