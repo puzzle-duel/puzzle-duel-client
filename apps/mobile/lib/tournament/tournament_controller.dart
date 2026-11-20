@@ -15,6 +15,7 @@ import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Local features vs authoritative Tournament refresh.
@@ -205,6 +206,11 @@ final class TournamentController extends ChangeNotifier {
   Map<String, Object?>? _claim;
   Object? _pending;
   String? _pendingKey;
+  final SameDeviceRecovery _deviceRecovery = const SameDeviceRecovery();
+  String? _verifiedSessionPlayerId;
+  String? _verifiedSessionId;
+  bool _openedFreshSession = false;
+  bool _sameDeviceRegistered = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
   GameState? _pendingPreState;
   int? _pendingOfferIndex;
@@ -334,6 +340,23 @@ final class TournamentController extends ChangeNotifier {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
       return;
     }
+    // Recovery is server-authoritative and never replays a rejected command.
+    // An absent/disabled recovery endpoint leaves existing writer fencing intact.
+    if (_openedFreshSession &&
+        _sameDeviceRegistered &&
+        claim.map['original'] == false &&
+        _verifiedSessionPlayerId != null &&
+        _verifiedSessionId != null) {
+      await _deviceRecovery.recover(
+        api: api,
+        playerId: _verifiedSessionPlayerId!,
+        newSessionId: _verifiedSessionId!,
+        origin: UatApi.apiOrigin(config.baseUrl),
+        seriesId: id,
+      );
+      if (activeEpoch != _tournamentEpoch) return;
+    }
+    _openedFreshSession = false;
     final view = await api.get('/v1/tournament/series/$id/board');
     if (activeEpoch != _tournamentEpoch) return;
     if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
@@ -1030,6 +1053,10 @@ final class TournamentController extends ChangeNotifier {
       debugPrint('PZD_PERF tournament.api.origin=$origin');
     }
 
+    _openedFreshSession = false;
+    _sameDeviceRegistered = false;
+    _verifiedSessionPlayerId = null;
+    _verifiedSessionId = null;
     final saved = _readBoundSession(binding: binding, origin: origin);
     if (saved != null) {
       api.sessionSecret = saved;
@@ -1042,6 +1069,16 @@ final class TournamentController extends ChangeNotifier {
         step: 'validate_bound',
       );
       if (current.status == 200) {
+        _verifiedSessionPlayerId = current.map['playerId']?.toString();
+        _verifiedSessionId = current.map['sessionId']?.toString();
+        if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
+          _sameDeviceRegistered = await _deviceRecovery.register(
+            api: api,
+            playerId: _verifiedSessionPlayerId!,
+            sessionId: _verifiedSessionId!,
+            origin: origin,
+          );
+        }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
         await _hydrateHomeSnapshot();
@@ -1106,6 +1143,17 @@ final class TournamentController extends ChangeNotifier {
       return false;
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
+    _verifiedSessionPlayerId = opened.map['playerId']?.toString();
+    _verifiedSessionId = opened.map['sessionId']?.toString();
+    _openedFreshSession = true;
+    if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
+      _sameDeviceRegistered = await _deviceRecovery.register(
+        api: api,
+        playerId: _verifiedSessionPlayerId!,
+        sessionId: _verifiedSessionId!,
+        origin: origin,
+      );
+    }
     await _bindPlayerId(opened.map['playerId']?.toString());
     await _hydrateHomeSnapshot();
     _persistBoundSession(
