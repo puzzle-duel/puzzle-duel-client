@@ -27,6 +27,15 @@ abstract final class PremiumAppIconComposer {
   /// Piece diameter as a fraction of canvas (safe for rounded launcher masks).
   static const double pieceFrac = 0.38;
 
+  /// Trophy cup radius as a fraction of [pieceSize] (visual weight vs gems).
+  static const double trophyScale = 0.46;
+
+  /// Upward optical lift of the BR trophy relative to its layout slot center.
+  ///
+  /// The cup silhouette sits lower than filled gems at the same center; this
+  /// fraction of [pieceSize] nudges it to align with the BL hexagon.
+  static const double trophyOpticalLift = 0.05;
+
   /// Paints the full icon into [canvas] of [size]×[size].
   ///
   /// [trophy] is retained for API compatibility and ignored — the cup is
@@ -56,9 +65,10 @@ abstract final class PremiumAppIconComposer {
     for (final slot in layout) {
       final center = Offset(slot.norm.dx * size, slot.norm.dy * size);
       if (slot.shape == null) {
-        // Optical lift: cup silhouette sits lower than filled gems at the same
-        // slot center — nudge up so BR trophy aligns with BL hexagon.
-        final trophyCenter = center.translate(0, -pieceSize * 0.05);
+        final trophyCenter = center.translate(
+          0,
+          -pieceSize * trophyOpticalLift,
+        );
         _paintTrophy(canvas, trophyCenter, pieceSize, trophy);
         continue;
       }
@@ -97,7 +107,7 @@ abstract final class PremiumAppIconComposer {
       height: pieceSize * 1.22,
     );
     // Match visual weight of circle/diamond/hexagon cells (was 0.34 — too small).
-    final r = pieceSize * 0.46;
+    final r = pieceSize * trophyScale;
     // Soft gold ambient only — never a rectangular plate.
     final cup = Path()
       ..moveTo(center.dx - r * 0.55, center.dy - r * 0.38)

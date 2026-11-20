@@ -767,6 +767,22 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Safe session-restore diagnostics: endpoint/status/operation/category only.
+  void _diagSession({
+    required String operation,
+    required String endpoint,
+    required int status,
+    required UatFailureCategory category,
+    required String step,
+  }) {
+    if (!InteractionPerf.enabled) return;
+    // Never log bearer, session secret, Authorization, or binding material.
+    debugPrint(
+      'PZD_PERF tournament.session.$step operation=$operation '
+      'endpoint=$endpoint status=$status category=${category.name}',
+    );
+  }
+
   /// Returns true only when a usable session secret is ready for ranked calls.
   Future<bool> _restoreSession({bool degradedOnFailure = false}) async {
     final binding = UatApi.authBinding(config.bearer);
@@ -781,6 +797,13 @@ final class TournamentController extends ChangeNotifier {
     if (saved != null) {
       api.sessionSecret = saved;
       final current = await api.get('/v1/tournament/session');
+      _diagSession(
+        operation: 'GET',
+        endpoint: '/v1/tournament/session',
+        status: current.status,
+        category: current.category,
+        step: 'validate_bound',
+      );
       if (current.status == 200) {
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
@@ -806,9 +829,23 @@ final class TournamentController extends ChangeNotifier {
     } else {
       api.sessionSecret = null;
       InteractionPerf.mark('tournament.session.restore.unbound');
+      _diagSession(
+        operation: 'NONE',
+        endpoint: '/v1/tournament/session',
+        status: -1,
+        category: UatFailureCategory.ok,
+        step: 'unbound',
+      );
     }
 
     final opened = await api.post('/v1/tournament/session');
+    _diagSession(
+      operation: 'POST',
+      endpoint: '/v1/tournament/session',
+      status: opened.status,
+      category: opened.category,
+      step: 'open',
+    );
     if (opened.status != 201) {
       if (opened.status == 401) {
         await identity.clearAuthenticatedPlayer();
@@ -817,8 +854,16 @@ final class TournamentController extends ChangeNotifier {
         return false;
       }
       // Offline / timeout: never clear a previously verified practice binding.
+      // Non-auth HTTP failures stay distinct from bearer rejection.
+      if (opened.status == 0) {
+        _fail(
+          opened.isTimeout ? 'TIMEOUT' : 'OFFLINE',
+          degradedOnFailure: degradedOnFailure,
+        );
+        return false;
+      }
       _fail(
-        opened.isTimeout ? 'TIMEOUT' : 'OFFLINE',
+        opened.error == 'REQUEST_FAILED' ? 'OFFLINE' : opened.error,
         degradedOnFailure: degradedOnFailure,
       );
       return false;

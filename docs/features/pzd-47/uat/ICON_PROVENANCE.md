@@ -11,7 +11,8 @@
 | Top-right | Purple diamond (`Shape.diamond`) Up |
 | Bottom-left | Golden hexagon (`Shape.triangle` → hexagon presentation) Up |
 | Bottom-right | Clean Canvas trophy (no rectangular plate; no raster load) |
-| Trophy scale | `pieceSize * 0.46` |
+| Trophy scale | `pieceSize * 0.46` (`PremiumAppIconComposer.trophyScale`) |
+| Trophy optical lift | `-pieceSize * 0.05` (`trophyOpticalLift`) — aligns BR cup with BL hexagon |
 | Direction glyph | One shared dark stroke chevron (`ProtoShapeGeometry.directionInk`) |
 | Display name | **Puzzle Duel** (iOS `CFBundleDisplayName`, Android `android:label`) |
 | Export | `PZD47_EXPORT_ICON=1 flutter test test/presentation/premium_app_icon_composer_test.dart` |

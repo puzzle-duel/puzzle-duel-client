@@ -76,12 +76,9 @@ class UatApi {
   ]) async {
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
-    final started = Stopwatch()..start();
-    var phase = 'connect';
-    final hadSession = sessionSecret != null && sessionSecret!.isNotEmpty;
-    final origin = apiOrigin(baseUrl);
+    // Safe fields only in logs: operation, endpoint, status, category.
     _perfLog(
-      'http.start $method $path origin=$origin hadSession=$hadSession',
+      'http.start operation=$method endpoint=$path status=- category=pending',
     );
     try {
       final uri = Uri.parse('$baseUrl$path');
@@ -89,7 +86,6 @@ class UatApi {
         _connectTimeout,
         onTimeout: () => throw const _UatTimeout('connect'),
       );
-      phase = 'headers';
       request.headers.set(HttpHeaders.authorizationHeader, bearer);
       final secret = sessionSecret;
       if (secret != null && secret.isNotEmpty) {
@@ -104,12 +100,10 @@ class UatApi {
         request.contentLength = bytes.length;
         request.add(bytes);
       }
-      phase = 'response';
       final response = await request.close().timeout(
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
       );
-      phase = 'body';
       final text = await utf8.decodeStream(response).timeout(
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
@@ -119,10 +113,11 @@ class UatApi {
         try {
           json = jsonDecode(text);
         } on FormatException {
-          _perfLog(
-            'http.done $method $path status=${response.statusCode} '
-            'ms=${started.elapsedMilliseconds} category=MALFORMED_BODY '
-            'phase=$phase hadSession=$hadSession',
+          _diagHttp(
+            operation: method,
+            endpoint: path,
+            status: response.statusCode,
+            category: UatFailureCategory.malformed,
           );
           return UatHttpResult(
             response.statusCode,
@@ -131,19 +126,23 @@ class UatApi {
           );
         }
       }
-      _perfLog(
-        'http.done $method $path status=${response.statusCode} '
-        'ms=${started.elapsedMilliseconds} category=ok '
-        'phase=$phase hadSession=$hadSession',
+      final category = categoryForStatus(response.statusCode);
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: response.statusCode,
+        category: category,
       );
-      return UatHttpResult(response.statusCode, json);
+      return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
       final category = error.phase == 'connect'
           ? UatFailureCategory.connectTimeout
           : UatFailureCategory.responseTimeout;
-      _perfLog(
-        'http.fail $method $path status=0 ms=${started.elapsedMilliseconds} '
-        'category=${category.name} phase=${error.phase} hadSession=$hadSession',
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: 0,
+        category: category,
       );
       return UatHttpResult(
         0,
@@ -151,9 +150,11 @@ class UatApi {
         category: category,
       );
     } on SocketException {
-      _perfLog(
-        'http.fail $method $path status=0 ms=${started.elapsedMilliseconds} '
-        'category=offline phase=$phase hadSession=$hadSession',
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: 0,
+        category: UatFailureCategory.offline,
       );
       return const UatHttpResult(
         0,
@@ -161,9 +162,11 @@ class UatApi {
         category: UatFailureCategory.offline,
       );
     } on HttpException {
-      _perfLog(
-        'http.fail $method $path status=0 ms=${started.elapsedMilliseconds} '
-        'category=offline phase=$phase hadSession=$hadSession',
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: 0,
+        category: UatFailureCategory.offline,
       );
       return const UatHttpResult(
         0,
@@ -171,20 +174,23 @@ class UatApi {
         category: UatFailureCategory.offline,
       );
     } on TimeoutException {
-      _perfLog(
-        'http.fail $method $path status=0 ms=${started.elapsedMilliseconds} '
-        'category=responseTimeout phase=$phase hadSession=$hadSession',
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: 0,
+        category: UatFailureCategory.responseTimeout,
       );
       return const UatHttpResult(
         0,
         {'error': 'TIMEOUT', 'timeoutPhase': 'response'},
         category: UatFailureCategory.responseTimeout,
       );
-    } on Exception catch (error) {
-      _perfLog(
-        'http.fail $method $path status=0 ms=${started.elapsedMilliseconds} '
-        'category=other phase=$phase type=${error.runtimeType} '
-        'hadSession=$hadSession',
+    } on Exception {
+      _diagHttp(
+        operation: method,
+        endpoint: path,
+        status: 0,
+        category: UatFailureCategory.other,
       );
       return const UatHttpResult(
         0,
@@ -199,6 +205,29 @@ class UatApi {
   static const _connectTimeout = Duration(seconds: 8);
   static const _responseTimeout = Duration(seconds: 12);
 
+  /// Maps HTTP status to a safe diagnostic category (never auth material).
+  static UatFailureCategory categoryForStatus(int status) {
+    if (status >= 200 && status < 300) return UatFailureCategory.ok;
+    if (status == 401) return UatFailureCategory.unauthenticated;
+    if (status == 0) return UatFailureCategory.offline;
+    if (status >= 500) return UatFailureCategory.server;
+    if (status >= 400) return UatFailureCategory.client;
+    return UatFailureCategory.other;
+  }
+
+  /// Safe HTTP diagnostics: operation, endpoint, status, category only.
+  static void _diagHttp({
+    required String operation,
+    required String endpoint,
+    required int status,
+    required UatFailureCategory category,
+  }) {
+    _perfLog(
+      'http.done operation=$operation endpoint=$endpoint '
+      'status=$status category=${category.name}',
+    );
+  }
+
   static void _perfLog(String message) {
     if (!InteractionPerf.enabled) return;
     debugPrint('PZD_PERF $message');
@@ -211,6 +240,9 @@ enum UatFailureCategory {
   connectTimeout,
   responseTimeout,
   malformed,
+  unauthenticated,
+  client,
+  server,
   other,
 }
 

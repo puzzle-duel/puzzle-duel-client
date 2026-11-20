@@ -36,6 +36,26 @@ Future<HttpServer> _bind(List<HttpRequest> seen, List<List<int>> bodies) {
 }
 
 void main() {
+  test('401 responses carry unauthenticated category, not ok', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      request.response.statusCode = 401;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'error': 'UNAUTHENTICATED'}));
+      await request.response.close();
+    });
+    final api = UatApi(
+      baseUrl: 'http://127.0.0.1:${server.port}',
+      bearer: 'Bearer uat-player-a',
+    );
+    final result = await api.post('/v1/tournament/session');
+    expect(result.status, 401);
+    expect(result.error, 'UNAUTHENTICATED');
+    expect(result.category, UatFailureCategory.unauthenticated);
+    expect(result.category, isNot(UatFailureCategory.ok));
+  });
+
   test('nonempty JSON POST sends one UTF-8 body with Content-Length', () async {
     final seen = <HttpRequest>[];
     final bodies = <List<int>>[];

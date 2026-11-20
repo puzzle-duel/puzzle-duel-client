@@ -394,10 +394,177 @@ void main() {
     final blob = [
       binding,
       UatApi.apiOrigin(api.baseUrl),
-      'PZD_PERF http.start GET /v1/tournament/session origin=http://127.0.0.1:9 hadSession=true',
+      'PZD_PERF http.start operation=GET endpoint=/v1/tournament/session '
+          'status=- category=pending',
+      'PZD_PERF http.done operation=POST endpoint=/v1/tournament/session '
+          'status=401 category=unauthenticated',
+      'PZD_PERF tournament.session.open operation=POST '
+          'endpoint=/v1/tournament/session status=401 category=unauthenticated',
     ].join('\n');
     expect(blob.contains('super-secret-token'), isFalse);
     expect(blob.contains('session-super-secret'), isFalse);
     expect(blob.contains('Authorization'), isFalse);
+    expect(blob.contains('Bearer '), isFalse);
+  });
+
+  test('HTTP 401 is categorized unauthenticated, not ok', () {
+    expect(UatApi.categoryForStatus(201), UatFailureCategory.ok);
+    expect(UatApi.categoryForStatus(200), UatFailureCategory.ok);
+    expect(
+      UatApi.categoryForStatus(401),
+      UatFailureCategory.unauthenticated,
+    );
+    expect(UatApi.categoryForStatus(503), UatFailureCategory.server);
+    expect(UatApi.categoryForStatus(400), UatFailureCategory.client);
+  });
+
+  test('expired bound session GET 401 recovers via POST without UNAUTHENTICATED',
+      () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd43-session-expired-secret');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    File('${directory.path}/pzd-uat-session.json').writeAsStringSync(
+      jsonEncode({
+        'version': 2,
+        'sessions': {
+          UatApi.authBinding('Bearer player-a'): {
+            'secret': 'stale-secret',
+            'apiOrigin': 'http://127.0.0.1',
+          },
+        },
+      }),
+    );
+    final calls = <String>[];
+    late final ScriptedUatApi api;
+    api = ScriptedUatApi((method, path, body) async {
+      calls.add('$method $path');
+      if (path.endsWith('/session') && method == 'GET') {
+        expect(api.sessionSecret, 'stale-secret');
+        return const UatHttpResult(
+          401,
+          {'error': 'UNAUTHENTICATED'},
+          category: UatFailureCategory.unauthenticated,
+        );
+      }
+      if (path.endsWith('/session') && method == 'POST') {
+        expect(api.sessionSecret, isNull);
+        return const UatHttpResult(201, {
+          'playerId': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          'sessionSecret': 'rotated-secret',
+        });
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(201, {
+          'seriesId': 'series-1',
+          'status': 'ACTIVE',
+          'original': true,
+        });
+      }
+      if (path.endsWith('/board')) {
+        return const UatHttpResult(200, {
+          'ordinal': 1,
+          'ordinalLabel': 'E1',
+          'seriesScore': 0,
+          'awaitAdvance': false,
+          'resultsPublished': false,
+          'state': {'turnsUsed': 0, 'moveLimit': 15, 'boardSize': 5},
+        });
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer player-a',
+        playerLabel: 'Player A',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    await controller.beginLocal();
+    await controller.refreshTournament();
+    expect(calls, contains('GET /v1/tournament/session'));
+    expect(calls, contains('POST /v1/tournament/session'));
+    expect(api.sessionSecret, 'rotated-secret');
+    expect(controller.tournamentNoticeCode, isNot('UNAUTHENTICATED'));
+    expect(controller.tournamentReady, isTrue);
+  });
+
+  test('offline and timeout stay distinct from UNAUTHENTICATED', () async {
+    expect(UatApi.categoryForStatus(0), UatFailureCategory.offline);
+    expect(
+      UatApi.categoryForStatus(401),
+      UatFailureCategory.unauthenticated,
+    );
+    expect(
+      const UatHttpResult(
+        0,
+        {'error': 'OFFLINE'},
+        category: UatFailureCategory.offline,
+      ).isTimeout,
+      isFalse,
+    );
+    expect(
+      const UatHttpResult(
+        0,
+        {'error': 'TIMEOUT', 'timeoutPhase': 'connect'},
+        category: UatFailureCategory.connectTimeout,
+      ).isTimeout,
+      isTrue,
+    );
+    expect(
+      const UatHttpResult(
+        401,
+        {'error': 'UNAUTHENTICATED'},
+        category: UatFailureCategory.unauthenticated,
+      ).isTimeout,
+      isFalse,
+    );
+  });
+
+  test('POST /v1/tournament/session 401 is the UNAUTHENTICATED operation',
+      () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd43-session-post-401');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final calls = <String>[];
+    final api = ScriptedUatApi((method, path, body) async {
+      calls.add('$method $path');
+      if (path.endsWith('/session') && method == 'POST') {
+        return const UatHttpResult(
+          401,
+          {'error': 'UNAUTHENTICATED'},
+          category: UatFailureCategory.unauthenticated,
+        );
+      }
+      fail('unexpected $method $path after bearer rejection');
+    });
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer expired-or-foreign',
+        playerLabel: 'Player A',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    await controller.beginLocal();
+    await controller.refreshTournament();
+    expect(calls, ['POST /v1/tournament/session']);
+    expect(controller.tournamentNoticeCode, 'UNAUTHENTICATED');
+    expect(controller.localReady, isTrue);
+    expect(controller.tournamentReady, isFalse);
   });
 }

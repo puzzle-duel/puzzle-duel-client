@@ -24,6 +24,18 @@ void main() {
     expect(PremiumAppIconComposer.gapsPositive(1024), isTrue);
   });
 
+  test('trophy scale and optical lift stay pinned for launcher parity', () {
+    expect(PremiumAppIconComposer.trophyScale, 0.46);
+    expect(PremiumAppIconComposer.trophyOpticalLift, 0.05);
+    final piece = PremiumAppIconComposer.piecePixelSize(1024);
+    final slot = PremiumAppIconComposer.layout.last;
+    expect(slot.shape, isNull);
+    final centerY = slot.norm.dy * 1024;
+    final liftedY = centerY - piece * PremiumAppIconComposer.trophyOpticalLift;
+    expect(liftedY, lessThan(centerY));
+    expect(centerY - liftedY, closeTo(piece * 0.05, 1e-9));
+  });
+
   test('renderImage produces raster via PremiumPieceRenderer + Canvas trophy',
       () async {
     final image = await PremiumAppIconComposer.renderImage(size: 256);
