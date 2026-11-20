@@ -127,6 +127,7 @@ final class TournamentController extends ChangeNotifier {
     required this.stateDirectory,
     required this.identity,
     UatApi? api,
+    SameDeviceRecovery? deviceRecovery,
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
@@ -137,6 +138,7 @@ final class TournamentController extends ChangeNotifier {
              baseUrl: UatApi.apiOrigin(config.baseUrl),
              bearer: config.bearer,
            ),
+       _deviceRecovery = deviceRecovery ?? const SameDeviceRecovery(),
        haptics = haptics ?? DeviceTournamentHaptics(),
        sfx = sfx ?? _QuietSfx(),
        settings = settings ?? LocalSettings.load(stateDirectory),
@@ -206,7 +208,7 @@ final class TournamentController extends ChangeNotifier {
   Map<String, Object?>? _claim;
   Object? _pending;
   String? _pendingKey;
-  final SameDeviceRecovery _deviceRecovery = const SameDeviceRecovery();
+  final SameDeviceRecovery _deviceRecovery;
   String? _verifiedSessionPlayerId;
   String? _verifiedSessionId;
   bool _openedFreshSession = false;
