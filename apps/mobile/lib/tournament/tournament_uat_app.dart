@@ -280,7 +280,7 @@ final class _PlayFeedback extends StatelessWidget {
             ),
           );
         }
-        if (controller.moveInFlight && !view.isResolving) {
+        if (controller.moveInFlight && view.activeScript == null) {
           return Text(
             copy.sending,
             style: const TextStyle(color: GameTokens.accent),
