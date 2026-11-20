@@ -536,6 +536,7 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     final id = seriesId;
     if (id == null) return;
+    final commandNavEpoch = _resolutionNavEpoch;
     moveInFlight = true;
     scoreDelta = null;
     noticeCode = null;
@@ -564,7 +565,12 @@ final class TournamentController extends ChangeNotifier {
             offerIndex != null &&
             tap != null) {
           final ok = await _reload(reveal: false, followGameplay: false);
-          if (!ok) return;
+          if (!ok ||
+              commandNavEpoch != _resolutionNavEpoch ||
+              route.place != TournamentPlace.playing ||
+              id != seriesId) {
+            return;
+          }
           await _presentAuthoritativeMove(
             preState: preState,
             offerIndex: offerIndex,
