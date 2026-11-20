@@ -3,6 +3,14 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
+/// Server-authoritative recovery result. No writer entitlement is inferred
+/// from a readable board or a successful device registration.
+final class RecoveryAttempt {
+  const RecoveryAttempt(this.succeeded, this.errorCode);
+  final bool succeeded;
+  final String? errorCode;
+}
+
 /// UAT-only same-device recovery. Keys never leave iOS Secure Enclave.
 /// Backend decides writer entitlement; this class never mutates local scores.
 final class SameDeviceRecovery {
@@ -51,7 +59,22 @@ final class SameDeviceRecovery {
 
   /// A successful recovery changes ONLY the server-owned writer binding.
   /// Callers must reload the authoritative board before sending commands.
+  /// Compatibility API for existing callers and tests.
   Future<bool> recover({
+    required UatApi api,
+    required String playerId,
+    required String newSessionId,
+    required String origin,
+    required String seriesId,
+  }) async => (await recoverDetailed(
+    api: api,
+    playerId: playerId,
+    newSessionId: newSessionId,
+    origin: origin,
+    seriesId: seriesId,
+  )).succeeded;
+
+  Future<RecoveryAttempt> recoverDetailed({
     required UatApi api,
     required String playerId,
     required String newSessionId,
@@ -62,12 +85,14 @@ final class SameDeviceRecovery {
         playerId.isEmpty ||
         newSessionId.isEmpty ||
         seriesId.isEmpty) {
-      return false;
+      return const RecoveryAttempt(false, 'RECOVERY_NOT_ELIGIBLE');
     }
     final issued = await api.post(
       '/v1/tournament/series/$seriesId/recovery-challenge',
     );
-    if (issued.status != 200) return false;
+    if (issued.status != 200) {
+      return RecoveryAttempt(false, issued.error);
+    }
     final data = issued.map;
     final challengeId = data['challengeId'];
     final credentialId = data['deviceCredentialId'];
@@ -79,7 +104,7 @@ final class SameDeviceRecovery {
         nonce is! String ||
         generation is! int ||
         expiresAtMs is! int) {
-      return false;
+      return const RecoveryAttempt(false, 'MALFORMED_BODY');
     }
     try {
       final signature = await _signer.invokeMethod<String>(
@@ -96,7 +121,9 @@ final class SameDeviceRecovery {
           'expiresAtMs': expiresAtMs,
         },
       );
-      if (signature == null) return false;
+      if (signature == null) {
+        return const RecoveryAttempt(false, 'RECOVERY_PROOF_INVALID');
+      }
       final response = await api.post(
         '/v1/tournament/series/$seriesId/recover-writer',
         {
@@ -113,12 +140,15 @@ final class SameDeviceRecovery {
           'signatureBase64Url': signature,
         },
       );
-      return response.status == 200 &&
-          response.map['writerGeneration'] is int;
+      return RecoveryAttempt(
+        response.status == 200 && response.map['writerGeneration'] is int,
+        response.status == 200 ? null : response.error,
+      );
     } on PlatformException {
-      return false;
+      return const RecoveryAttempt(false, 'RECOVERY_PROOF_INVALID');
     } on MissingPluginException {
-      return false;
+      return const RecoveryAttempt(false, 'RECOVERY_NOT_ELIGIBLE');
     }
   }
 }
+
