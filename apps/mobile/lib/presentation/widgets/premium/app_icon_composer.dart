@@ -89,10 +89,11 @@ abstract final class PremiumAppIconComposer {
     // trophy crop that carries a purple rectangular plate artifact.
     final dst = Rect.fromCenter(
       center: center,
-      width: pieceSize * 0.92,
-      height: pieceSize * 0.92,
+      width: pieceSize * 1.22,
+      height: pieceSize * 1.22,
     );
-    final r = pieceSize * 0.34;
+    // Match visual weight of circle/diamond/hexagon cells (was 0.34 — too small).
+    final r = pieceSize * 0.46;
     // Soft gold ambient only — never a rectangular plate.
     final cup = Path()
       ..moveTo(center.dx - r * 0.55, center.dy - r * 0.38)
