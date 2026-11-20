@@ -216,7 +216,8 @@ final class TournamentController extends ChangeNotifier {
   /// Destination after Practice-parity resolution + completion beat.
   TournamentPlace? _pendingAfterResolution;
   bool _awaitingResolutionNav = false;
-  int _seenResolutionId = 0;
+  int _resolutionNavEpoch = 0;
+  int? _pendingResolutionId;
   Timer? _resolutionHold;
 
   bool get hasPendingCommand => _pending != null;
@@ -251,7 +252,7 @@ final class TournamentController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _resolutionHold?.cancel();
+    _cancelPendingResolutionNav();
     session.removeListener(_onSessionResolution);
     super.dispose();
   }
@@ -354,6 +355,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> showHome() async {
+    _cancelPendingResolutionNav();
     noticeCode = null;
     errorCode = null;
     route = const TournamentRoute();
@@ -366,6 +368,7 @@ final class TournamentController extends ChangeNotifier {
   /// Returns the shell to Home without starting a network refresh.
   /// Used when a pushed Leaderboard route is popped.
   void returnToHomeShell() {
+    _cancelPendingResolutionNav();
     noticeCode = null;
     errorCode = null;
     if (route.place == TournamentPlace.home) return;
@@ -374,6 +377,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   void showOverview() {
+    _cancelPendingResolutionNav();
     route = const TournamentRoute(place: TournamentPlace.overview);
     notifyListeners();
   }
@@ -381,7 +385,10 @@ final class TournamentController extends ChangeNotifier {
   Future<void> resume() => _reload(reveal: true, followGameplay: false);
 
   Future<void> openResults() async {
-    await _loadResults();
+    _cancelPendingResolutionNav();
+    final epoch = _resolutionNavEpoch;
+    await _loadResults(stillCurrent: () => epoch == _resolutionNavEpoch);
+    if (epoch != _resolutionNavEpoch) return;
     route = const TournamentRoute(place: TournamentPlace.results);
     errorCode = null;
     notifyListeners();
@@ -425,6 +432,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> back() async {
+    _cancelPendingResolutionNav();
     final next = route.back();
     if (next.place == TournamentPlace.home && day == null) {
       await showHome();
@@ -435,6 +443,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> recover() async {
+    _cancelPendingResolutionNav();
     if (hasPendingCommand) {
       await retryUnknown();
       return;
@@ -610,6 +619,10 @@ final class TournamentController extends ChangeNotifier {
     required int offerIndex,
     required Coordinate tap,
   }) async {
+    _cancelPendingResolutionNav();
+    final epoch = _resolutionNavEpoch;
+    final tournamentEpoch = _tournamentEpoch;
+    final currentSeries = seriesId;
     final raw = board['state'];
     if (raw is! Map) {
       noticeCode = 'BOARD_UNREADABLE';
@@ -649,7 +662,15 @@ final class TournamentController extends ChangeNotifier {
 
     final phase = day?.phase ?? DayPhase.unknown;
     if (phase == DayPhase.completed) {
-      await _loadResults();
+      await _loadResults(stillCurrent: () =>
+          epoch == _resolutionNavEpoch &&
+          tournamentEpoch == _tournamentEpoch &&
+          currentSeries == seriesId &&
+          route.place == TournamentPlace.playing);
+      if (epoch != _resolutionNavEpoch ||
+          tournamentEpoch != _tournamentEpoch ||
+          currentSeries != seriesId ||
+          route.place != TournamentPlace.playing) return;
       _armPendingResolutionNav(TournamentPlace.results);
     } else if (day?.awaitAdvance == true) {
       _armPendingResolutionNav(TournamentPlace.transition);
@@ -661,6 +682,8 @@ final class TournamentController extends ChangeNotifier {
 
   void _armPendingResolutionNav(TournamentPlace place) {
     _resolutionHold?.cancel();
+    final script = session.view.activeScript;
+    _pendingResolutionId = script?.resolutionId;
     _pendingAfterResolution = place;
     _awaitingResolutionNav = false;
     // If resolution already settled (no script / reduce-motion settle), navigate.
@@ -668,6 +691,8 @@ final class TournamentController extends ChangeNotifier {
   }
 
   void _cancelPendingResolutionNav() {
+    _resolutionNavEpoch += 1;
+    _pendingResolutionId = null;
     _resolutionHold?.cancel();
     _resolutionHold = null;
     _pendingAfterResolution = null;
@@ -686,36 +711,47 @@ final class TournamentController extends ChangeNotifier {
 
     final view = session.view;
     final script = view.activeScript;
-    if (script != null && script.resolutionId != _seenResolutionId) {
-      _seenResolutionId = script.resolutionId;
-    }
+    if (script != null && script.resolutionId != _pendingResolutionId) return;
 
     // Keep the board mounted until AccessibleBoard completes the script.
     if (view.phase == GameScreenPhase.resolving) return;
     if (_awaitingResolutionNav) return;
     _awaitingResolutionNav = true;
+    final epoch = _resolutionNavEpoch;
+    final resolutionId = _pendingResolutionId;
 
     if (_platformReduceMotion) {
-      unawaited(_commitPendingResolutionNav());
+      unawaited(_commitPendingResolutionNav(epoch, resolutionId));
       return;
     }
 
     _resolutionHold?.cancel();
     final expected = pending;
     _resolutionHold = Timer(kResolutionCompletionBeat, () {
-      if (_pendingAfterResolution != expected) return;
+      if (_resolutionNavEpoch != epoch ||
+          _pendingAfterResolution != expected ||
+          _pendingResolutionId != resolutionId ||
+          route.place != TournamentPlace.playing) return;
+      final currentScript = session.view.activeScript;
+      if (currentScript != null &&
+          currentScript.resolutionId != resolutionId) return;
       if (session.view.phase == GameScreenPhase.resolving) {
         _awaitingResolutionNav = false;
         _onSessionResolution();
         return;
       }
-      unawaited(_commitPendingResolutionNav());
+      unawaited(_commitPendingResolutionNav(epoch, resolutionId));
     });
   }
 
-  Future<void> _commitPendingResolutionNav() async {
+  Future<void> _commitPendingResolutionNav(int epoch, int? resolutionId) async {
+    if (_resolutionNavEpoch != epoch ||
+        _pendingResolutionId != resolutionId ||
+        route.place != TournamentPlace.playing) return;
     final pending = _pendingAfterResolution;
     _pendingAfterResolution = null;
+    _pendingResolutionId = null;
+    _resolutionNavEpoch += 1;
     _awaitingResolutionNav = false;
     _resolutionHold?.cancel();
     _resolutionHold = null;
@@ -873,10 +909,11 @@ final class TournamentController extends ChangeNotifier {
     return text;
   }
 
-  Future<void> _loadResults() async {
+  Future<void> _loadResults({bool Function()? stillCurrent}) async {
     final id = seriesId;
     if (id == null) return;
     final response = await api.get('/v1/tournament/series/$id/results');
+    if (stillCurrent != null && !stillCurrent()) return;
     if (response.status == 200) {
       results = response.map;
       resultsError = null;
@@ -1217,8 +1254,10 @@ final class TournamentController extends ChangeNotifier {
   }
 
   /// Clears authenticated practice binding after logout / identity switch.
-  Future<void> clearAuthenticatedPracticeScope() =>
-      identity.clearAuthenticatedPlayer();
+  Future<void> clearAuthenticatedPracticeScope() {
+    _cancelPendingResolutionNav();
+    return identity.clearAuthenticatedPlayer();
+  }
 
   String _today() => DateTime.now().toUtc().toIso8601String().substring(0, 10);
 }
