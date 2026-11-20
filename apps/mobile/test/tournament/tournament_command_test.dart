@@ -176,7 +176,7 @@ void main() {
         return const UatHttpResult(200, {
           'seriesId': '11111111-1111-4111-8111-111111111111',
           'status': 'ACTIVE',
-          'original': false,
+          'original': true,
         });
       }
       if (path.endsWith('/board')) {
