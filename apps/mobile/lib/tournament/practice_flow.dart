@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
@@ -24,8 +25,6 @@ final class PracticeFlow extends StatefulWidget {
 }
 
 final class _PracticeFlowState extends State<PracticeFlow> {
-  static const _completionBeat = Duration(milliseconds: 420);
-
   final GameSession _session = GameSession();
   late PracticeStore _store = widget.controller.practiceStore();
   DifficultyProfile? _profile;
@@ -88,7 +87,7 @@ final class _PracticeFlowState extends State<PracticeFlow> {
         return;
       }
       _resultHold?.cancel();
-      _resultHold = Timer(_completionBeat, () {
+      _resultHold = Timer(kResolutionCompletionBeat, () {
         if (!mounted || _session.view.phase != GameScreenPhase.ended) {
           return;
         }

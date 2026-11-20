@@ -146,8 +146,16 @@ void main() {
       expect(api.commandBodies, hasLength(2));
       expect(identical(api.commandBodies[0], api.commandBodies[1]), isTrue);
       expect(identical(api.commandBodies[0], first), isTrue);
-      expect(controller.session.applyMoveCallCount, 0);
+      // Local apply is used only to arm AnimationScript; ranked score is server.
+      expect(controller.session.applyMoveCallCount, 1);
+      expect(controller.session.view.phase, GameScreenPhase.resolving);
       expect(controller.scoreDelta, 300);
+      expect(controller.session.view.score, 300);
+      final script = controller.session.view.activeScript!;
+      controller.session.completeResolution(
+        generation: script.generation,
+        resolutionId: script.resolutionId,
+      );
       expect(controller.session.view.score, 300);
     },
   );

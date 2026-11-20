@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
@@ -128,6 +129,7 @@ final class TournamentController extends ChangeNotifier {
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
+    this._reduceMotion,
   }) : api =
            api ??
            UatApi(
@@ -138,7 +140,9 @@ final class TournamentController extends ChangeNotifier {
        sfx = sfx ?? _QuietSfx(),
        settings = settings ?? LocalSettings.load(stateDirectory),
        _kv = DirectoryKvStore(stateDirectory),
-       _stateFile = File('${stateDirectory.path}/pzd-uat-session.json');
+       _stateFile = File('${stateDirectory.path}/pzd-uat-session.json') {
+    session.addListener(_onSessionResolution);
+  }
 
   final UatConfig config;
   final Directory stateDirectory;
@@ -147,6 +151,7 @@ final class TournamentController extends ChangeNotifier {
   final TournamentHaptics haptics;
   final GameSfx sfx;
   final LocalSettings settings;
+  final bool Function()? _reduceMotion;
   final LocalKvStore _kv;
   final File _stateFile;
   final GameSession session = GameSession();
@@ -200,9 +205,19 @@ final class TournamentController extends ChangeNotifier {
   Map<String, Object?>? _claim;
   Object? _pending;
   String? _pendingKey;
+  /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
+  GameState? _pendingPreState;
+  int? _pendingOfferIndex;
+  Coordinate? _pendingTap;
   int _tournamentEpoch = 0;
   Future<void>? _refreshInFlight;
   TournamentRefreshOrigin _refreshOrigin = TournamentRefreshOrigin.background;
+
+  /// Destination after Practice-parity resolution + completion beat.
+  TournamentPlace? _pendingAfterResolution;
+  bool _awaitingResolutionNav = false;
+  int _seenResolutionId = 0;
+  Timer? _resolutionHold;
 
   bool get hasPendingCommand => _pending != null;
 
@@ -229,6 +244,17 @@ final class TournamentController extends ChangeNotifier {
 
   /// The exact command waiting for reconciliation. Retries send this object.
   Object? get pendingCommand => _pending;
+
+  /// True while Transition/Results are deferred until animation + beat finish.
+  bool get awaitingResolutionNavigation =>
+      _pendingAfterResolution != null || _awaitingResolutionNav;
+
+  @override
+  void dispose() {
+    _resolutionHold?.cancel();
+    session.removeListener(_onSessionResolution);
+    super.dispose();
+  }
 
   /// Local-only boot: Home + Practice usable without Tournament HTTP.
   Future<void> beginLocal() async {
@@ -437,7 +463,18 @@ final class TournamentController extends ChangeNotifier {
       pending,
       key: _pendingKey ?? '',
       fromPlay: route.place == TournamentPlace.playing,
+      preState: _pendingPreState,
+      offerIndex: _pendingOfferIndex,
+      tap: _pendingTap,
     );
+  }
+
+  void _clearPendingCommand() {
+    _pending = null;
+    _pendingKey = null;
+    _pendingPreState = null;
+    _pendingOfferIndex = null;
+    _pendingTap = null;
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
@@ -450,6 +487,8 @@ final class TournamentController extends ChangeNotifier {
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
+    // Canonical is still the pre-move board while the authoritative request runs.
+    final preState = session.view.canonicalState;
     final revision = board['boardRevision'];
     final writer = board['writerGeneration'];
     final key =
@@ -465,17 +504,26 @@ final class TournamentController extends ChangeNotifier {
         'writerGeneration': writer,
       },
     };
-    await _sendCommand(body, key: key, fromPlay: true);
+    await _sendCommand(
+      body,
+      key: key,
+      fromPlay: true,
+      preState: preState,
+      offerIndex: offerIndex,
+      tap: tap,
+    );
   }
 
   Future<void> _sendCommand(
     Object body, {
     required String key,
     required bool fromPlay,
+    GameState? preState,
+    int? offerIndex,
+    Coordinate? tap,
   }) async {
     final id = seriesId;
     if (id == null) return;
-    final before = day?.seriesScore;
     moveInFlight = true;
     scoreDelta = null;
     noticeCode = null;
@@ -488,55 +536,54 @@ final class TournamentController extends ChangeNotifier {
       if (response.status == 0) {
         _pending = body;
         _pendingKey = key;
+        _pendingPreState = preState;
+        _pendingOfferIndex = offerIndex;
+        _pendingTap = tap;
         noticeCode = 'outcome_unknown';
         if (fromPlay) session.markAuthoritativeUnknown();
         return;
       }
-      _pending = null;
-      _pendingKey = null;
+      _clearPendingCommand();
       session.clearAuthoritativeUnknown();
       if (response.status == 200) {
         rankedWriterLocked = false;
+        if (fromPlay &&
+            preState != null &&
+            offerIndex != null &&
+            tap != null) {
+          final ok = await _reload(reveal: false, followGameplay: false);
+          if (!ok) return;
+          await _presentAuthoritativeMove(
+            preState: preState,
+            offerIndex: offerIndex,
+            tap: tap,
+          );
+          return;
+        }
         final ok = await _reload(reveal: true, followGameplay: true);
         if (!ok) return;
-        final delta = fromPlay && before != null && day?.seriesScore != null
-            ? day!.seriesScore! - before
-            : 0;
-        scoreDelta = delta > 0 && route.place == TournamentPlace.playing
-            ? delta
-            : null;
         if (route.place == TournamentPlace.results) {
           sfx.play(GameSfxEvent.chainComplete);
           _haptic((feel) => feel.completed());
         } else if (route.place == TournamentPlace.transition) {
-          if (delta > 0) {
-            sfx.play(GameSfxEvent.clear);
-            _haptic((feel) => feel.cleared());
-          }
           sfx.play(GameSfxEvent.roundEnd);
           _haptic((feel) => feel.completed());
-        } else if (fromPlay) {
-          if (delta > 0) {
-            sfx.play(GameSfxEvent.clear);
-            _haptic((feel) => feel.cleared());
-          } else {
-            sfx.play(GameSfxEvent.place);
-            _haptic((feel) => feel.accepted());
-          }
         }
         return;
       }
       sfx.play(GameSfxEvent.reject);
+      _cancelPendingResolutionNav();
       if (response.status == 401) {
+        session.showServerRejection('UNAUTHENTICATED');
         _fail('UNAUTHENTICATED', degradedOnFailure: localReady);
         _haptic((feel) => feel.rejected());
         return;
       }
       if (response.error == 'WRITER_NOT_AUTHORIZED') {
         // Soft, non-network notice: do not auto-retry or invent scores.
-        _pending = null;
-        _pendingKey = null;
+        _clearPendingCommand();
         session.clearAuthoritativeUnknown();
+        session.showServerRejection('WRITER_NOT_AUTHORIZED');
         rankedWriterLocked = true;
         noticeCode = 'WRITER_NOT_AUTHORIZED';
         errorCode = null;
@@ -556,6 +603,137 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
+  /// Reloads board metadata, then arms Practice-parity animation before any
+  /// Transition / Results navigation.
+  Future<void> _presentAuthoritativeMove({
+    required GameState preState,
+    required int offerIndex,
+    required Coordinate tap,
+  }) async {
+    final raw = board['state'];
+    if (raw is! Map) {
+      noticeCode = 'BOARD_UNREADABLE';
+      session.showServerRejection('BOARD_UNREADABLE');
+      notifyListeners();
+      return;
+    }
+    late final GameState authoritative;
+    try {
+      authoritative = parseGameState(raw);
+    } catch (_) {
+      noticeCode = 'BOARD_UNREADABLE';
+      session.showServerRejection('BOARD_UNREADABLE');
+      notifyListeners();
+      return;
+    }
+
+    // Stay on the play screen while AccessibleBoard runs AnimationScript.
+    route = const TournamentRoute(place: TournamentPlace.playing);
+    errorCode = null;
+
+    final applied = session.applyAuthoritativeResolution(
+      preState: preState,
+      offerIndex: offerIndex,
+      tap: tap,
+      authoritative: authoritative,
+    );
+    final delta = applied?.scoreDelta ?? 0;
+    scoreDelta = delta > 0 ? delta : null;
+    if (applied != null) {
+      if (delta > 0) {
+        _haptic((feel) => feel.cleared());
+      } else {
+        _haptic((feel) => feel.accepted());
+      }
+    }
+
+    final phase = day?.phase ?? DayPhase.unknown;
+    if (phase == DayPhase.completed) {
+      await _loadResults();
+      _armPendingResolutionNav(TournamentPlace.results);
+    } else if (day?.awaitAdvance == true) {
+      _armPendingResolutionNav(TournamentPlace.transition);
+    } else {
+      _cancelPendingResolutionNav();
+    }
+    notifyListeners();
+  }
+
+  void _armPendingResolutionNav(TournamentPlace place) {
+    _resolutionHold?.cancel();
+    _pendingAfterResolution = place;
+    _awaitingResolutionNav = false;
+    // If resolution already settled (no script / reduce-motion settle), navigate.
+    _onSessionResolution();
+  }
+
+  void _cancelPendingResolutionNav() {
+    _resolutionHold?.cancel();
+    _resolutionHold = null;
+    _pendingAfterResolution = null;
+    _awaitingResolutionNav = false;
+  }
+
+  bool get _platformReduceMotion {
+    final override = _reduceMotion;
+    if (override != null) return override();
+    return PlatformDispatcher.instance.accessibilityFeatures.reduceMotion;
+  }
+
+  void _onSessionResolution() {
+    final pending = _pendingAfterResolution;
+    if (pending == null) return;
+
+    final view = session.view;
+    final script = view.activeScript;
+    if (script != null && script.resolutionId != _seenResolutionId) {
+      _seenResolutionId = script.resolutionId;
+    }
+
+    // Keep the board mounted until AccessibleBoard completes the script.
+    if (view.phase == GameScreenPhase.resolving) return;
+    if (_awaitingResolutionNav) return;
+    _awaitingResolutionNav = true;
+
+    if (_platformReduceMotion) {
+      unawaited(_commitPendingResolutionNav());
+      return;
+    }
+
+    _resolutionHold?.cancel();
+    final expected = pending;
+    _resolutionHold = Timer(kResolutionCompletionBeat, () {
+      if (_pendingAfterResolution != expected) return;
+      if (session.view.phase == GameScreenPhase.resolving) {
+        _awaitingResolutionNav = false;
+        _onSessionResolution();
+        return;
+      }
+      unawaited(_commitPendingResolutionNav());
+    });
+  }
+
+  Future<void> _commitPendingResolutionNav() async {
+    final pending = _pendingAfterResolution;
+    _pendingAfterResolution = null;
+    _awaitingResolutionNav = false;
+    _resolutionHold?.cancel();
+    _resolutionHold = null;
+    if (pending == null) return;
+
+    if (pending == TournamentPlace.results) {
+      route = const TournamentRoute(place: TournamentPlace.results);
+      sfx.play(GameSfxEvent.chainComplete);
+      _haptic((feel) => feel.completed());
+    } else if (pending == TournamentPlace.transition) {
+      scoreDelta = null;
+      route = const TournamentRoute(place: TournamentPlace.transition);
+      sfx.play(GameSfxEvent.roundEnd);
+      _haptic((feel) => feel.completed());
+    }
+    notifyListeners();
+  }
+
   Future<bool> _reload({
     required bool reveal,
     required bool followGameplay,
@@ -572,12 +750,16 @@ final class TournamentController extends ChangeNotifier {
       if (followGameplay) {
         await _loadResults();
         route = const TournamentRoute(place: TournamentPlace.results);
+      } else if (!reveal) {
+        // Caller presents animation then navigates after the completion beat.
       } else {
         route = const TournamentRoute();
       }
     } else if (day?.awaitAdvance == true) {
-      scoreDelta = null;
-      route = const TournamentRoute(place: TournamentPlace.transition);
+      if (followGameplay) {
+        scoreDelta = null;
+        route = const TournamentRoute(place: TournamentPlace.transition);
+      }
     } else if (reveal) {
       route = const TournamentRoute(place: TournamentPlace.playing);
     }

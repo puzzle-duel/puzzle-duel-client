@@ -253,32 +253,42 @@ final class _PlayFeedback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final delta = controller.scoreDelta;
     if (controller.hasPendingCommand) {
       return TextButton(
         onPressed: controller.retryUnknown,
         child: Text(copy.retrySame),
       );
     }
-    // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
-    if (delta != null && delta > 0) {
-      return Text(
-        '+$delta',
-        key: const Key('score-delta'),
-        style: const TextStyle(
-          color: GameTokens.success,
-          fontWeight: FontWeight.w800,
-          fontSize: 20,
-        ),
-      );
-    }
-    if (controller.moveInFlight) {
-      return Text(
-        copy.sending,
-        style: const TextStyle(color: GameTokens.accent),
-      );
-    }
-    return const SizedBox.shrink();
+    // Same Practice timing: positive move delta only while resolving.
+    return ListenableBuilder(
+      listenable: controller.session,
+      builder: (context, _) {
+        final view = controller.session.view;
+        final scriptDelta = view.activeScript?.applied.scoreDelta;
+        final delta = (view.isResolving && scriptDelta != null && scriptDelta > 0)
+            ? scriptDelta
+            : controller.scoreDelta;
+        // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
+        if (delta != null && delta > 0 && view.isResolving) {
+          return Text(
+            '+$delta',
+            key: const Key('score-delta'),
+            style: const TextStyle(
+              color: GameTokens.success,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+            ),
+          );
+        }
+        if (controller.moveInFlight && !view.isResolving) {
+          return Text(
+            copy.sending,
+            style: const TextStyle(color: GameTokens.accent),
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
   }
 }
 
