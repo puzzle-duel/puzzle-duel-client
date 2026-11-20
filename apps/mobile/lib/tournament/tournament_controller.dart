@@ -686,8 +686,10 @@ final class TournamentController extends ChangeNotifier {
     scoreDelta = delta > 0 ? delta : null;
     if (applied != null) {
       if (delta > 0) {
+        sfx.play(GameSfxEvent.clear);
         _haptic((feel) => feel.cleared());
       } else {
+        sfx.play(GameSfxEvent.place);
         _haptic((feel) => feel.accepted());
       }
     }
