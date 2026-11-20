@@ -145,7 +145,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       final scored = _frame(tester);
       _expectSameFrame(scored, before);
-      expect(find.text('+12'), findsOneWidget);
+      // The scripted server changes its score but returns the unchanged board.
+      // A mismatched authoritative state must not invent a +score animation.
+      expect(find.text('+12'), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('offer-slot-0')));
       await tester.pump();
