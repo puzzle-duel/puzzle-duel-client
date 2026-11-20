@@ -14,8 +14,9 @@ import CryptoKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "PzdDeviceSigning")
-    PzdDeviceSigning.register(with: registrar)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "PzdDeviceSigning") {
+      PzdDeviceSigning.register(with: registrar)
+    }
   }
 }
 
