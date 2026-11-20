@@ -624,7 +624,7 @@ final class TournamentController extends ChangeNotifier {
     // Refresh with enough time for a normal network round-trip; the 45s UAT
     // profile renews about 12s before expiration.
     final lead = remaining > 24000 ? 12000 : (remaining ~/ 3).clamp(1000, 12000);
-    final wait = (remaining - lead).clamp(0, 1800000);
+    final wait = (remaining - lead).clamp(0, 1800000).toInt();
     _sessionRenewalTimer = Timer(Duration(milliseconds: wait), () {
       unawaited(_renewActiveSession());
     });
@@ -667,7 +667,10 @@ final class TournamentController extends ChangeNotifier {
     }
     // Do not create a second writer or replay a command from a timer.
     // An expired/revoked session is handled by explicit signed recovery.
-    if (response.status == 401) _sessionExpiresAtMs = null;
+    if (response.status == 401) {
+      // Keep the expired timestamp so the next command enters signed recovery.
+      _sessionExpiresAtMs = DateTime.now().toUtc().millisecondsSinceEpoch - 1;
+    }
     _sessionRenewalTimer?.cancel();
     if (response.status != 401 && _appForeground) {
       _sessionRenewalTimer = Timer(const Duration(seconds: 2), () {
