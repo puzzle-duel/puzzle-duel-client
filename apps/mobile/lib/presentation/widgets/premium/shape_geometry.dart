@@ -48,6 +48,9 @@ abstract final class ProtoShapeGeometry {
     west: Offset(c.dx - r, c.dy),
   );
 
+  /// Legacy upright-triangle vertices retained for historical API parity.
+  ///
+  /// Not used by [outerPath] — presentation for [Shape.triangle] is [flatTopHexagon].
   static ({Offset apex, Offset bottomRight, Offset bottomLeft})
   triangleVertices(Offset c, double r) => (
     apex: Offset(c.dx, c.dy - r),
@@ -55,48 +58,8 @@ abstract final class ProtoShapeGeometry {
     bottomLeft: Offset(c.dx - r * 0.95, c.dy + r * 0.82),
   );
 
-  /// Optical balance point — hexagon/circle/diamond use geometric center.
+  /// Optical balance point — circle / diamond / hexagon use geometric center.
   static Offset glyphOrigin(Offset c, double r, Shape shape) => c;
-
-  /// Centroid of the upright triangle silhouette at radius [r].
-  static Offset triangleCentroid(Offset c, double r) {
-    final v = triangleVertices(c, r);
-    return Offset(
-      (v.apex.dx + v.bottomRight.dx + v.bottomLeft.dx) / 3,
-      (v.apex.dy + v.bottomRight.dy + v.bottomLeft.dy) / 3,
-    );
-  }
-
-  /// Inset usable face for chevron placement (inside bevel / extrusion).
-  /// Keep close to body radius so arms stay as long as circle/diamond.
-  static double triangleSafeFaceFrac(ProtoOpticalTier? tier) => switch (tier) {
-    ProtoOpticalTier.board => 0.82,
-    ProtoOpticalTier.tray => 0.84,
-    ProtoOpticalTier.hero || null => 0.86,
-  };
-
-  /// Direction-specific optical origin inside the upright triangle face.
-  ///
-  /// Body silhouette stays apex-up; only the chevron rotates. Offsets keep the
-  /// glyph inside the safe face without a single global vertical nudge.
-  static Offset triangleChevronOrigin(
-    Offset c,
-    double r, {
-    required Direction direction,
-    ProtoOpticalTier? tier,
-  }) {
-    final faceR = r * triangleSafeFaceFrac(tier);
-    final base = triangleCentroid(c, faceR);
-    // Optical nudges as fractions of face radius — tuned per direction so
-    // tip/wings clear the bevel without looking off-center.
-    final nudge = switch (direction) {
-      Direction.up => Offset(0, faceR * 0.10),
-      Direction.down => Offset(0, -faceR * 0.06),
-      Direction.left => Offset(faceR * 0.05, faceR * 0.04),
-      Direction.right => Offset(-faceR * 0.05, faceR * 0.04),
-    };
-    return base + nudge;
-  }
 
   static Path roundedPolygon(List<Offset> points, double cornerRadius) {
     final path = Path();

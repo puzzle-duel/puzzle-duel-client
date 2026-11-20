@@ -10,9 +10,13 @@
 | Top-left | Green circle (`Shape.circle`) Up |
 | Top-right | Purple diamond (`Shape.diamond`) Up |
 | Bottom-left | Golden hexagon (`Shape.triangle` → hexagon presentation) Up |
-| Bottom-right | Clean Canvas trophy (no rectangular plate) |
+| Bottom-right | Clean Canvas trophy (no rectangular plate; no raster load) |
+| Trophy scale | `pieceSize * 0.46` |
 | Direction glyph | One shared dark stroke chevron (`ProtoShapeGeometry.directionInk`) |
-| Export | `PZD47_EXPORT_CHEVRON_EVIDENCE=1 flutter test test/presentation/simple_chevron_evidence_test.dart` |
+| Display name | **Puzzle Duel** (iOS `CFBundleDisplayName`, Android `android:label`) |
+| Export | `PZD47_EXPORT_ICON=1 flutter test test/presentation/premium_app_icon_composer_test.dart` |
 | Platform icons | `python3 tools/pzd47/generate_app_icons.py` |
 
 Shared implementation — not palette-only parity. See `DOMAIN_VISUAL_MAPPING.md`.
+
+Archival crops (`reference/crops/trophy.png`, etc.) are **not** used by export.

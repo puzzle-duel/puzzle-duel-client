@@ -1,72 +1,66 @@
 # PZD-47 — Visual parity manifest
 
-Status: **READY_FOR_OWNER_VISUAL_UAT** (do not merge / do not mark Done)
+Status: **READY_FOR_OWNER_PHYSICAL_UAT** (do not merge / do not mark Done)
 
-## Source inspection (AC-01)
+## Binding reference
 
 | Field | Value |
 | --- | --- |
-| Jira | [PZD-47](https://puzzle-duel-app.atlassian.net/browse/PZD-47) |
-| Attachment | `Neon Puzzle Trophy Icon.png` (id `10000`) |
-| Repo copy | `docs/features/pzd-47/reference/Neon_Puzzle_Trophy_Icon.png` |
-| Bytes | `1653310` (matches Jira attachment size) |
-| Dimensions | `1254 × 1254` RGB PNG |
-| SHA-256 | `32d53c61874e1c7a6e19c51bcf96cfb0f70d4ddbbe753df6695ace1fc8f5e48b` |
-| Center circular arrows | **Absent** in attachment (verified via center crop) |
+| Identity | Green circle + purple diamond + golden flat-top hexagon |
+| Owner PNG | `docs/features/pzd-47/reference/hexagon-icon-visual-reference.png` |
+| Dimensions | `1024 × 1024` |
+| SHA-256 | `dff57723ed17a469f5bd437a589c0f51e5ef970c657248d59638de77c99b689c` |
+| Material pin | `pzd47-hexagon-identity-v1` |
 
-Clean icon alias (same bytes as attachment):
+Earlier Neon trophy attachment remains archival under `reference/Neon_Puzzle_Trophy_Icon.png` — not the current binding silhouette.
 
-- `docs/features/pzd-47/reference/app_icon_clean_no_center_arrows.png`
-
-## Canonical shape system (AC-03)
+## Canonical shape system
 
 | Role | Path |
 | --- | --- |
-| Material / version tokens | `apps/mobile/lib/presentation/widgets/premium_shape_materials.dart` (`pzd47-canonical-shapes-v1`) |
-| Shared body + direction renderer | `apps/mobile/lib/presentation/widgets/piece_glyph.dart` (`PiecePainter`) |
-| Board consumption | `apps/mobile/lib/presentation/game/board/board_paint_utils.dart` → `paintPieceGlyph` → `PiecePainter` |
-| Tray consumption | `apps/mobile/lib/presentation/game/offer_tray.dart` → `PieceGlyph` → `PiecePainter` |
-| Theme color alignment | `apps/mobile/lib/theme/game_tokens.dart` |
-| App icon master (1024) | `apps/mobile/assets/branding/app_icon_master_1024.png` |
+| Geometry | `apps/mobile/lib/presentation/widgets/premium/shape_geometry.dart` |
+| Materials | `…/premium/material_palette.dart` + `premium_shape_materials.dart` |
+| Body + chevron painter | `…/premium/premium_piece_renderer.dart` |
+| Widget façade | `…/piece_glyph.dart` → `PremiumPieceRenderer` |
+| Board | `board_paint_utils.dart` → `PiecePainter` |
+| Tray | `offer_tray.dart` → `PieceGlyph` |
+| App icon | `premium/app_icon_composer.dart` (shared renderer + Canvas trophy) |
 | Icon generator | `tools/pzd47/generate_app_icons.py` |
 
 ### Layer mapping
 
-1. **Body / material** — silhouette path (circle / 45° rounded diamond / rounded triangle) + bevel shell + face gradient + top-left specular + contact shadow.
-2. **Direction glyph** — dark navy inset chevron, composited independently from gameplay `Direction`. Diamond body rotation does **not** rotate the logical direction marker.
-3. **Trophy** — icon-only artwork retained from the approved attachment; **not** a playable piece.
+1. **Body** — circle / 45° diamond / flat-top hexagon; bevel, face gradient, specular, contact shadow.
+2. **Direction** — one dark stroke chevron (`ProtoShapeGeometry.directionInk`); body never rotates with direction.
+3. **Trophy** — icon-only Canvas cup; not a playable piece; raster crops are not loaded at export time.
 
-### Reconstruction honesty
+### Domain mapping
 
-The Jira attachment is a flattened raster. Shape layers were reconstructed as a deterministic Flutter painter matching the icon crops (geometry, lighting direction, bevel, colors, inset chevron). This is **not** a claim of pixel-perfect equality with the raster. Owner visual UAT decides PASS.
+Serialized `Shape.triangle` / wire `triangle` unchanged. Presentation + a11y label: **hexagon**. See `DOMAIN_VISUAL_MAPPING.md`.
 
-## Direction mapping (AC-04)
+## Direction matrix (12 / 12)
 
-| Shape | Directions covered |
-| --- | --- |
-| Circle | up, right, down, left |
-| Diamond (45° body) | up, right, down, left |
-| Triangle | up, right, down, left |
-
-**12 / 12** combinations covered by widget + golden tests in:
+Covered by geometry tests + goldens in:
 
 - `apps/mobile/test/presentation/piece_glyph_triangle_arrow_test.dart`
 - `apps/mobile/test/presentation/pzd47_premium_shapes_test.dart`
+- `apps/mobile/test/presentation/pzd47_golden_artifacts_test.dart` (CI integrity)
 
-## Platform icons (AC-06)
+## Platform icons + display name
 
-| Platform | Path |
+| Platform | Path / value |
 | --- | --- |
-| iOS AppIcon set | `apps/mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/` |
-| Android legacy mipmaps | `apps/mobile/android/app/src/main/res/mipmap-*/ic_launcher.png` |
-| Android adaptive | `mipmap-anydpi-v26/ic_launcher.xml` + `drawable-*/ic_launcher_foreground.png` + `@color/ic_launcher_background` |
+| iOS AppIcon | `ios/Runner/Assets.xcassets/AppIcon.appiconset/` |
+| iOS display name | `CFBundleDisplayName` = **Puzzle Duel** |
+| Android mipmaps / adaptive | `mipmap-*`, `drawable-*/ic_launcher_foreground.png` |
+| Android label | `android:label` = **Puzzle Duel** |
+| Trophy scale | `pieceSize * 0.46` in `PremiumAppIconComposer` |
 
-Regenerate:
+## UAT evidence index
 
-```bash
-python3 tools/pzd47/generate_app_icons.py
-```
+| Set | Location | Role |
+| --- | --- | --- |
+| **PZD-47 canonical** | `docs/features/pzd-47/uat/` + `uat/polish/` | Hexagon-identity boards, tray, icon |
+| PZD-23 folder (refreshed) | `docs/mobile/uat-evidence/pzd23-visual/` | Offline practice captures regenerated with current renderer on this UAT branch — not pre-hexagon historical archive |
+| PZD-42 folder (refreshed) | `docs/mobile/uat-evidence/pzd42-visual/` | Tournament UI captures regenerated similarly |
 
-## UAT evidence
-
-See `docs/features/pzd-47/uat/` after capture tests are run.
+Pre-hexagon historical bits remain on `main` / earlier commits; this branch keeps current-renderer evidence in those folders for regression of adjacent surfaces.

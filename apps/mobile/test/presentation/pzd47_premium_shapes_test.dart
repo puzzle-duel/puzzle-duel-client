@@ -8,9 +8,14 @@ import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
-bool get _skipGoldensOnCi =>
-    Platform.environment['CI'] == 'true' ||
-    Platform.environment['GITHUB_ACTIONS'] == 'true';
+/// See `pzd47_golden_artifacts_test.dart` for always-on CI coverage.
+bool get _skipCiPixelGoldens {
+  final force = Platform.environment['PZD47_FORCE_GOLDENS'] == '1';
+  final onCi =
+      Platform.environment['CI'] == 'true' ||
+      Platform.environment['GITHUB_ACTIONS'] == 'true';
+  return onCi && !force;
+}
 
 Widget _matrixCell(Piece piece, double size) {
   return Directionality(
@@ -118,7 +123,7 @@ void main() {
               'goldens/pzd47_${shape.wire}_${direction.wire}.png',
             ),
           );
-        }, skip: _skipGoldensOnCi);
+        }, skip: _skipCiPixelGoldens);
       }
     }
 
@@ -177,7 +182,7 @@ void main() {
         find.byType(RepaintBoundary).first,
         matchesGoldenFile('goldens/pzd47_direction_matrix_3x4.png'),
       );
-    }, skip: _skipGoldensOnCi);
+    }, skip: _skipCiPixelGoldens);
   });
 
   testWidgets('piece painter paints within bounds (no overflow)', (tester) async {

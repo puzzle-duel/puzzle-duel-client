@@ -12,9 +12,16 @@ double pieceSizeForBoard(int boardSize, {double boardSide = 360}) {
   return cell * 0.9;
 }
 
-bool get _skipGoldensOnCi =>
-    Platform.environment['CI'] == 'true' ||
-    Platform.environment['GITHUB_ACTIONS'] == 'true';
+/// Pixel goldens are macOS-baselined. On CI skip *pixels* unless
+/// `PZD47_FORCE_GOLDENS=1`. Always-on coverage:
+/// `pzd47_golden_artifacts_test.dart` + geometry groups in this file.
+bool get _skipCiPixelGoldens {
+  final force = Platform.environment['PZD47_FORCE_GOLDENS'] == '1';
+  final onCi =
+      Platform.environment['CI'] == 'true' ||
+      Platform.environment['GITHUB_ACTIONS'] == 'true';
+  return onCi && !force;
+}
 
 Widget _glyph(Piece piece, double size) {
   return ColoredBox(
@@ -103,13 +110,28 @@ void main() {
       }
     });
 
-    test('triangle silhouette stays upright', () {
+    test('legacy triangleVertices helper remains upright (API parity)', () {
       final c = const Offset(40, 40);
       const r = 20.0;
       final v = PiecePainter.triangleVertices(c, r);
       expect(v.apex.dy, lessThan(v.bottomLeft.dy));
       expect(v.bottomLeft.dy, closeTo(v.bottomRight.dy, 1e-9));
       expect(v.apex.dx, closeTo(c.dx, 1e-9));
+    });
+
+    test('domain triangle presentation uses centered hexagon origin', () {
+      const c = Offset(40, 40);
+      const r = 20.0;
+      expect(PiecePainter.glyphOrigin(c, r, Shape.triangle), c);
+      expect(
+        PiecePainter.pointInShape(c, c, r, Shape.triangle),
+        isTrue,
+      );
+      // Far outside the hexagon bounds.
+      expect(
+        PiecePainter.pointInShape(Offset(c.dx + r * 2, c.dy), c, r, Shape.triangle),
+        isFalse,
+      );
     });
 
     test('semantics labels use presentation names', () {
@@ -160,7 +182,7 @@ void main() {
                 ),
               );
             },
-            skip: _skipGoldensOnCi,
+            skip: _skipCiPixelGoldens,
           );
         }
       }
@@ -301,7 +323,7 @@ void main() {
           matchesGoldenFile('goldens/direction_family_board_tray.png'),
         );
       },
-      skip: _skipGoldensOnCi,
+      skip: _skipCiPixelGoldens,
     );
 
     testWidgets(
@@ -342,7 +364,7 @@ void main() {
           matchesGoldenFile('goldens/triangle_directions_strip.png'),
         );
       },
-      skip: _skipGoldensOnCi,
+      skip: _skipCiPixelGoldens,
     );
   });
 }

@@ -29,7 +29,8 @@ abstract final class PremiumAppIconComposer {
 
   /// Paints the full icon into [canvas] of [size]×[size].
   ///
-  /// [trophy] is optional decorative artwork for the bottom-right cell.
+  /// [trophy] is retained for API compatibility and ignored — the cup is
+  /// always painted procedurally (avoids purple-plate raster artifacts).
   static void paint({
     required Canvas canvas,
     required double size,

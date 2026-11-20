@@ -133,12 +133,15 @@ final class PiecePainter extends CustomPainter {
   static double triangleArrowStroke(double side) => directionArrowStroke(side);
 
   /// Visual balance point for the direction mark inside [shape].
-  static Offset glyphOrigin(Offset c, double r, Shape shape) => switch (shape) {
-    Shape.triangle => triangleCentroid(c, r),
-    Shape.circle || Shape.diamond => c,
-  };
+  ///
+  /// Presentation silhouettes (including domain [Shape.triangle] → hexagon)
+  /// are optically centered; only the chevron rotates with [Direction].
+  static Offset glyphOrigin(Offset c, double r, Shape shape) => c;
 
-  /// Equilateral-ish upright triangle matching [shapePath] for [Shape.triangle].
+  /// Legacy upright-triangle vertices (historical API / tests only).
+  ///
+  /// Presentation silhouette for [Shape.triangle] is [ProtoShapeGeometry.flatTopHexagon]
+  /// via [shapePath] — do not use these vertices for containment or ray probes.
   static ({Offset apex, Offset bottomRight, Offset bottomLeft}) triangleVertices(
     Offset c,
     double r,
@@ -162,7 +165,7 @@ final class PiecePainter extends CustomPainter {
     );
   }
 
-  /// Barycenter of the upright triangle (visual balance point for the arrow).
+  /// Legacy barycenter of [triangleVertices] (not used by hexagon presentation).
   static Offset triangleCentroid(Offset c, double r) {
     final v = triangleVertices(c, r);
     return Offset(
@@ -182,11 +185,12 @@ final class PiecePainter extends CustomPainter {
         final dy = (p.dy - c.dy).abs() / r;
         return dx + dy <= 1 + 1e-6;
       case Shape.triangle:
-        return pointInTriangle(p, c, r);
+        // Domain wire `triangle` → flat-top hexagon presentation.
+        return shapePath(c, r, Shape.triangle).contains(p);
     }
   }
 
-  /// True when [p] lies inside or on the triangle defined by [shapePath].
+  /// Legacy helper: true when [p] lies inside the historical triangle vertices.
   static bool pointInTriangle(Offset p, Offset c, double r) {
     final v = triangleVertices(c, r);
     return _barycentricInside(p, v.apex, v.bottomRight, v.bottomLeft);
@@ -498,12 +502,17 @@ final class PiecePainter extends CustomPainter {
           (v.west, v.north),
         ], fallback: radius * 0.4);
       case Shape.triangle:
-        final v = triangleVertices(shapeCenter, radius);
-        return _rayDistanceToEdges(origin, unit, [
-          (v.apex, v.bottomRight),
-          (v.bottomRight, v.bottomLeft),
-          (v.bottomLeft, v.apex),
-        ], fallback: radius * 0.4);
+        final pts = ProtoShapeGeometry.flatTopHexagon(shapeCenter, radius);
+        final edges = <(Offset, Offset)>[
+          for (var i = 0; i < pts.length; i++)
+            (pts[i], pts[(i + 1) % pts.length]),
+        ];
+        return _rayDistanceToEdges(
+          origin,
+          unit,
+          edges,
+          fallback: radius * 0.4,
+        );
     }
   }
 
@@ -562,11 +571,10 @@ final class PiecePainter extends CustomPainter {
           _distancePointToSegment(p, v.west, v.north),
         ].reduce(math.min);
       case Shape.triangle:
-        final v = triangleVertices(c, r);
+        final pts = ProtoShapeGeometry.flatTopHexagon(c, r);
         return [
-          _distancePointToSegment(p, v.apex, v.bottomRight),
-          _distancePointToSegment(p, v.bottomRight, v.bottomLeft),
-          _distancePointToSegment(p, v.bottomLeft, v.apex),
+          for (var i = 0; i < pts.length; i++)
+            _distancePointToSegment(p, pts[i], pts[(i + 1) % pts.length]),
         ].reduce(math.min);
     }
   }
