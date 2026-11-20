@@ -30,6 +30,94 @@ void main() {
         .setMockMethodCallHandler(signer, null);
   });
 
+  test('proactive foreground renewal extends same session without writer '
+      'takeover or blocked commands', () async {
+    final dir = Directory.systemTemp.createTempSync('pzd-proactive-renewal-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(dir);
+    await identity.load();
+    final firstExpiry = DateTime.now().millisecondsSinceEpoch + 45000;
+    const originalSessionId = '33333333-3333-4333-8333-333333333333';
+    const playerId = '11111111-1111-4111-8111-111111111111';
+    var sessionOpens = 0;
+    var renewals = 0;
+    var challenges = 0;
+    var commands = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path == '/v1/tournament/session' && method == 'POST') {
+        sessionOpens++;
+        return UatHttpResult(201, {
+          'playerId': playerId,
+          'sessionId': originalSessionId,
+          'sessionSecret': 'session-1',
+          'expiresAtMs': firstExpiry,
+        });
+      }
+      if (path == '/v1/tournament/session' && method == 'PATCH') {
+        renewals++;
+        return UatHttpResult(200, {
+          'playerId': playerId,
+          'sessionId': originalSessionId,
+          'expiresAtMs': DateTime.now().millisecondsSinceEpoch + 45000,
+        });
+      }
+      if (path.endsWith('/devices/register')) {
+        return const UatHttpResult(200, {});
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(201, {
+          'seriesId': '22222222-2222-4222-8222-222222222222',
+          'status': 'ACTIVE',
+          'original': true,
+        });
+      }
+      if (path.endsWith('/recovery-challenge') ||
+          path.endsWith('/recover-writer')) {
+        challenges++;
+        return const UatHttpResult(409, {'error': 'WRITER_STILL_ACTIVE'});
+      }
+      if (path.endsWith('/board')) {
+        return const UatHttpResult(200, {
+          'ordinal': 1,
+          'awaitAdvance': true,
+          'boardRevision': 4,
+          'writerGeneration': 1,
+        });
+      }
+      if (path.endsWith('/commands')) {
+        commands++;
+        return const UatHttpResult(200, {});
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer test',
+        playerLabel: 'continuity',
+      ),
+      api: api,
+      stateDirectory: dir,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    controller.setAppForeground(false);
+    controller.setAppForeground(true);
+    // Foreground refresh runs off the input path.
+    for (var attempt = 0; attempt < 20 && renewals == 0; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(renewals, 1);
+    expect(sessionOpens, 1);
+    expect(challenges, 0);
+    await controller.advance();
+    expect(commands, 1);
+    expect(sessionOpens, 1);
+    expect(challenges, 0);
+  });
+
   test('expired session renews and recovers writer before advance command '
       'without a rejected command or duplicate submission', () async {
     final dir = Directory.systemTemp.createTempSync('pzd-session-continuity-');
