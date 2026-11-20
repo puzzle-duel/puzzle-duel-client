@@ -213,6 +213,8 @@ final class TournamentController extends ChangeNotifier {
   String? _verifiedSessionId;
   bool _openedFreshSession = false;
   bool _sameDeviceRegistered = false;
+  int? _sessionExpiresAtMs;
+  bool _renewingWriter = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
   GameState? _pendingPreState;
   int? _pendingOfferIndex;
@@ -284,6 +286,7 @@ final class TournamentController extends ChangeNotifier {
   /// upgrades [_refreshOrigin] so the user still sees pull feedback.
   Future<void> refreshTournament({
     TournamentRefreshOrigin origin = TournamentRefreshOrigin.background,
+    bool preserveRoute = false,
   }) {
     if (_refreshInFlight != null) {
       if (origin == TournamentRefreshOrigin.pullToRefresh &&
@@ -294,12 +297,14 @@ final class TournamentController extends ChangeNotifier {
       return _refreshInFlight!;
     }
     _refreshOrigin = origin;
-    return _refreshInFlight = _refreshTournamentBody().whenComplete(() {
+    return _refreshInFlight = _refreshTournamentBody(
+      preserveRoute: preserveRoute,
+    ).whenComplete(() {
       _refreshInFlight = null;
     });
   }
 
-  Future<void> _refreshTournamentBody() async {
+  Future<void> _refreshTournamentBody({bool preserveRoute = false}) async {
     final epoch = ++_tournamentEpoch;
     InteractionPerf.mark('tournament.refresh.start');
     tournamentSync = TournamentSyncState.syncing;
@@ -316,7 +321,7 @@ final class TournamentController extends ChangeNotifier {
       }
       return;
     }
-    await loadDay(presentHome: true, epoch: epoch);
+    await loadDay(presentHome: !preserveRoute, epoch: epoch);
   }
 
   /// Compatibility entry used by older tests: local ready then ranked refresh.
@@ -502,7 +507,13 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> advance() async {
-    if (!tournamentReady || rankedWriterLocked || moveInFlight || hasPendingCommand) return;
+    if (!tournamentReady || rankedWriterLocked || moveInFlight ||
+        hasPendingCommand || _renewingWriter) return;
+    final originalSeries = seriesId;
+    final originalOrdinal = day?.ordinal;
+    if (!await _ensureLiveWriterSession()) return;
+    if (!tournamentReady || rankedWriterLocked ||
+        originalSeries != seriesId || originalOrdinal != day?.ordinal) return;
     final id = seriesId;
     final ordinal = day?.ordinal;
     if (id == null || ordinal == null) return;
@@ -533,7 +544,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
-    if (!tournamentReady || rankedWriterLocked ||
+    if (!tournamentReady || rankedWriterLocked || _renewingWriter ||
         moveInFlight ||
         hasPendingCommand ||
         session.authoritativeOutcomeUnknown) {
@@ -542,6 +553,18 @@ final class TournamentController extends ChangeNotifier {
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
+    // Do not submit a move with an expired session or stale writer generation.
+    // Renewal happens BEFORE constructing the command and does not replay it.
+    final originalRevision = board['boardRevision'];
+    final originalOrdinal = board['ordinal'];
+    if (!await _ensureLiveWriterSession()) return;
+    if (!tournamentReady || rankedWriterLocked || seriesId != id ||
+        board['boardRevision'] != originalRevision ||
+        board['ordinal'] != originalOrdinal ||
+        route.place != TournamentPlace.playing) {
+      session.showServerRejection('STATE_CONFLICT');
+      return;
+    }
     // Canonical is still the pre-move board while the authoritative request runs.
     final preState = session.view.canonicalState;
     final revision = board['boardRevision'];
@@ -567,6 +590,37 @@ final class TournamentController extends ChangeNotifier {
       offerIndex: offerIndex,
       tap: tap,
     );
+  }
+
+  /// Existing writer remains entitled until its server session expires.
+  /// Device recovery is intentionally not attempted early: backend rejects
+  /// writer takeover while the old session is still active.
+  Future<bool> _ensureLiveWriterSession() async {
+    final expiry = _sessionExpiresAtMs;
+    if (expiry == null) return true; // Legacy mocked UAT sessions.
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    if (now < expiry - 1500) return true;
+    if (_renewingWriter) return false;
+    _renewingWriter = true;
+    notifyListeners();
+    try {
+      // Small expiry-boundary buffer. Never force writer takeover early.
+      final remaining = expiry + 150 - now;
+      if (remaining > 0) {
+        await Future<void>.delayed(Duration(milliseconds: remaining));
+      }
+      InteractionPerf.mark('tournament.session.renew.before_command');
+      await refreshTournament(preserveRoute: true);
+      final ready = tournamentReady && !rankedWriterLocked &&
+          api.sessionSecret != null;
+      if (!ready && route.place == TournamentPlace.playing) {
+        session.showServerRejection(tournamentNoticeCode ?? 'UNAUTHENTICATED');
+      }
+      return ready;
+    } finally {
+      _renewingWriter = false;
+      notifyListeners();
+    }
   }
 
   Future<void> _sendCommand(
@@ -635,8 +689,15 @@ final class TournamentController extends ChangeNotifier {
       sfx.play(GameSfxEvent.reject);
       _cancelPendingResolutionNav();
       if (response.status == 401) {
+        // Auth rejected this command. Re-establish a verified session and
+        // server-owned writer binding, but NEVER replay the command here.
         session.showServerRejection('UNAUTHENTICATED');
-        _fail('UNAUTHENTICATED', degradedOnFailure: localReady);
+        _sessionExpiresAtMs = null;
+        await refreshTournament(preserveRoute: true);
+        if (tournamentReady && seriesId == id &&
+            route.place == TournamentPlace.playing) {
+          await _reload(reveal: true, followGameplay: false);
+        }
         _haptic((feel) => feel.rejected());
         return;
       }
@@ -1079,6 +1140,7 @@ final class TournamentController extends ChangeNotifier {
     _sameDeviceRegistered = false;
     _verifiedSessionPlayerId = null;
     _verifiedSessionId = null;
+    _sessionExpiresAtMs = null;
     final saved = _readBoundSession(binding: binding, origin: origin);
     if (saved != null) {
       api.sessionSecret = saved;
@@ -1091,6 +1153,7 @@ final class TournamentController extends ChangeNotifier {
         step: 'validate_bound',
       );
       if (current.status == 200) {
+        _sessionExpiresAtMs = tournamentInt(current.map['expiresAtMs']);
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
@@ -1165,6 +1228,7 @@ final class TournamentController extends ChangeNotifier {
       return false;
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
+    _sessionExpiresAtMs = tournamentInt(opened.map['expiresAtMs']);
     _verifiedSessionPlayerId = opened.map['playerId']?.toString();
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
