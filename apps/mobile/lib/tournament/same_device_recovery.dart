@@ -6,7 +6,11 @@ import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 /// UAT-only same-device recovery. Keys never leave iOS Secure Enclave.
 /// Backend decides writer entitlement; this class never mutates local scores.
 final class SameDeviceRecovery {
-  const SameDeviceRecovery();
+  const SameDeviceRecovery({this.isSupportedDevice});
+
+  /// Test seam only. Production uses Platform.isIOS.
+  final bool Function()? isSupportedDevice;
+  bool get _isSupported => isSupportedDevice?.call() ?? Platform.isIOS;
 
   static const MethodChannel _signer = MethodChannel('pzd/device_signing');
 
@@ -18,7 +22,7 @@ final class SameDeviceRecovery {
     required String sessionId,
     required String origin,
   }) async {
-    if (!Platform.isIOS || playerId.isEmpty || sessionId.isEmpty) return false;
+    if (!_isSupported || playerId.isEmpty || sessionId.isEmpty) return false;
     try {
       final proof = await _signer.invokeMapMethod<String, String>(
         'registerProof',
@@ -54,7 +58,7 @@ final class SameDeviceRecovery {
     required String origin,
     required String seriesId,
   }) async {
-    if (!Platform.isIOS ||
+    if (!_isSupported ||
         playerId.isEmpty ||
         newSessionId.isEmpty ||
         seriesId.isEmpty) {
