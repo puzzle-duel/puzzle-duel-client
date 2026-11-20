@@ -19,7 +19,7 @@ void main() {
     final feel = await _play(score: 40, status: 200);
     expect(feel.sfx.events, [GameSfxEvent.clear]);
     expect(feel.haptics.events, ['cleared']);
-    expect(feel.controller.scoreDelta, 40);
+    expect(feel.controller.scoreDelta, 300);
   });
 
   test(
@@ -137,6 +137,14 @@ Future<_Feel> _play({
     File('test/tournament/fixtures/V3-02-single-wave.json').readAsStringSync(),
   ) as Map<String, Object?>;
   var served = 0;
+  var accepted = false;
+  final initial = parseGameState(document['initialState']);
+  final tap = score == 0
+      ? Coordinate(row: 1, column: 1)
+      : Coordinate(row: 0, column: 2);
+  final applied = applyMove(initial, Move(offerIndex: 0, tap: tap));
+  expect(applied, isA<MoveApplied>());
+  final authoritative = (applied as MoveApplied).finalState.toJson();
   final api = ScriptedUatApi((method, path, body) async {
     if (method == 'POST' && path.endsWith('/session')) {
       return const UatHttpResult(201, {
@@ -161,11 +169,14 @@ Future<_Feel> _play({
         'resultsPublished': false,
         'boardRevision': 1,
         'writerGeneration': 1,
-        'state': document['initialState'],
+        'state': accepted ? authoritative : document['initialState'],
       });
     }
     if (path.endsWith('/commands')) {
-      if (status == 200) served = score;
+      if (status == 200) {
+        served = score;
+        accepted = true;
+      }
       return UatHttpResult(status, {'error': error});
     }
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});
@@ -195,7 +206,7 @@ Future<_Feel> _play({
   await controller.resume();
   if (submit) {
     controller.session.selectOffer(0);
-    expect(controller.session.submitTap(Coordinate(row: 0, column: 2)), isTrue);
+    expect(controller.session.submitTap(tap), isTrue);
     await pumpEventQueue();
     await pumpEventQueue();
   }
