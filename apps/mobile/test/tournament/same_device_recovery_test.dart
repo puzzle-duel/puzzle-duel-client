@@ -104,6 +104,23 @@ void main() {
     expect(commands, 0);
   });
 
+  test('malformed server challenge never reaches signing or commands', () async {
+    final paths = <String>[];
+    final api = ScriptedUatApi((method, path, body) async {
+      paths.add(path);
+      return const UatHttpResult(200, {'challengeId': 'missing fields'});
+    });
+    expect(await recovery.recover(
+      api: api,
+      playerId: '11111111-1111-4111-8111-111111111111',
+      newSessionId: '33333333-3333-4333-8333-333333333333',
+      origin: 'http://127.0.0.1',
+      seriesId: '22222222-2222-4222-8222-222222222222',
+    ), false);
+    expect(paths, hasLength(1));
+    expect(paths.single, endsWith('/recovery-challenge'));
+  });
+
   test('default platform guard is fail closed outside iOS', () async {
     final api = ScriptedUatApi((method, path, body) async {
       fail('Must not call HTTP on unsupported platform');
