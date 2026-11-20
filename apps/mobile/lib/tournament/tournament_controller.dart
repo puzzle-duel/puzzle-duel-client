@@ -618,7 +618,9 @@ final class TournamentController extends ChangeNotifier {
     _sessionRenewalTimer?.cancel();
     final expiry = _sessionExpiresAtMs;
     if (!_appForeground || _disposed || expiry == null ||
-        api.sessionSecret == null) return;
+        api.sessionSecret == null) {
+      return;
+    }
     final now = DateTime.now().toUtc().millisecondsSinceEpoch;
     final remaining = expiry - now;
     // Refresh with enough time for a normal network round-trip; the 45s UAT
@@ -653,13 +655,17 @@ final class TournamentController extends ChangeNotifier {
     InteractionPerf.mark('tournament.session.renew.proactive');
     final response = await api.patch('/v1/tournament/session');
     if (_disposed || originalSecret != api.sessionSecret ||
-        originalSessionId != _verifiedSessionId) return false;
+        originalSessionId != _verifiedSessionId) {
+      return false;
+    }
     if (response.status == 200 &&
         response.map['sessionId'] == originalSessionId &&
         response.map['playerId'] == originalPlayerId) {
       final nextExpiry = tournamentInt(response.map['expiresAtMs']);
       if (nextExpiry == null ||
-          nextExpiry <= DateTime.now().toUtc().millisecondsSinceEpoch) return false;
+          nextExpiry <= DateTime.now().toUtc().millisecondsSinceEpoch) {
+        return false;
+      }
       _sessionExpiresAtMs = nextExpiry;
       InteractionPerf.mark('tournament.session.renew.proactive.ready');
       _scheduleSessionRenewal();
