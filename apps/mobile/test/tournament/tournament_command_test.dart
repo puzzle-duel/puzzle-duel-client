@@ -27,6 +27,9 @@ final class ScriptedUatApi extends UatApi {
   Future<UatHttpResult> get(String path) => onRequest('GET', path, null);
 
   @override
+  Future<UatHttpResult> patch(String path) => onRequest('PATCH', path, null);
+
+  @override
   Future<UatHttpResult> post(String path, [Object? body]) {
     if (path.endsWith('/commands')) commandBodies.add(body);
     if (path.endsWith('/claims/daily')) claimPosts += 1;
@@ -176,7 +179,7 @@ void main() {
         return const UatHttpResult(200, {
           'seriesId': '11111111-1111-4111-8111-111111111111',
           'status': 'ACTIVE',
-          'original': false,
+          'original': true,
         });
       }
       if (path.endsWith('/board')) {

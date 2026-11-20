@@ -64,7 +64,8 @@ final class TournamentUatApp extends StatefulWidget {
   State<TournamentUatApp> createState() => _TournamentUatAppState();
 }
 
-final class _TournamentUatAppState extends State<TournamentUatApp> {
+final class _TournamentUatAppState extends State<TournamentUatApp>
+    with WidgetsBindingObserver {
   late final GameSfx _sfx = widget.sfx ?? SilentGameSfx();
   TournamentController? _controller;
   String? _bootError;
@@ -72,7 +73,14 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    _controller?.setAppForeground(foreground);
   }
 
   Future<void> _bootstrap() async {
@@ -121,6 +129,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     final controller = _controller;
     controller?.session.dispose();
     controller?.dispose();
@@ -280,7 +289,7 @@ final class _PlayFeedback extends StatelessWidget {
             ),
           );
         }
-        if (controller.moveInFlight && !view.isResolving) {
+        if (controller.moveInFlight && view.activeScript == null) {
           return Text(
             copy.sending,
             style: const TextStyle(color: GameTokens.accent),

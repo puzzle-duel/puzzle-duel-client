@@ -15,6 +15,7 @@ import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Local features vs authoritative Tournament refresh.
@@ -126,6 +127,7 @@ final class TournamentController extends ChangeNotifier {
     required this.stateDirectory,
     required this.identity,
     UatApi? api,
+    SameDeviceRecovery? deviceRecovery,
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
@@ -136,6 +138,7 @@ final class TournamentController extends ChangeNotifier {
              baseUrl: UatApi.apiOrigin(config.baseUrl),
              bearer: config.bearer,
            ),
+       _deviceRecovery = deviceRecovery ?? const SameDeviceRecovery(),
        haptics = haptics ?? DeviceTournamentHaptics(),
        sfx = sfx ?? _QuietSfx(),
        settings = settings ?? LocalSettings.load(stateDirectory),
@@ -205,6 +208,17 @@ final class TournamentController extends ChangeNotifier {
   Map<String, Object?>? _claim;
   Object? _pending;
   String? _pendingKey;
+  final SameDeviceRecovery _deviceRecovery;
+  String? _verifiedSessionPlayerId;
+  String? _verifiedSessionId;
+  bool _openedFreshSession = false;
+  bool _sameDeviceRegistered = false;
+  int? _sessionExpiresAtMs;
+  bool _renewingWriter = false;
+  Timer? _sessionRenewalTimer;
+  Future<bool>? _sessionRenewalInFlight;
+  bool _appForeground = true;
+  bool _disposed = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
   GameState? _pendingPreState;
   int? _pendingOfferIndex;
@@ -252,6 +266,8 @@ final class TournamentController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _sessionRenewalTimer?.cancel();
     _cancelPendingResolutionNav();
     session.removeListener(_onSessionResolution);
     super.dispose();
@@ -276,6 +292,7 @@ final class TournamentController extends ChangeNotifier {
   /// upgrades [_refreshOrigin] so the user still sees pull feedback.
   Future<void> refreshTournament({
     TournamentRefreshOrigin origin = TournamentRefreshOrigin.background,
+    bool preserveRoute = false,
   }) {
     if (_refreshInFlight != null) {
       if (origin == TournamentRefreshOrigin.pullToRefresh &&
@@ -286,12 +303,14 @@ final class TournamentController extends ChangeNotifier {
       return _refreshInFlight!;
     }
     _refreshOrigin = origin;
-    return _refreshInFlight = _refreshTournamentBody().whenComplete(() {
+    return _refreshInFlight = _refreshTournamentBody(
+      preserveRoute: preserveRoute,
+    ).whenComplete(() {
       _refreshInFlight = null;
     });
   }
 
-  Future<void> _refreshTournamentBody() async {
+  Future<void> _refreshTournamentBody({bool preserveRoute = false}) async {
     final epoch = ++_tournamentEpoch;
     InteractionPerf.mark('tournament.refresh.start');
     tournamentSync = TournamentSyncState.syncing;
@@ -308,7 +327,7 @@ final class TournamentController extends ChangeNotifier {
       }
       return;
     }
-    await loadDay(presentHome: true, epoch: epoch);
+    await loadDay(presentHome: !preserveRoute, epoch: epoch);
   }
 
   /// Compatibility entry used by older tests: local ready then ranked refresh.
@@ -334,6 +353,35 @@ final class TournamentController extends ChangeNotifier {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
       return;
     }
+    // A readable board is not proof of writer entitlement. A fresh session
+    // attempting an existing claim must recover via the pinned device proof.
+    // On any denial keep the board readable, but disable ranked commands.
+    String? recoveryDenial;
+    // Completed series are read-only: results and leaderboards must remain
+    // accessible after session rotation without a writer takeover.
+    if (_openedFreshSession &&
+        claim.map['original'] == false &&
+        claim.map['status'] != 'COMPLETED') {
+      if (_sameDeviceRegistered &&
+          _verifiedSessionPlayerId != null &&
+          _verifiedSessionId != null) {
+        final attempt = await _deviceRecovery.recoverDetailed(
+          api: api,
+          playerId: _verifiedSessionPlayerId!,
+          newSessionId: _verifiedSessionId!,
+          origin: UatApi.apiOrigin(config.baseUrl),
+          seriesId: id,
+        );
+        if (activeEpoch != _tournamentEpoch) return;
+        if (!attempt.succeeded) {
+          recoveryDenial = UatApi.diagnosticErrorCode(attempt.errorCode) ??
+              'RECOVERY_NOT_ELIGIBLE';
+        }
+      } else {
+        recoveryDenial = 'RECOVERY_NOT_ELIGIBLE';
+      }
+    }
+    _openedFreshSession = false;
     final view = await api.get('/v1/tournament/series/$id/board');
     if (activeEpoch != _tournamentEpoch) return;
     if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
@@ -347,10 +395,16 @@ final class TournamentController extends ChangeNotifier {
     busy = false;
     booting = false;
     errorCode = null;
-    tournamentNoticeCode = null;
-    tournamentSync = TournamentSyncState.ready;
+    rankedWriterLocked = recoveryDenial != null;
+    tournamentNoticeCode = recoveryDenial;
+    tournamentSync = recoveryDenial == null
+        ? TournamentSyncState.ready
+        : TournamentSyncState.degraded;
+    if (recoveryDenial == null) _scheduleSessionRenewal();
     if (presentHome) route = const TournamentRoute();
-    InteractionPerf.mark('tournament.refresh.ready');
+    InteractionPerf.mark(recoveryDenial == null
+        ? 'tournament.refresh.ready'
+        : 'tournament.refresh.recovery_denied');
     notifyListeners();
   }
 
@@ -383,6 +437,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> resume() {
+    if (!tournamentReady || rankedWriterLocked) return Future<void>.value();
     _cancelPendingResolutionNav();
     return _reload(reveal: true, followGameplay: false);
   }
@@ -459,7 +514,17 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> advance() async {
-    if (rankedWriterLocked || moveInFlight || hasPendingCommand) return;
+    if (!tournamentReady || rankedWriterLocked || moveInFlight ||
+        hasPendingCommand || _renewingWriter) {
+      return;
+    }
+    final originalSeries = seriesId;
+    final originalOrdinal = day?.ordinal;
+    if (!await _ensureLiveWriterSession()) return;
+    if (!tournamentReady || rankedWriterLocked ||
+        originalSeries != seriesId || originalOrdinal != day?.ordinal) {
+      return;
+    }
     final id = seriesId;
     final ordinal = day?.ordinal;
     if (id == null || ordinal == null) return;
@@ -490,7 +555,7 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
-    if (rankedWriterLocked ||
+    if (!tournamentReady || rankedWriterLocked || _renewingWriter ||
         moveInFlight ||
         hasPendingCommand ||
         session.authoritativeOutcomeUnknown) {
@@ -499,6 +564,18 @@ final class TournamentController extends ChangeNotifier {
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
+    // Do not submit a move with an expired session or stale writer generation.
+    // Renewal happens BEFORE constructing the command and does not replay it.
+    final originalRevision = board['boardRevision'];
+    final originalOrdinal = board['ordinal'];
+    if (!await _ensureLiveWriterSession()) return;
+    if (!tournamentReady || rankedWriterLocked || seriesId != id ||
+        board['boardRevision'] != originalRevision ||
+        board['ordinal'] != originalOrdinal ||
+        route.place != TournamentPlace.playing) {
+      session.showServerRejection('STATE_CONFLICT');
+      return;
+    }
     // Canonical is still the pre-move board while the authoritative request runs.
     final preState = session.view.canonicalState;
     final revision = board['boardRevision'];
@@ -524,6 +601,121 @@ final class TournamentController extends ChangeNotifier {
       offerIndex: offerIndex,
       tap: tap,
     );
+  }
+
+  /// Called by the host app on foreground/background transitions.
+  void setAppForeground(bool foreground) {
+    _appForeground = foreground;
+    _sessionRenewalTimer?.cancel();
+    if (foreground) {
+      unawaited(_renewActiveSession());
+    }
+  }
+
+  /// Schedule before expiry, independently of any player input. An in-place
+  /// extension cannot change session, device, writer binding or generation.
+  void _scheduleSessionRenewal() {
+    _sessionRenewalTimer?.cancel();
+    final expiry = _sessionExpiresAtMs;
+    if (!_appForeground || _disposed || expiry == null ||
+        api.sessionSecret == null) {
+      return;
+    }
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final remaining = expiry - now;
+    // Refresh with enough time for a normal network round-trip; the 45s UAT
+    // profile renews about 12s before expiration.
+    final lead = remaining > 24000 ? 12000 : (remaining ~/ 3).clamp(1000, 12000);
+    final wait = (remaining - lead).clamp(0, 1800000).toInt();
+    _sessionRenewalTimer = Timer(Duration(milliseconds: wait), () {
+      unawaited(_renewActiveSession());
+    });
+  }
+
+  Future<bool> _renewActiveSession() {
+    if (_sessionRenewalInFlight != null) return _sessionRenewalInFlight!;
+    final operation = _renewActiveSessionBody();
+    _sessionRenewalInFlight = operation;
+    return operation.whenComplete(() => _sessionRenewalInFlight = null);
+  }
+
+  Future<bool> _renewActiveSessionBody() async {
+    if (_disposed || !_appForeground || api.sessionSecret == null) return false;
+    if (_refreshInFlight != null || moveInFlight || _renewingWriter) {
+      _sessionRenewalTimer?.cancel();
+      _sessionRenewalTimer = Timer(const Duration(milliseconds: 500), () {
+        unawaited(_renewActiveSession());
+      });
+      return false;
+    }
+    final originalSecret = api.sessionSecret;
+    final originalSessionId = _verifiedSessionId;
+    final originalPlayerId = _verifiedSessionPlayerId;
+    if (originalSessionId == null || originalPlayerId == null) return false;
+    InteractionPerf.mark('tournament.session.renew.proactive');
+    final response = await api.patch('/v1/tournament/session');
+    if (_disposed || originalSecret != api.sessionSecret ||
+        originalSessionId != _verifiedSessionId) {
+      return false;
+    }
+    if (response.status == 200 &&
+        response.map['sessionId'] == originalSessionId &&
+        response.map['playerId'] == originalPlayerId) {
+      final nextExpiry = tournamentInt(response.map['expiresAtMs']);
+      if (nextExpiry == null ||
+          nextExpiry <= DateTime.now().toUtc().millisecondsSinceEpoch) {
+        return false;
+      }
+      _sessionExpiresAtMs = nextExpiry;
+      InteractionPerf.mark('tournament.session.renew.proactive.ready');
+      _scheduleSessionRenewal();
+      return true;
+    }
+    // Do not create a second writer or replay a command from a timer.
+    // An expired/revoked session is handled by explicit signed recovery.
+    if (response.status == 401) {
+      // Keep the expired timestamp so the next command enters signed recovery.
+      _sessionExpiresAtMs = DateTime.now().toUtc().millisecondsSinceEpoch - 1;
+    }
+    _sessionRenewalTimer?.cancel();
+    if (response.status != 401 && _appForeground) {
+      _sessionRenewalTimer = Timer(const Duration(seconds: 2), () {
+        unawaited(_renewActiveSession());
+      });
+    }
+    return false;
+  }
+
+  /// Last-resort recovery if the proactive timer could not run (suspended
+  /// background app, lost connectivity or device-clock drift).
+  Future<bool> _ensureLiveWriterSession() async {
+    final expiry = _sessionExpiresAtMs;
+    if (expiry == null) return true; // Legacy mocked UAT sessions.
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    if (now < expiry - 1500) return true;
+    if (_renewingWriter) return false;
+    final renewed = await _renewActiveSession();
+    if (renewed) return true;
+    _renewingWriter = true;
+    notifyListeners();
+    try {
+      // The backend forbids writer handoff before the old session expires.
+      final remaining = expiry + 150 - DateTime.now().toUtc().millisecondsSinceEpoch;
+      if (remaining > 0) {
+        await Future<void>.delayed(Duration(milliseconds: remaining));
+      }
+      InteractionPerf.mark('tournament.session.renew.before_command');
+      await refreshTournament(preserveRoute: true);
+      final ready = tournamentReady && !rankedWriterLocked &&
+          api.sessionSecret != null;
+      if (!ready && route.place == TournamentPlace.playing) {
+        session.showServerRejection(tournamentNoticeCode ?? 'UNAUTHENTICATED');
+      }
+      return ready;
+    } finally {
+      _renewingWriter = false;
+      notifyListeners();
+    }
   }
 
   Future<void> _sendCommand(
@@ -592,8 +784,15 @@ final class TournamentController extends ChangeNotifier {
       sfx.play(GameSfxEvent.reject);
       _cancelPendingResolutionNav();
       if (response.status == 401) {
+        // Auth rejected this command. Re-establish a verified session and
+        // server-owned writer binding, but NEVER replay the command here.
         session.showServerRejection('UNAUTHENTICATED');
-        _fail('UNAUTHENTICATED', degradedOnFailure: localReady);
+        _sessionExpiresAtMs = null;
+        await refreshTournament(preserveRoute: true);
+        if (tournamentReady && seriesId == id &&
+            route.place == TournamentPlace.playing) {
+          await _reload(reveal: true, followGameplay: false);
+        }
         _haptic((feel) => feel.rejected());
         return;
       }
@@ -663,8 +862,10 @@ final class TournamentController extends ChangeNotifier {
     scoreDelta = delta > 0 ? delta : null;
     if (applied != null) {
       if (delta > 0) {
+        sfx.play(GameSfxEvent.clear);
         _haptic((feel) => feel.cleared());
       } else {
+        sfx.play(GameSfxEvent.place);
         _haptic((feel) => feel.accepted());
       }
     }
@@ -1030,6 +1231,11 @@ final class TournamentController extends ChangeNotifier {
       debugPrint('PZD_PERF tournament.api.origin=$origin');
     }
 
+    _openedFreshSession = false;
+    _sameDeviceRegistered = false;
+    _verifiedSessionPlayerId = null;
+    _verifiedSessionId = null;
+    _sessionExpiresAtMs = null;
     final saved = _readBoundSession(binding: binding, origin: origin);
     if (saved != null) {
       api.sessionSecret = saved;
@@ -1042,6 +1248,18 @@ final class TournamentController extends ChangeNotifier {
         step: 'validate_bound',
       );
       if (current.status == 200) {
+        _sessionExpiresAtMs = tournamentInt(current.map['expiresAtMs']);
+        _scheduleSessionRenewal();
+        _verifiedSessionPlayerId = current.map['playerId']?.toString();
+        _verifiedSessionId = current.map['sessionId']?.toString();
+        if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
+          _sameDeviceRegistered = await _deviceRecovery.register(
+            api: api,
+            playerId: _verifiedSessionPlayerId!,
+            sessionId: _verifiedSessionId!,
+            origin: origin,
+          );
+        }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
         await _hydrateHomeSnapshot();
@@ -1106,6 +1324,19 @@ final class TournamentController extends ChangeNotifier {
       return false;
     }
     api.sessionSecret = opened.map['sessionSecret']?.toString();
+    _sessionExpiresAtMs = tournamentInt(opened.map['expiresAtMs']);
+    _scheduleSessionRenewal();
+    _verifiedSessionPlayerId = opened.map['playerId']?.toString();
+    _verifiedSessionId = opened.map['sessionId']?.toString();
+    _openedFreshSession = true;
+    if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
+      _sameDeviceRegistered = await _deviceRecovery.register(
+        api: api,
+        playerId: _verifiedSessionPlayerId!,
+        sessionId: _verifiedSessionId!,
+        origin: origin,
+      );
+    }
     await _bindPlayerId(opened.map['playerId']?.toString());
     await _hydrateHomeSnapshot();
     _persistBoundSession(
