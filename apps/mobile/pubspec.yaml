@@ -32,4 +32,5 @@ flutter:
     - assets/sfx/cascade.wav
     - assets/sfx/chain_complete.wav
     - assets/sfx/round_end.wav
+    - assets/branding/app_icon_master_1024.png
 

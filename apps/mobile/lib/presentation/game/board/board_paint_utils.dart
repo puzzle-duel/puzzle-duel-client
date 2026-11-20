@@ -1,9 +1,10 @@
 import 'dart:ui';
 
 import 'package:puzzle_duel_mobile/presentation/widgets/piece_glyph.dart';
-import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_mobile/presentation/widgets/premium_shape_materials.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
+/// Board Flame path into the same canonical [PiecePainter] used by the tray.
 void paintPieceGlyph(
   Canvas canvas, {
   required Offset center,
@@ -15,7 +16,7 @@ void paintPieceGlyph(
   final painter = PiecePainter(
     piece: piece,
     fill: fill,
-    deep: GameTokens.pieceDeep(piece.shape),
+    deep: PremiumShapeMaterials.deep(piece.shape),
     stroke: stroke,
     selected: false,
   );
