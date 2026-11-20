@@ -88,7 +88,7 @@ final class PzdDeviceSigning: NSObject, FlutterPlugin {
               let challengeId = arguments["challengeId"] as? String,
               let nonce = arguments["nonce"] as? String,
               let generation = arguments["expectedWriterGeneration"] as? Int,
-              let expiresAtMs = arguments["expiresAtMs"] as? Int64 else {
+              let expiresAtMs = arguments["expiresAtMs"] as? Int else {
           throw DeviceSigningError.invalidArgument
         }
         let message = [
