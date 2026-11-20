@@ -382,7 +382,10 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resume() => _reload(reveal: true, followGameplay: false);
+  Future<void> resume() {
+    _cancelPendingResolutionNav();
+    return _reload(reveal: true, followGameplay: false);
+  }
 
   Future<void> openResults() async {
     _cancelPendingResolutionNav();
@@ -810,6 +813,7 @@ final class TournamentController extends ChangeNotifier {
     bool preserveReturn = false,
     bool fromHome = false,
   }) async {
+    _cancelPendingResolutionNav();
     if (fromHome) category = 'ALL';
     final opened = preserveReturn
         ? TournamentRoute(
