@@ -27,6 +27,9 @@ final class ScriptedUatApi extends UatApi {
   Future<UatHttpResult> get(String path) => onRequest('GET', path, null);
 
   @override
+  Future<UatHttpResult> patch(String path) => onRequest('PATCH', path, null);
+
+  @override
   Future<UatHttpResult> post(String path, [Object? body]) {
     if (path.endsWith('/commands')) commandBodies.add(body);
     if (path.endsWith('/claims/daily')) claimPosts += 1;
