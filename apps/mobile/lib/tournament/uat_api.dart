@@ -66,6 +66,8 @@ class UatApi {
 
   Future<UatHttpResult> get(String path) => _send('GET', path);
 
+  Future<UatHttpResult> patch(String path) => _send('PATCH', path);
+
   Future<UatHttpResult> post(String path, [Object? body]) =>
       _send('POST', path, body);
 
