@@ -72,7 +72,7 @@ final class TournamentSettingsScreen extends StatelessWidget {
                           messenger.showSnackBar(SnackBar(
                             content: Text(result.status == 201 && reportId is String
                                 ? 'Log gönderildi. Rapor: $reportId'
-                                : 'Log gönderilemedi (' + result.status.toString() + ').'),
+                                : 'Log gönderilemedi (${result.status}).'),
                           ));
                         } catch (_) {
                           if (!context.mounted) return;
