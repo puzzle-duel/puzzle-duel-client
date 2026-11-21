@@ -6,8 +6,6 @@ import 'dart:math';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 
-import 'package:flutter/foundation.dart';
-import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 
 /// Authenticated Tournament UAT client. It never sends a score or a seal.
 class UatApi {
@@ -102,10 +100,6 @@ class UatApi {
     final requestId = _newDiagnosticId();
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
-    // Safe fields only in logs: operation, endpoint, status, category.
-    _perfLog(
-      'http.start operation=$method endpoint=$path status=- category=pending',
-    );
     var diagnosticStatus = 0;
     try {
       final uri = Uri.parse('$baseUrl$path');
@@ -142,12 +136,7 @@ class UatApi {
         try {
           json = jsonDecode(text);
         } on FormatException {
-          _diagHttp(
-            operation: method,
-            endpoint: path,
-            status: response.statusCode,
-            category: UatFailureCategory.malformed,
-          );
+
           return UatHttpResult(
             response.statusCode,
             {'error': 'MALFORMED_BODY'},
@@ -157,72 +146,41 @@ class UatApi {
       }
       final category = categoryForStatus(response.statusCode);
       _structuredAuthStatus(response.statusCode, json);
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: response.statusCode,
-        category: category,
-        errorCode: json is Map ? json['error']?.toString() : null,
-      );
+
       return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
       final category = error.phase == 'connect'
           ? UatFailureCategory.connectTimeout
           : UatFailureCategory.responseTimeout;
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: category,
-      );
+
       return UatHttpResult(
         0,
         {'error': 'TIMEOUT', 'timeoutPhase': error.phase},
         category: category,
       );
     } on SocketException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.offline,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
         category: UatFailureCategory.offline,
       );
     } on HttpException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.offline,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
         category: UatFailureCategory.offline,
       );
     } on TimeoutException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.responseTimeout,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'TIMEOUT', 'timeoutPhase': 'response'},
         category: UatFailureCategory.responseTimeout,
       );
     } on Exception {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.other,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
@@ -270,9 +228,7 @@ class UatApi {
     required String requestId,
     required int durationMs,
   }) {
-    final level = status >= 400 || status == 0
-        ? LogLevel.warning
-        : LogLevel.info;
+    if (status > 0 && status < 400) return;
     final verb = switch (method) {
       'GET' => HttpVerb.get,
       'POST' => HttpVerb.post,
@@ -280,10 +236,9 @@ class UatApi {
       'PUT' => HttpVerb.put,
       _ => HttpVerb.delete,
     };
-    if (level == LogLevel.info) return; // Lite: only failed HTTP calls.
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: level,
-      code: level == LogLevel.warning ? LogCode.httpFailed : LogCode.httpCompleted,
+      level: LogLevel.warning,
+      code: LogCode.httpFailed,
       operation: 'tournament_http',
       requestId: requestId,
       httpVerb: verb,
@@ -303,22 +258,6 @@ class UatApi {
     if (status >= 500) return UatFailureCategory.server;
     if (status >= 400) return UatFailureCategory.client;
     return UatFailureCategory.other;
-  }
-
-  /// Safe HTTP diagnostics: operation, endpoint, status, category only.
-  static void _diagHttp({
-    required String operation,
-    required String endpoint,
-    required int status,
-    required UatFailureCategory category,
-    String? errorCode,
-  }) {
-    final safeError = diagnosticErrorCode(errorCode);
-    _perfLog(
-      'http.done operation=$operation endpoint=$endpoint '
-      'status=$status category=${category.name}'
-      '${safeError == null ? '' : ' error=$safeError'}',
-    );
   }
 
   /// Only known protocol error codes may enter diagnostics. Never log an
@@ -346,10 +285,6 @@ class UatApi {
     }.contains(code) ? code : null;
   }
 
-  static void _perfLog(String message) {
-    if (!InteractionPerf.enabled) return;
-    debugPrint('PZD_PERF $message');
-  }
 }
 
 enum UatFailureCategory {
