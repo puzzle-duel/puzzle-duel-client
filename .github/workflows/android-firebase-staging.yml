@@ -2,7 +2,7 @@ name: PZD-49 Android Firebase staging distribution
 
 on:
   pull_request:
-    branches: [main]
+    branches: ['version/**']
     paths:
       - ".github/workflows/android-firebase-staging.yml"
       - "apps/mobile/android/app/build.gradle.kts"
@@ -10,12 +10,11 @@ on:
       - "apps/mobile/pubspec.yaml"
       - "apps/mobile/pubspec.lock"
   push:
-    branches: [main]
+    branches: ['version/**']
     paths:
       - "apps/mobile/**"
       - "packages/puzzle_duel_rules/**"
       - ".github/workflows/android-firebase-staging.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -49,7 +48,7 @@ jobs:
 
   distribute:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/version/') && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: pzd-android-staging
@@ -60,6 +59,14 @@ jobs:
           flutter-version: "3.50.0"
           channel: stable
           cache: true
+      - name: Verify backend staging readiness
+        env:
+          STAGING_BASE_URL: ${{ vars.PZD_STAGING_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_BASE_URL"
+          case "$STAGING_BASE_URL" in https://*) ;; *) echo 'staging API must use HTTPS'; exit 1;; esac
+          curl --fail --show-error --silent --retry 3 --max-time 15 "$STAGING_BASE_URL/healthz" >/dev/null
       - name: Validate required secrets and stage signing material
         env:
           KEYSTORE_B64: ${{ secrets.PZD_ANDROID_KEYSTORE_BASE64 }}
@@ -87,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
-          flutter build apk --release --dart-define=PZD_ENV=staging
+          flutter build apk --release --build-name=0.0.1 --build-number=${{ github.run_number }} --dart-define=PZD_ENV=staging
           test -s build/app/outputs/flutter-apk/app-release.apk
           test "$PZD_ANDROID_CD_SIGNING" = "true"
       - name: Firebase App Distribution
@@ -102,7 +109,7 @@ jobs:
           firebase appdistribution:distribute apps/mobile/build/app/outputs/flutter-apk/app-release.apk \
             --app "$FIREBASE_APP_ID" \
             --groups "$FIREBASE_TESTER_GROUP" \
-            --release-notes "Puzzle Duel staging ${GITHUB_SHA}"
+            --release-notes "Puzzle Duel Android 0.0.1 staging ${GITHUB_SHA}"
       - name: Clean ephemeral credentials
         if: always()
         run: rm -f "$RUNNER_TEMP/pzd-staging.jks" "$RUNNER_TEMP/firebase-service-account.json"
