@@ -2,12 +2,13 @@ name: PZD-49 Android Firebase staging distribution
 
 on:
   pull_request:
-    branches: [main]
+    branches: ["version/**"]
     paths:
       - ".github/workflows/android-firebase-staging.yml"
-      - "apps/mobile/android/app/build.gradle.kts"
+      - "apps/mobile/**"
+      - "packages/puzzle_duel_rules/**"
   push:
-    branches: [main]
+    branches: ["version/**"]
     paths:
       - "apps/mobile/**"
       - "packages/puzzle_duel_rules/**"
@@ -40,7 +41,7 @@ jobs:
 
   distribute:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/version/') && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: pzd-android-staging
