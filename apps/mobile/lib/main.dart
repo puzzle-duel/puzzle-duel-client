@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
+import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/app/portrait_lock.dart';
@@ -12,9 +13,10 @@ import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final crashReporter = await FirebaseDiagnostics.initialize();
   final crashHandler = DiagnosticCrashHandler(
     logger: DiagnosticRuntime.logger,
-    reporter: const NoopCrashReporter(),
+    reporter: crashReporter,
   );
   final previousFlutterHandler = FlutterError.onError;
   FlutterError.onError = (details) {
