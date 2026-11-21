@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer' as developer;
@@ -160,23 +161,34 @@ class PuzzleDuelLogger {
   PuzzleDuelLogger({
     required List<LogSink> sinks,
     this.minimumLevel = LogLevel.info,
-  }) : _sinks = List.unmodifiable(sinks);
+    this.maxPendingPerSink = 1024,
+  }) : _sinks = List.unmodifiable(sinks) {
+    if (maxPendingPerSink < 1) throw ArgumentError('Invalid pending sink limit');
+  }
 
   final List<LogSink> _sinks;
   final LogLevel minimumLevel;
+  final int maxPendingPerSink;
   final Map<LogSink, Future<void>> _tails = {};
+  final Map<LogSink, int> _pending = {};
+
 
   /// Queues events in FIFO order independently per sink. A failing or slow
   /// sink cannot delay another sink or the caller.
   Future<void> log(LogEvent event) {
     if (event.level.index < minimumLevel.index) return Future<void>.value();
     for (final sink in _sinks) {
+      final count = _pending[sink] ?? 0;
+      if (count >= maxPendingPerSink) continue;
+      _pending[sink] = count + 1;
       final previous = _tails[sink] ?? Future<void>.value();
       final next = previous.then((_) async {
         try {
           await sink.write(event);
         } catch (_) {
           // Telemetry is best-effort and must not affect application logic.
+        } finally {
+          _pending[sink] = (_pending[sink] ?? 1) - 1;
         }
       });
       _tails[sink] = next;
@@ -187,7 +199,7 @@ class PuzzleDuelLogger {
   /// Await pending writes before taking a diagnostic snapshot.
   /// A permanently stalled sink will also stall flush; callers must set
   /// their own timeout when using this method.
-  Future<void> flush() async {
-    await Future.wait(_tails.values.toList());
+  Future<void> flush({Duration timeout = const Duration(seconds: 2)}) async {
+    await Future.wait(_tails.values.toList()).timeout(timeout);
   }
 }
