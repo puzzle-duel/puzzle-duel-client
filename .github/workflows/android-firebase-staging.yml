@@ -88,6 +88,9 @@ jobs:
           set -euo pipefail
           flutter pub get --enforce-lockfile
           printf '\npzdStagingFirebase=true\n' >> android/gradle.properties
+          # Google Services must run, not merely have a JSON config checked in.
+          # Fail before APK compilation if the staging task is missing or broken.
+          (cd android && bash ./gradlew :app:processReleaseGoogleServices --no-daemon --console=plain)
           flutter build apk --release \
             --dart-define=PZD_ENV=staging \
             --dart-define=PZD_FIREBASE_CONFIGURED=true \
