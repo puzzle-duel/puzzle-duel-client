@@ -35,7 +35,7 @@ jobs:
           cache: true
       - working-directory: apps/mobile
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter analyze
           flutter test
 
