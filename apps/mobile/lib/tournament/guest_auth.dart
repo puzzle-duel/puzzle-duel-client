@@ -37,9 +37,15 @@ final class GuestAuthClient {
   final GuestCredentialStore credentials;
   final HttpClient Function() _factory;
   Future<GuestAccess>? _pending;
+  GuestAccess? _current;
 
   /// Coalesces concurrent app startup/foreground authentication attempts.
-  Future<GuestAccess> authenticate() {
+  Future<GuestAccess> authenticate({bool forceRefresh = false}) {
+    final cached = _current;
+    if (!forceRefresh && cached != null &&
+        cached.expiresAt.isAfter(DateTime.now().toUtc().add(const Duration(minutes: 1)))) {
+      return Future.value(cached);
+    }
     final pending = _pending;
     if (pending != null) return pending;
     final next = _authenticate();
@@ -80,7 +86,7 @@ final class GuestAuthClient {
       throw const GuestAuthException('INVALID_AUTH_RESPONSE');
     }
     await credentials.writeRefreshToken(refresh);
-    return GuestAccess(accessToken: access, expiresAt: expiresAt);
+    return _current = GuestAccess(accessToken: access, expiresAt: expiresAt);
   }
 
   Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {
