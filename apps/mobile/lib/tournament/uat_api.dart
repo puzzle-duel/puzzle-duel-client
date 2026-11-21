@@ -13,6 +13,7 @@ class UatApi {
     required this.baseUrl,
     required String bearer,
     this.sessionSecret,
+    this.accessTokenProvider,
     HttpClient Function()? httpClientFactory,
   }) : bearer = normalizeBearer(bearer),
        _httpClientFactory = httpClientFactory ?? HttpClient.new;
@@ -21,6 +22,8 @@ class UatApi {
   final String baseUrl;
   String bearer;
   String? sessionSecret;
+  /// Optional staging token provider; UAT fixed-bearer mode remains unchanged.
+  final Future<String> Function()? accessTokenProvider;
   final HttpClient Function() _httpClientFactory;
 
   /// Ensures `Authorization` is `Bearer <token>` without double-prefixing.
@@ -113,7 +116,10 @@ class UatApi {
         _connectTimeout,
         onTimeout: () => throw const _UatTimeout('connect'),
       );
-      request.headers.set(HttpHeaders.authorizationHeader, bearer);
+      final token = accessTokenProvider == null
+          ? bearer
+          : normalizeBearer(await accessTokenProvider!());
+      request.headers.set(HttpHeaders.authorizationHeader, token);
       request.headers.set('x-request-id', requestId);
       final secret = sessionSecret;
       if (secret != null && secret.isNotEmpty) {
