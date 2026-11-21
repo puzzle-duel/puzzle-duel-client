@@ -75,7 +75,9 @@ class UatApi {
         category: UatFailureCategory.client,
       );
     }
-    final events = await DiagnosticRuntime.snapshot();
+    final events = (await DiagnosticRuntime.snapshot())
+        .where((event) => event.code != LogCode.httpStarted && event.code != LogCode.screenOpened)
+        .toList();
     return post('/v1/diagnostics/reports', {
       'events': events.length <= 40
           ? events.map((event) => event.toJson()).toList()
@@ -98,6 +100,10 @@ class UatApi {
   ]) async {
     final started = Stopwatch()..start();
     final requestId = _newDiagnosticId();
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info, code: LogCode.httpStarted,
+      operation: 'tournament_http', requestId: requestId,
+    )));
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
     var diagnosticStatus = 0;
@@ -228,7 +234,7 @@ class UatApi {
     required String requestId,
     required int durationMs,
   }) {
-    if (status > 0 && status < 400) return;
+    // Crashlytics keeps both successful and failed requests as breadcrumbs.
     final verb = switch (method) {
       'GET' => HttpVerb.get,
       'POST' => HttpVerb.post,
@@ -237,8 +243,8 @@ class UatApi {
       _ => HttpVerb.delete,
     };
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.warning,
-      code: LogCode.httpFailed,
+      level: status >= 200 && status < 400 ? LogLevel.info : LogLevel.warning,
+      code: status >= 200 && status < 400 ? LogCode.httpCompleted : LogCode.httpFailed,
       operation: 'tournament_http',
       requestId: requestId,
       httpVerb: verb,

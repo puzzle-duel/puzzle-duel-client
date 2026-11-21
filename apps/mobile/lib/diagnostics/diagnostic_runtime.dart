@@ -1,4 +1,5 @@
 import 'diagnostic_policy.dart';
+import 'firebase_crashlytics_adapter.dart';
 import 'puzzle_duel_logger.dart';
 
 /// Process-local diagnostic lifecycle. Never persists secrets or payloads.
@@ -11,9 +12,10 @@ final class DiagnosticRuntime {
       ? RingBufferLogSink(maxEvents: 100, maxBytes: 64 * 1024, maxAge: const Duration(minutes: 30))
       : null;
   static final PuzzleDuelLogger logger = PuzzleDuelLogger(
-    minimumLevel: policy.minimumLevel,
+    minimumLevel: LogLevel.info,
     sinks: [
       const ConsoleLogSink(),
+      CrashlyticsLogSink(),
       ?buffer,
     ],
   );
