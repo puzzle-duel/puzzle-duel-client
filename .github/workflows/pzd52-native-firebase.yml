@@ -98,13 +98,23 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get --enforce-lockfile
+          printf "\npzdStagingFirebase=true\n" >> android/gradle.properties
           flutter build apk --release \
             --dart-define=PZD_FIREBASE_CONFIGURED=true \
             --dart-define=PZD_DIAGNOSTIC_ENV=staging \
             --dart-define=PZD_STAGING_DIAGNOSTICS=true
-          RESOURCE=build/app/generated/res/google-services/release/values/values.xml
-          test -s "$RESOURCE"
-          grep -q 'puzzle-duel-staging' "$RESOURCE"
+          # AGP/Flutter can move generated outputs between versions; inspect the generated resources.
+          mapfile -t RESOURCES < <(find build -type f -path '*/generated/res/google-services/*/values/values.xml' -print)
+          if [ "${#RESOURCES[@]}" -eq 0 ]; then
+            echo "::error::Firebase google-services generated resources not found"
+            find build -iname '*google*services*' -print || true
+            exit 1
+          fi
+          printf '%s\n' "${RESOURCES[@]}"
+          grep -l 'puzzle-duel-staging' "${RESOURCES[@]}" >/dev/null || {
+            echo "::error::Staging Firebase project ID is missing from generated resources"
+            exit 1
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pzd-0.0.1-android-staging
