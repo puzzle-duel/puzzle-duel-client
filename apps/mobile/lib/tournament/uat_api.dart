@@ -75,7 +75,9 @@ class UatApi {
         category: UatFailureCategory.client,
       );
     }
-    final events = await DiagnosticRuntime.snapshot();
+    final events = (await DiagnosticRuntime.snapshot())
+        .where((event) => event.code != LogCode.httpStarted && event.code != LogCode.screenOpened)
+        .toList();
     return post('/v1/diagnostics/reports', {
       'events': events.length <= 40
           ? events.map((event) => event.toJson()).toList()
