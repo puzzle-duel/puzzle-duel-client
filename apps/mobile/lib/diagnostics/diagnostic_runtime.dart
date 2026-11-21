@@ -8,7 +8,7 @@ final class DiagnosticRuntime {
   static final DiagnosticPolicy policy =
       DiagnosticPolicy.forEnvironment(DiagnosticPolicy.fromBuild());
   static final RingBufferLogSink? buffer = policy.captureMemory
-      ? RingBufferLogSink()
+      ? RingBufferLogSink(maxEvents: 100, maxBytes: 64 * 1024, maxAge: const Duration(minutes: 30))
       : null;
   static final PuzzleDuelLogger logger = PuzzleDuelLogger(
     minimumLevel: policy.minimumLevel,
