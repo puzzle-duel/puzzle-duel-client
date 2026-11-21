@@ -1,6 +1,6 @@
 # PZD-52 — Native Firebase staging build
 
-Firebase project: `puzzle-duel-staging`. Native configuration is opt-in; production builds must not include staging Firebase resources.
+Firebase project: `puzzle-duel-staging`. Native configuration is opt-in; production builds must not include staging Firebase resources. The committed `pubspec.lock` is resolved with Flutter 3.50.0 / Dart 3.14.0 and includes the Firebase Core and Crashlytics dependency graph.
 
 ## Android staging (release APK)
 
