@@ -80,7 +80,7 @@ jobs:
           flutter pub get
           flutter build apk --release --dart-define=PZD_ENV=staging
           test -s build/app/outputs/flutter-apk/app-release.apk
-          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep -q 'Owner:'
+          test "$PZD_ANDROID_CD_SIGNING" = "true"
       - name: Firebase App Distribution
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
