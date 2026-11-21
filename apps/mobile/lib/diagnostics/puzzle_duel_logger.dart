@@ -8,6 +8,8 @@ import 'dart:developer' as developer;
 enum LogLevel { verbose, debug, info, warning, error, fatal }
 enum LogCode {
   applicationStarted,
+  screenOpened,
+  httpStarted,
   httpCompleted,
   httpFailed,
   authExpired,
