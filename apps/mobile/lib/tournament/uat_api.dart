@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
@@ -76,12 +80,15 @@ class UatApi {
     String path, [
     Object? body,
   ]) async {
+    final started = Stopwatch()..start();
+    final requestId = _newDiagnosticId();
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
     // Safe fields only in logs: operation, endpoint, status, category.
     _perfLog(
       'http.start operation=$method endpoint=$path status=- category=pending',
     );
+    var diagnosticStatus = 0;
     try {
       final uri = Uri.parse('$baseUrl$path');
       final request = await client.openUrl(method, uri).timeout(
@@ -89,6 +96,7 @@ class UatApi {
         onTimeout: () => throw const _UatTimeout('connect'),
       );
       request.headers.set(HttpHeaders.authorizationHeader, bearer);
+      request.headers.set('x-request-id', requestId);
       final secret = sessionSecret;
       if (secret != null && secret.isNotEmpty) {
         request.headers.set('x-pzd-session-secret', secret);
@@ -106,6 +114,7 @@ class UatApi {
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
       );
+      diagnosticStatus = response.statusCode;
       final text = await utf8.decodeStream(response).timeout(
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
@@ -201,8 +210,45 @@ class UatApi {
         category: UatFailureCategory.other,
       );
     } finally {
+      started.stop();
+      _structuredHttp(method: method, status: diagnosticStatus,
+          requestId: requestId, durationMs: started.elapsedMilliseconds);
       client.close(force: true);
     }
+  }
+
+  static String _newDiagnosticId() {
+    final random = Random.secure();
+    return List<int>.generate(16, (_) => random.nextInt(256))
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
+
+  static void _structuredHttp({
+    required String method,
+    required int status,
+    required String requestId,
+    required int durationMs,
+  }) {
+    final level = status >= 400 || status == 0
+        ? LogLevel.warning
+        : LogLevel.info;
+    final verb = switch (method) {
+      'GET' => HttpVerb.get,
+      'POST' => HttpVerb.post,
+      'PATCH' => HttpVerb.patch,
+      'PUT' => HttpVerb.put,
+      _ => HttpVerb.delete,
+    };
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: level,
+      code: level == LogLevel.warning ? LogCode.httpFailed : LogCode.httpCompleted,
+      operation: 'tournament_http',
+      requestId: requestId,
+      httpVerb: verb,
+      httpStatus: status == 0 ? null : status,
+      durationMs: durationMs,
+    )));
   }
 
   static const _connectTimeout = Duration(seconds: 8);
