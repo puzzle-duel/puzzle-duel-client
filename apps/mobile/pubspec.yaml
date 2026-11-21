@@ -1,7 +1,7 @@
 name: puzzle_duel_mobile
 description: "Puzzle Duel iOS/Android client bootstrap (PZD-22)"
 publish_to: "none"
-version: 0.1.0+1
+version: 0.0.1+1
 
 # Pinned to Accepted ADR-001: Flutter 3.50.0 / Dart 3.14.0.
 environment:
