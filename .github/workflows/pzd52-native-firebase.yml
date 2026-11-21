@@ -23,11 +23,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  refresh-lockfile:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.ref }}
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Resolve and commit the Flutter 3.50.0 lockfile
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          flutter pub get
+          if git -C ../.. diff --quiet -- pubspec.lock; then
+            echo "pubspec.lock is already current"
+          else
+            git -C ../.. config user.name "github-actions[bot]"
+            git -C ../.. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C ../.. add apps/mobile/pubspec.lock
+            git -C ../.. commit -m "[PZD-49] Resolve pubspec.lock with Flutter 3.50.0"
+            git -C ../.. push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
   flutter-quality:
+    needs: refresh-lockfile
+    if: always() && (needs.refresh-lockfile.result == 'success' || needs.refresh-lockfile.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.ref }}
       - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         with:
           flutter-version: "3.50.0"
