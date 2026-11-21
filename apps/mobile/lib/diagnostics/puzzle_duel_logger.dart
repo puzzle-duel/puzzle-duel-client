@@ -86,7 +86,7 @@ class ConsoleLogSink implements LogSink {
 class RingBufferLogSink implements LogSink {
   RingBufferLogSink({
     this.maxEvents = 300,
-    this.maxAge = const Duration(minutes: 15),
+    this.maxAge = const Duration(hours: 1),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     if (maxEvents < 1 || maxAge <= Duration.zero) {
