@@ -79,9 +79,9 @@ class UatApi {
     }
     final events = await DiagnosticRuntime.snapshot();
     return post('/v1/diagnostics/reports', {
-      'events': events.length <= 64
+      'events': events.length <= 40
           ? events.map((event) => event.toJson()).toList()
-          : events.skip(events.length - 64)
+          : events.skip(events.length - 40)
               .map((event) => event.toJson()).toList(),
     });
   }
@@ -280,6 +280,7 @@ class UatApi {
       'PUT' => HttpVerb.put,
       _ => HttpVerb.delete,
     };
+    if (level == LogLevel.info) return; // Lite: only failed HTTP calls.
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: level,
       code: level == LogLevel.warning ? LogCode.httpFailed : LogCode.httpCompleted,
