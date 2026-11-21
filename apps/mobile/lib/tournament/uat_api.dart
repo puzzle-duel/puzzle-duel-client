@@ -68,6 +68,24 @@ class UatApi {
         : '${uri.scheme}://${uri.host}';
   }
 
+  /// Explicit staging-only diagnostic report submission. Never automatic.
+  /// The server validates the fixed event schema and returns a reportId.
+  Future<UatHttpResult> sendDiagnosticReport() async {
+    if (!DiagnosticRuntime.policy.manualReportEnabled) {
+      return const UatHttpResult(
+        403, {'error': 'DIAGNOSTICS_DISABLED'},
+        category: UatFailureCategory.client,
+      );
+    }
+    final events = await DiagnosticRuntime.snapshot();
+    return post('/v1/diagnostics/reports', {
+      'events': events.length <= 64
+          ? events.map((event) => event.toJson()).toList()
+          : events.skip(events.length - 64)
+              .map((event) => event.toJson()).toList(),
+    });
+  }
+
   Future<UatHttpResult> get(String path) => _send('GET', path);
 
   Future<UatHttpResult> patch(String path) => _send('PATCH', path);
