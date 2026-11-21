@@ -4,6 +4,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val stagingFirebase = providers.gradleProperty("pzdStagingFirebase").orNull == "true"
+if (stagingFirebase) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
+
 android {
     namespace = "app.puzzleduel.puzzle_duel_mobile"
     // Flutter 3.50.0 toolchain defaults: compileSdk/targetSdk = 36.
