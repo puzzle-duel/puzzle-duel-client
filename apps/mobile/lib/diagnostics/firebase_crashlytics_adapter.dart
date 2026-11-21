@@ -8,6 +8,25 @@ import 'puzzle_duel_logger.dart';
 final class FirebaseDiagnostics {
   FirebaseDiagnostics._();
   static bool enabled = false;
+  static const bool stagingDiagnosticsEnabled =
+      bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS', defaultValue: false) &&
+      bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false) &&
+      !bool.fromEnvironment('dart.vm.product', defaultValue: false);
+
+  static Future<void> sendTestNonFatal() async {
+    if (!stagingDiagnosticsEnabled || !enabled) return;
+    await FirebaseCrashlytics.instance.log('PZDProfile:: test_nonfatal called');
+    await FirebaseCrashlytics.instance.recordError(
+      StateError('PZD_STAGING_TEST_NONFATAL'), StackTrace.current,
+      reason: 'Staging diagnostics verification', fatal: false,
+    );
+  }
+
+  static Future<void> forceTestCrash() async {
+    if (!stagingDiagnosticsEnabled || !enabled) return;
+    await FirebaseCrashlytics.instance.log('PZDProfile:: test_crash called');
+    FirebaseCrashlytics.instance.crash();
+  }
   static Future<CrashReporter> initialize() async {
     const configured = bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false);
     if (!configured) return const NoopCrashReporter();
