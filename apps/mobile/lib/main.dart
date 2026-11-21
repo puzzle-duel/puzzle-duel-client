@@ -10,6 +10,8 @@ import 'package:puzzle_duel_mobile/app/portrait_lock.dart';
 import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,6 +50,27 @@ Future<void> main() async {
     );
     return;
   }
-  // Guest-first offline bootstrap: no network, auth, ads, or analytics.
+  // Staging guest mode is explicit. A failed auth must never generate an
+  // alternate identity or block offline practice.
+  const staging = String.fromEnvironment('PZD_STAGING_BASE_URL');
+  if (staging.isNotEmpty) {
+    try {
+      final auth = GuestAuthClient(
+        origin: staging,
+        credentials: const SecureGuestCredentialStore(),
+      );
+      final access = await auth.authenticate();
+      await runTournamentUatApp(UatConfig(
+        baseUrl: staging,
+        bearer: access.accessToken,
+        playerLabel: 'Guest',
+      ));
+      return;
+    } on GuestAuthException {
+      // Offline Practice remains available; no credentials in diagnostics.
+    } on Exception {
+      // Configuration/storage errors also fail closed to offline Practice.
+    }
+  }
   runPuzzleDuelApp(GameSession());
 }
