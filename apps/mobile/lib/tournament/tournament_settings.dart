@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
@@ -55,6 +56,33 @@ final class TournamentSettingsScreen extends StatelessWidget {
                     onChanged: controller.setHaptics,
                     switchKey: const Key('settings-haptics'),
                   ),
+                  if (DiagnosticRuntime.policy.manualReportEnabled) ...[
+                    const SizedBox(height: 12),
+                    ListTile(
+                      key: const Key('settings-send-diagnostics'),
+                      leading: const Icon(Icons.bug_report_outlined),
+                      title: const Text('Log Gönder (UAT)'),
+                      subtitle: const Text('Son güvenli hata kayıtlarını gönder'),
+                      onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          final result = await controller.api.sendDiagnosticReport();
+                          if (!context.mounted) return;
+                          final reportId = result.map['reportId'];
+                          messenger.showSnackBar(SnackBar(
+                            content: Text(result.status == 201 && reportId is String
+                                ? 'Log gönderildi. Rapor: $reportId'
+                                : 'Log gönderilemedi (${result.status}).'),
+                          ));
+                        } catch (_) {
+                          if (!context.mounted) return;
+                          messenger.showSnackBar(const SnackBar(
+                            content: Text('Log gönderilemedi.'),
+                          ));
+                        }
+                      },
+                    ),
+                  ],
                 ],
               );
             },

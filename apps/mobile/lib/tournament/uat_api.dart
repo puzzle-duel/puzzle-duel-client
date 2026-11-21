@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
-import 'package:flutter/foundation.dart';
-import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
+
 
 /// Authenticated Tournament UAT client. It never sends a score or a seal.
 class UatApi {
@@ -64,6 +66,24 @@ class UatApi {
         : '${uri.scheme}://${uri.host}';
   }
 
+  /// Explicit staging-only diagnostic report submission. Never automatic.
+  /// The server validates the fixed event schema and returns a reportId.
+  Future<UatHttpResult> sendDiagnosticReport() async {
+    if (!DiagnosticRuntime.policy.manualReportEnabled) {
+      return const UatHttpResult(
+        403, {'error': 'DIAGNOSTICS_DISABLED'},
+        category: UatFailureCategory.client,
+      );
+    }
+    final events = await DiagnosticRuntime.snapshot();
+    return post('/v1/diagnostics/reports', {
+      'events': events.length <= 40
+          ? events.map((event) => event.toJson()).toList()
+          : events.skip(events.length - 40)
+              .map((event) => event.toJson()).toList(),
+    });
+  }
+
   Future<UatHttpResult> get(String path) => _send('GET', path);
 
   Future<UatHttpResult> patch(String path) => _send('PATCH', path);
@@ -76,12 +96,11 @@ class UatApi {
     String path, [
     Object? body,
   ]) async {
+    final started = Stopwatch()..start();
+    final requestId = _newDiagnosticId();
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
-    // Safe fields only in logs: operation, endpoint, status, category.
-    _perfLog(
-      'http.start operation=$method endpoint=$path status=- category=pending',
-    );
+    var diagnosticStatus = 0;
     try {
       final uri = Uri.parse('$baseUrl$path');
       final request = await client.openUrl(method, uri).timeout(
@@ -89,6 +108,7 @@ class UatApi {
         onTimeout: () => throw const _UatTimeout('connect'),
       );
       request.headers.set(HttpHeaders.authorizationHeader, bearer);
+      request.headers.set('x-request-id', requestId);
       final secret = sessionSecret;
       if (secret != null && secret.isNotEmpty) {
         request.headers.set('x-pzd-session-secret', secret);
@@ -106,6 +126,7 @@ class UatApi {
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
       );
+      diagnosticStatus = response.statusCode;
       final text = await utf8.decodeStream(response).timeout(
         _responseTimeout,
         onTimeout: () => throw const _UatTimeout('response'),
@@ -115,12 +136,7 @@ class UatApi {
         try {
           json = jsonDecode(text);
         } on FormatException {
-          _diagHttp(
-            operation: method,
-            endpoint: path,
-            status: response.statusCode,
-            category: UatFailureCategory.malformed,
-          );
+
           return UatHttpResult(
             response.statusCode,
             {'error': 'MALFORMED_BODY'},
@@ -129,80 +145,106 @@ class UatApi {
         }
       }
       final category = categoryForStatus(response.statusCode);
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: response.statusCode,
-        category: category,
-        errorCode: json is Map ? json['error']?.toString() : null,
-      );
+      _structuredAuthStatus(response.statusCode, json);
+
       return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
       final category = error.phase == 'connect'
           ? UatFailureCategory.connectTimeout
           : UatFailureCategory.responseTimeout;
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: category,
-      );
+
       return UatHttpResult(
         0,
         {'error': 'TIMEOUT', 'timeoutPhase': error.phase},
         category: category,
       );
     } on SocketException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.offline,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
         category: UatFailureCategory.offline,
       );
     } on HttpException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.offline,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
         category: UatFailureCategory.offline,
       );
     } on TimeoutException {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.responseTimeout,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'TIMEOUT', 'timeoutPhase': 'response'},
         category: UatFailureCategory.responseTimeout,
       );
     } on Exception {
-      _diagHttp(
-        operation: method,
-        endpoint: path,
-        status: 0,
-        category: UatFailureCategory.other,
-      );
+
       return const UatHttpResult(
         0,
         {'error': 'OFFLINE'},
         category: UatFailureCategory.other,
       );
     } finally {
+      started.stop();
+      _structuredHttp(method: method, status: diagnosticStatus,
+          requestId: requestId, durationMs: started.elapsedMilliseconds);
       client.close(force: true);
     }
+  }
+
+  static void _structuredAuthStatus(int status, Object? response) {
+    LogCode? code;
+    if (status == 401) {
+      code = LogCode.authExpired;
+    } else if (status == 409 && response is Map) {
+      final safeCode = diagnosticErrorCode(response['error']?.toString());
+      if (safeCode == 'STALE_WRITER' ||
+          safeCode == 'WRITER_NOT_AUTHORIZED' ||
+          safeCode == 'WRITER_STILL_ACTIVE') {
+        code = LogCode.writerBindingRejected;
+      }
+    }
+    if (code == null) return;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.warning,
+      code: code,
+      operation: 'tournament_session',
+      httpStatus: status,
+    )));
+  }
+
+  static String _newDiagnosticId() {
+    final random = Random.secure();
+    return List<int>.generate(16, (_) => random.nextInt(256))
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
+
+  static void _structuredHttp({
+    required String method,
+    required int status,
+    required String requestId,
+    required int durationMs,
+  }) {
+    if (status > 0 && status < 400) return;
+    final verb = switch (method) {
+      'GET' => HttpVerb.get,
+      'POST' => HttpVerb.post,
+      'PATCH' => HttpVerb.patch,
+      'PUT' => HttpVerb.put,
+      _ => HttpVerb.delete,
+    };
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.warning,
+      code: LogCode.httpFailed,
+      operation: 'tournament_http',
+      requestId: requestId,
+      httpVerb: verb,
+      httpStatus: status == 0 ? null : status,
+      durationMs: durationMs,
+    )));
   }
 
   static const _connectTimeout = Duration(seconds: 8);
@@ -216,22 +258,6 @@ class UatApi {
     if (status >= 500) return UatFailureCategory.server;
     if (status >= 400) return UatFailureCategory.client;
     return UatFailureCategory.other;
-  }
-
-  /// Safe HTTP diagnostics: operation, endpoint, status, category only.
-  static void _diagHttp({
-    required String operation,
-    required String endpoint,
-    required int status,
-    required UatFailureCategory category,
-    String? errorCode,
-  }) {
-    final safeError = diagnosticErrorCode(errorCode);
-    _perfLog(
-      'http.done operation=$operation endpoint=$endpoint '
-      'status=$status category=${category.name}'
-      '${safeError == null ? '' : ' error=$safeError'}',
-    );
   }
 
   /// Only known protocol error codes may enter diagnostics. Never log an
@@ -259,10 +285,6 @@ class UatApi {
     }.contains(code) ? code : null;
   }
 
-  static void _perfLog(String message) {
-    if (!InteractionPerf.enabled) return;
-    debugPrint('PZD_PERF $message');
-  }
 }
 
 enum UatFailureCategory {
