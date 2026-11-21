@@ -85,16 +85,20 @@ class ConsoleLogSink implements LogSink {
 /// Bounded by both event count and age. No disk persistence.
 class RingBufferLogSink implements LogSink {
   RingBufferLogSink({
-    this.maxEvents = 300,
+    this.maxEvents = 10000,
+    this.maxBytes = 2 * 1024 * 1024,
     this.maxAge = const Duration(hours: 1),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
-    if (maxEvents < 1 || maxAge <= Duration.zero) {
+    if (maxEvents < 1 || maxBytes < 1 || maxAge <= Duration.zero) {
       throw ArgumentError('Invalid ring buffer limits');
     }
   }
 
   final int maxEvents;
+  final int maxBytes;
+  int _bytes = 0;
+  final Queue<int> _sizes = Queue<int>();
   final Duration maxAge;
   final DateTime Function() _clock;
   final Queue<LogEvent> _events = Queue<LogEvent>();
@@ -103,9 +107,13 @@ class RingBufferLogSink implements LogSink {
   void write(LogEvent event) {
     _evict();
     if (_clock().toUtc().difference(event.timestamp) > maxAge) return;
+    final size = utf8.encode(jsonEncode(event.toJson())).length;
+    if (size > maxBytes) return;
     _events.addLast(event);
-    while (_events.length > maxEvents) {
-      _events.removeFirst();
+    _sizes.addLast(size);
+    _bytes += size;
+    while (_events.length > maxEvents || _bytes > maxBytes) {
+      _removeOldest();
     }
   }
 
@@ -114,11 +122,37 @@ class RingBufferLogSink implements LogSink {
     return List.unmodifiable(_events);
   }
 
-  void clear() => _events.clear();
+  int get retainedBytes => _bytes;
+
+  void clear() {
+    _events.clear();
+    _sizes.clear();
+    _bytes = 0;
+  }
+
+  void _removeOldest() {
+    _events.removeFirst();
+    _bytes -= _sizes.removeFirst();
+  }
 
   void _evict() {
     final cutoff = _clock().toUtc().subtract(maxAge);
-    _events.removeWhere((event) => event.timestamp.isBefore(cutoff));
+    // Preserve FIFO alignment between events and encoded byte sizes.
+    // Expired entries may occur out of order with injected timestamps.
+    final retained = <LogEvent>[];
+    final sizes = <int>[];
+    while (_events.isNotEmpty) {
+      final event = _events.removeFirst();
+      final size = _sizes.removeFirst();
+      if (!event.timestamp.isBefore(cutoff)) {
+        retained.add(event);
+        sizes.add(size);
+      } else {
+        _bytes -= size;
+      }
+    }
+    _events.addAll(retained);
+    _sizes.addAll(sizes);
   }
 }
 
@@ -134,12 +168,15 @@ class PuzzleDuelLogger {
   /// Logging is best-effort: failing sinks must never affect app behavior.
   Future<void> log(LogEvent event) async {
     if (event.level.index < minimumLevel.index) return;
+    // Do not await slow sinks on a gameplay-critical call path.
     for (final sink in _sinks) {
-      try {
-        await sink.write(event);
-      } catch (_) {
-        // Intentionally suppress telemetry errors; never recursively log.
-      }
+      unawaited(Future<void>.sync(() async {
+        try {
+          await sink.write(event);
+        } catch (_) {
+          // Telemetry must never interrupt the application.
+        }
+      }));
     }
   }
 }
