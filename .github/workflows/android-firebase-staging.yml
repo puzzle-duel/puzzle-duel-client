@@ -1,0 +1,99 @@
+name: PZD-49 Android Firebase staging distribution
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/android-firebase-staging.yml"
+      - "apps/mobile/android/app/build.gradle.kts"
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/puzzle_duel_rules/**"
+      - ".github/workflows/android-firebase-staging.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pzd-android-firebase-staging
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  distribute:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: pzd-android-staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Validate required secrets and stage signing material
+        env:
+          KEYSTORE_B64: ${{ secrets.PZD_ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.PZD_ANDROID_KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.PZD_ANDROID_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.PZD_ANDROID_KEY_PASSWORD }}
+          FIREBASE_APP_ID: ${{ secrets.PZD_FIREBASE_ANDROID_APP_ID }}
+          FIREBASE_CREDENTIALS: ${{ secrets.PZD_FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" && test -n "$KEY_ALIAS" && test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD"
+          test -n "$FIREBASE_APP_ID" && test -n "$FIREBASE_CREDENTIALS"
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/pzd-staging.jks"
+          printf '%s' "$FIREBASE_CREDENTIALS" > "$RUNNER_TEMP/firebase-service-account.json"
+          test -s "$RUNNER_TEMP/pzd-staging.jks"
+      - name: Build signed staging APK
+        working-directory: apps/mobile
+        env:
+          PZD_ANDROID_CD_SIGNING: "true"
+          PZD_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/pzd-staging.jks
+          PZD_ANDROID_KEY_ALIAS: ${{ secrets.PZD_ANDROID_KEY_ALIAS }}
+          PZD_ANDROID_STORE_PASSWORD: ${{ secrets.PZD_ANDROID_STORE_PASSWORD }}
+          PZD_ANDROID_KEY_PASSWORD: ${{ secrets.PZD_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter build apk --release --dart-define=PZD_ENV=staging
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          test "$PZD_ANDROID_CD_SIGNING" = "true"
+      - name: Firebase App Distribution
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          FIREBASE_APP_ID: ${{ secrets.PZD_FIREBASE_ANDROID_APP_ID }}
+          FIREBASE_TESTER_GROUP: ${{ vars.PZD_FIREBASE_ANDROID_TESTER_GROUP }}
+        run: |
+          set -euo pipefail
+          test -n "$FIREBASE_TESTER_GROUP"
+          npm install --global firebase-tools@14
+          firebase appdistribution:distribute apps/mobile/build/app/outputs/flutter-apk/app-release.apk \
+            --app "$FIREBASE_APP_ID" \
+            --groups "$FIREBASE_TESTER_GROUP" \
+            --release-notes "Puzzle Duel staging ${GITHUB_SHA}"
+      - name: Clean ephemeral credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pzd-staging.jks" "$RUNNER_TEMP/firebase-service-account.json"

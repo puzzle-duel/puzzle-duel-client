@@ -4,7 +4,27 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val pzdReleaseKeystore = System.getenv("PZD_ANDROID_KEYSTORE_FILE")
+val pzdReleaseAlias = System.getenv("PZD_ANDROID_KEY_ALIAS")
+val pzdReleaseStorePassword = System.getenv("PZD_ANDROID_STORE_PASSWORD")
+val pzdReleaseKeyPassword = System.getenv("PZD_ANDROID_KEY_PASSWORD")
+val pzdCdSigning = System.getenv("PZD_ANDROID_CD_SIGNING") == "true"
+
 android {
+    if (pzdCdSigning) {
+        require(!pzdReleaseKeystore.isNullOrBlank() && !pzdReleaseAlias.isNullOrBlank() &&
+            !pzdReleaseStorePassword.isNullOrBlank() && !pzdReleaseKeyPassword.isNullOrBlank()) {
+            "PZD Android CD signing secrets missing"
+        }
+        signingConfigs {
+            create("pzdStaging") {
+                storeFile = file(pzdReleaseKeystore!!)
+                storePassword = pzdReleaseStorePassword
+                keyAlias = pzdReleaseAlias
+                keyPassword = pzdReleaseKeyPassword
+            }
+        }
+    }
     namespace = "app.puzzleduel.puzzle_duel_mobile"
     // Flutter 3.50.0 toolchain defaults: compileSdk/targetSdk = 36.
     compileSdk = flutter.compileSdkVersion
@@ -27,7 +47,7 @@ android {
     buildTypes {
         release {
             // Debug signing for local bootstrap only. Store release signing is out of scope.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (pzdCdSigning) signingConfigs.getByName("pzdStaging") else signingConfigs.getByName("debug")
         }
     }
 }
