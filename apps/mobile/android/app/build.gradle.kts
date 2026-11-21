@@ -4,6 +4,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val stagingFirebase = providers.gradleProperty("pzdStagingFirebase").orNull == "true"
+if (stagingFirebase) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 val pzdReleaseKeystore = System.getenv("PZD_ANDROID_KEYSTORE_FILE")
 val pzdReleaseAlias = System.getenv("PZD_ANDROID_KEY_ALIAS")
 val pzdReleaseStorePassword = System.getenv("PZD_ANDROID_STORE_PASSWORD")
