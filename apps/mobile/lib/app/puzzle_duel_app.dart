@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/screen_breadcrumb_observer.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
@@ -58,6 +59,7 @@ final class _PuzzleDuelAppState extends State<PuzzleDuelApp> {
       child: MaterialApp(
         title: 'Puzzle Duel',
         debugShowCheckedModeBanner: false,
+        navigatorObservers: [ScreenBreadcrumbObserver()],
         theme: PuzzleDuelTheme.dark(),
         // Bridge supplies theme/localizations to Flame (legacy Material imports).
         builder: (context, child) {
