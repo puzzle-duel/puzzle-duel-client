@@ -48,6 +48,8 @@ void main() {
       logger.flush(timeout: const Duration(milliseconds: 20)),
       throwsA(isA<TimeoutException>()),
     );
+    expect(logger.droppedFor(sink), 8);
+    expect(logger.totalDropped, 8);
     sink.gate.complete();
     await logger.flush();
   });
