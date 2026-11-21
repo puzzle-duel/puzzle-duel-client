@@ -39,8 +39,11 @@ final class UatConfig {
     required this.baseUrl,
     required this.bearer,
     required this.playerLabel,
+    this.stagingSessionBinding,
   });
 
+  /// Stable guest subject binding; only set in explicit staging mode.
+  final String? stagingSessionBinding;
   final String baseUrl;
   final String bearer;
   final String playerLabel;
@@ -1223,7 +1226,7 @@ final class TournamentController extends ChangeNotifier {
 
   /// Returns true only when a usable session secret is ready for ranked calls.
   Future<bool> _restoreSession({bool degradedOnFailure = false}) async {
-    final binding = UatApi.authBinding(config.bearer);
+    final binding = config.stagingSessionBinding ?? UatApi.authBinding(config.bearer);
     final origin = UatApi.apiOrigin(config.baseUrl);
     InteractionPerf.mark('tournament.session.restore.start');
     if (InteractionPerf.enabled) {
