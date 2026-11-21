@@ -138,6 +138,7 @@ class UatApi {
         }
       }
       final category = categoryForStatus(response.statusCode);
+      _structuredAuthStatus(response.statusCode, json);
       _diagHttp(
         operation: method,
         endpoint: path,
@@ -215,6 +216,27 @@ class UatApi {
           requestId: requestId, durationMs: started.elapsedMilliseconds);
       client.close(force: true);
     }
+  }
+
+  static void _structuredAuthStatus(int status, Object? response) {
+    LogCode? code;
+    if (status == 401) {
+      code = LogCode.authExpired;
+    } else if (status == 409 && response is Map) {
+      final safeCode = diagnosticErrorCode(response['error']?.toString());
+      if (safeCode == 'STALE_WRITER' ||
+          safeCode == 'WRITER_NOT_AUTHORIZED' ||
+          safeCode == 'WRITER_STILL_ACTIVE') {
+        code = LogCode.writerBindingRejected;
+      }
+    }
+    if (code == null) return;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.warning,
+      code: code,
+      operation: 'tournament_session',
+      httpStatus: status,
+    )));
   }
 
   static String _newDiagnosticId() {
