@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 /// SDK-independent, allowlisted diagnostic events. Never accept arbitrary
 /// request bodies, headers, user identifiers or exception.toString() here.
@@ -64,11 +65,11 @@ class LogEvent {
     'level': level.name,
     'code': code.name,
     'operation': operation,
-    if (requestId != null) 'requestId': requestId!,
-    if (traceId != null) 'traceId': traceId!,
-    if (httpVerb != null) 'httpMethod': httpVerb!.name.toUpperCase(),
-    if (httpStatus != null) 'httpStatus': httpStatus!,
-    if (durationMs != null) 'durationMs': durationMs!,
+    if (requestId case final value?) 'requestId': value,
+    if (traceId case final value?) 'traceId': value,
+    if (httpVerb case final value?) 'httpMethod': value.name.toUpperCase(),
+    if (httpStatus case final value?) 'httpStatus': value,
+    if (durationMs case final value?) 'durationMs': value,
   };
 }
 
@@ -79,7 +80,7 @@ abstract interface class LogSink {
 class ConsoleLogSink implements LogSink {
   const ConsoleLogSink();
   @override
-  void write(LogEvent event) => print(jsonEncode(event.toJson()));
+  void write(LogEvent event) => developer.log(jsonEncode(event.toJson()), name: 'PuzzleDuelLogger');
 }
 
 /// Bounded by both event count and age. No disk persistence.
