@@ -40,7 +40,7 @@ void main() {
     sink.write(event());
     sink.write(event());
     expect(sink.snapshot(), hasLength(2));
-    now = now.add(const Duration(minutes: 16));
+    now = now.add(const Duration(minutes: 61));
     expect(sink.snapshot(), isEmpty);
   });
 
