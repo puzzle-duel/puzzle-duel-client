@@ -44,6 +44,18 @@ void main() {
     expect(sink.snapshot(), isEmpty);
   });
 
+  test('byte cap evicts oldest events and remains bounded', () {
+    final now = DateTime.utc(2026, 11, 21, 12);
+    final sink = RingBufferLogSink(maxBytes: 300, clock: () => now);
+    for (var i = 0; i < 20; i++) {
+      sink.write(LogEvent(level: LogLevel.info,
+        code: LogCode.httpCompleted, operation: 'http_request',
+        timestamp: now, durationMs: i));
+    }
+    expect(sink.retainedBytes, lessThanOrEqualTo(300));
+    expect(sink.snapshot().length, lessThan(20));
+  });
+
   test('sink failure does not block other sinks', () async {
     final recording = _RecordingSink();
     final logger = PuzzleDuelLogger(sinks: [_FailingSink(), recording]);
