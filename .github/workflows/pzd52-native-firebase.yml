@@ -1,0 +1,107 @@
+name: PZD-52 Native Firebase Build Verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/pzd52-native-firebase.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Build staging APK with native Firebase
+        working-directory: apps/mobile
+        env:
+          ORG_GRADLE_PROJECT_pzdStagingFirebase: "true"
+        run: |
+          flutter pub get
+          flutter build apk --release \
+            --dart-define=PZD_FIREBASE_CONFIGURED=true \
+            --dart-define=PZD_DIAGNOSTIC_ENV=staging \
+            --dart-define=PZD_STAGING_DIAGNOSTICS=true
+      - name: Inspect staging Firebase resources
+        run: |
+          set -eu
+          APK=apps/mobile/build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'resources.arsc'
+          echo "Staging APK built: $(du -h "$APK" | cut -f1)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pzd52-android-staging-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 3
+
+  android-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Build production-default APK
+        working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter build apk --release
+      - name: Verify no Firebase Google Services resource injection
+        run: |
+          set -eu
+          test -s apps/mobile/build/app/outputs/flutter-apk/app-release.apk
+          if grep -R -l 'PZD_STAGING_DIAGNOSTICS=true' apps/mobile/build/app/outputs/flutter-apk 2>/dev/null; then
+            echo "Unexpected staging diagnostics marker" >&2
+            exit 1
+          fi
+
+  ios-staging:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: "3.50.0"
+          channel: stable
+          cache: true
+      - name: Build unsigned staging iOS app
+        working-directory: apps/mobile
+        env:
+          PZD_STAGING_FIREBASE: "1"
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign \
+            --dart-define=PZD_FIREBASE_CONFIGURED=true \
+            --dart-define=PZD_DIAGNOSTIC_ENV=staging \
+            --dart-define=PZD_STAGING_DIAGNOSTICS=true
+      - name: Inspect staging iOS bundle
+        run: |
+          set -eu
+          APP=apps/mobile/build/ios/iphoneos/Runner.app
+          test -d "$APP"
+          test -s "$APP/GoogleService-Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :PROJECT_ID' "$APP/GoogleService-Info.plist" | grep -qx puzzle-duel-staging
