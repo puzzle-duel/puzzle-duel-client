@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
@@ -234,6 +235,35 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   onRetry: _loadBadges,
                 ),
                 const SizedBox(height: 12),
+                if (FirebaseDiagnostics.stagingDiagnosticsEnabled) ...[
+                  const SizedBox(height: 24),
+                  const Text('Developer Diagnostics'),
+                  OutlinedButton(
+                    key: const Key('diagnostics-nonfatal'),
+                    onPressed: () async {
+                      await FirebaseDiagnostics.sendTestNonFatal();
+                    },
+                    child: const Text('Send Test Non-Fatal'),
+                  ),
+                  OutlinedButton(
+                    key: const Key('diagnostics-crash'),
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Force test crash?'),
+                          content: const Text('This will close the staging app. Relaunch it to upload the crash report.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Crash')),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) await FirebaseDiagnostics.forceTestCrash();
+                    },
+                    child: const Text('Force Test Crash'),
+                  ),
+                ],
                 _BadgeGrid(
                   snapshot: _badges,
                   copy: copy,
