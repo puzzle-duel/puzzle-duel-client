@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/screen_breadcrumb_observer.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/accessible_board.dart';
@@ -145,6 +146,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       child: MaterialApp(
         title: 'Puzzle Duel',
         debugShowCheckedModeBanner: false,
+        navigatorObservers: [ScreenBreadcrumbObserver()],
         theme: PuzzleDuelTheme.dark().copyWith(
           scaffoldBackgroundColor: GameTokens.bgDeep,
           canvasColor: GameTokens.bgDeep,
