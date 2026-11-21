@@ -45,12 +45,16 @@ jobs:
 
   distribute:
     needs: verify
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/version/') && vars.PZD_ANDROID_FIREBASE_CD_ENABLED == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/version/0.0.1'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: pzd-android-staging
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "21"
       - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         with:
           flutter-version: "3.50.0"
@@ -82,9 +86,17 @@ jobs:
           PZD_ANDROID_KEY_PASSWORD: ${{ secrets.PZD_ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          flutter pub get
-          flutter build apk --release --dart-define=PZD_ENV=staging
+          flutter pub get --enforce-lockfile
+          printf '\npzdStagingFirebase=true\n' >> android/gradle.properties
+          flutter build apk --release \
+            --dart-define=PZD_ENV=staging \
+            --dart-define=PZD_FIREBASE_CONFIGURED=true \
+            --dart-define=PZD_DIAGNOSTIC_ENV=staging \
+            --dart-define=PZD_STAGING_DIAGNOSTICS=true
           test -s build/app/outputs/flutter-apk/app-release.apk
+          mapfile -t RESOURCES < <(find build -type f -path '*/generated/res/google-services/*/values/values.xml' -print)
+          test "${#RESOURCES[@]}" -gt 0
+          grep -l 'puzzle-duel-staging' "${RESOURCES[@]}" >/dev/null
           test "$PZD_ANDROID_CD_SIGNING" = "true"
       - name: Firebase App Distribution
         env:
