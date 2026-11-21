@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 
