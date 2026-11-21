@@ -171,6 +171,12 @@ class PuzzleDuelLogger {
   final int maxPendingPerSink;
   final Map<LogSink, Future<void>> _tails = {};
   final Map<LogSink, int> _pending = {};
+  final Map<LogSink, int> _dropped = {};
+
+  /// Number of events rejected by each sink's bounded queue.
+  int droppedFor(LogSink sink) => _dropped[sink] ?? 0;
+
+  int get totalDropped => _dropped.values.fold(0, (sum, count) => sum + count);
 
 
   /// Queues events in FIFO order independently per sink. A failing or slow
@@ -179,7 +185,10 @@ class PuzzleDuelLogger {
     if (event.level.index < minimumLevel.index) return Future<void>.value();
     for (final sink in _sinks) {
       final count = _pending[sink] ?? 0;
-      if (count >= maxPendingPerSink) continue;
+      if (count >= maxPendingPerSink) {
+        _dropped[sink] = (_dropped[sink] ?? 0) + 1;
+        continue;
+      }
       _pending[sink] = count + 1;
       final previous = _tails[sink] ?? Future<void>.value();
       final next = previous.then((_) async {
