@@ -2,7 +2,7 @@ name: PZD-52 Native Firebase and release verification
 
 on:
   pull_request:
-    branches: ["version/**"]
+    branches: ["main", "version/**"]
     paths:
       - "apps/mobile/**"
       - ".github/workflows/pzd52-native-firebase.yml"
