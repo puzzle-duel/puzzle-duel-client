@@ -65,11 +65,11 @@ class LogEvent {
     'level': level.name,
     'code': code.name,
     'operation': operation,
-    if (requestId case final value?) 'requestId': value,
-    if (traceId case final value?) 'traceId': value,
-    if (httpVerb case final value?) 'httpMethod': value.name.toUpperCase(),
-    if (httpStatus case final value?) 'httpStatus': value,
-    if (durationMs case final value?) 'durationMs': value,
+    'requestId': ?requestId,
+    'traceId': ?traceId,
+    'httpMethod': ?httpVerb?.name.toUpperCase(),
+    'httpStatus': ?httpStatus,
+    'durationMs': ?durationMs,
   };
 }
 
