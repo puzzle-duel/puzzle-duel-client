@@ -75,6 +75,7 @@ jobs:
 
   android-staging:
     needs: flutter-quality
+    if: always() && needs.flutter-quality.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -113,6 +114,7 @@ jobs:
 
   android-production:
     needs: flutter-quality
+    if: always() && needs.flutter-quality.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -139,6 +141,7 @@ jobs:
 
   ios-staging:
     needs: flutter-quality
+    if: always() && needs.flutter-quality.result == 'success'
     runs-on: macos-15
     timeout-minutes: 55
     steps:
@@ -168,6 +171,7 @@ jobs:
 
   ios-production:
     needs: flutter-quality
+    if: always() && needs.flutter-quality.result == 'success'
     runs-on: macos-15
     timeout-minutes: 55
     steps:
