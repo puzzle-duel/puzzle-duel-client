@@ -15,6 +15,7 @@ dependencies:
   flame: 1.38.2
   flutter:
     sdk: flutter
+  flutter_secure_storage: ^10.0.0
   material_ui: ^1.11.0
   path_provider: 2.1.5
   puzzle_duel_rules:
@@ -35,3 +36,4 @@ flutter:
     - assets/sfx/chain_complete.wav
     - assets/sfx/round_end.wav
     - assets/branding/app_icon_master_1024.png
+
