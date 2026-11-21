@@ -11,7 +11,7 @@ final class FirebaseDiagnostics {
   static const bool stagingDiagnosticsEnabled =
       bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS', defaultValue: false) &&
       bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false) &&
-      !bool.fromEnvironment('dart.vm.product', defaultValue: false);
+      const String.fromEnvironment('PZD_DIAGNOSTIC_ENV') == 'staging';
 
   static Future<void> sendTestNonFatal() async {
     if (!stagingDiagnosticsEnabled || !enabled) return;
