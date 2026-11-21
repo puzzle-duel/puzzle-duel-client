@@ -4,6 +4,8 @@ Firebase project: `puzzle-duel-staging`. Native configuration is opt-in; product
 
 ## Android staging (release APK)
 
+Use JDK 21 with the pinned Android Gradle Plugin 9.3.1 toolchain.
+
 From `apps/mobile`:
 
 ```sh
