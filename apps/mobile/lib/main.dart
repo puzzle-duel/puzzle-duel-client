@@ -65,6 +65,7 @@ Future<void> main() async {
         baseUrl: staging,
         bearer: access.accessToken,
         playerLabel: 'Guest',
+        stagingSessionBinding: access.sessionVaultBinding,
       ), api: UatApi(
         baseUrl: UatApi.apiOrigin(staging),
         bearer: access.accessToken,
