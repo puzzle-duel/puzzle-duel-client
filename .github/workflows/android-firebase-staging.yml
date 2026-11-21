@@ -2,7 +2,7 @@ name: PZD-49 Android Firebase staging distribution
 
 on:
   pull_request:
-    branches: ["version/**"]
+    branches: ["main", "version/**"]
     paths:
       - ".github/workflows/android-firebase-staging.yml"
       - "apps/mobile/**"
