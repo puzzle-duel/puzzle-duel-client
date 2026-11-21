@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer' as developer;
@@ -165,19 +164,30 @@ class PuzzleDuelLogger {
 
   final List<LogSink> _sinks;
   final LogLevel minimumLevel;
+  final Map<LogSink, Future<void>> _tails = {};
 
-  /// Logging is best-effort: failing sinks must never affect app behavior.
-  Future<void> log(LogEvent event) async {
-    if (event.level.index < minimumLevel.index) return;
-    // Do not await slow sinks on a gameplay-critical call path.
+  /// Queues events in FIFO order independently per sink. A failing or slow
+  /// sink cannot delay another sink or the caller.
+  Future<void> log(LogEvent event) {
+    if (event.level.index < minimumLevel.index) return Future<void>.value();
     for (final sink in _sinks) {
-      unawaited(Future<void>.sync(() async {
+      final previous = _tails[sink] ?? Future<void>.value();
+      final next = previous.then((_) async {
         try {
           await sink.write(event);
         } catch (_) {
-          // Telemetry must never interrupt the application.
+          // Telemetry is best-effort and must not affect application logic.
         }
-      }));
+      });
+      _tails[sink] = next;
     }
+    return Future<void>.value();
+  }
+
+  /// Await pending writes before taking a diagnostic snapshot.
+  /// A permanently stalled sink will also stall flush; callers must set
+  /// their own timeout when using this method.
+  Future<void> flush() async {
+    await Future.wait(_tails.values.toList());
   }
 }
