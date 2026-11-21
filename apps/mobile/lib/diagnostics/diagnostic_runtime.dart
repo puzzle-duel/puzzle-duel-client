@@ -14,7 +14,7 @@ final class DiagnosticRuntime {
     minimumLevel: policy.minimumLevel,
     sinks: [
       const ConsoleLogSink(),
-      if (buffer case final value?) value,
+      ?buffer,
     ],
   );
 
