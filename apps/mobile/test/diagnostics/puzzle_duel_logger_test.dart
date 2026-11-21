@@ -70,6 +70,7 @@ void main() {
     final logger = PuzzleDuelLogger(sinks: [_FailingSink(), recording]);
     await logger.log(LogEvent(level: LogLevel.error,
       code: LogCode.authRefreshFailed, operation: 'auth_refresh'));
+    await logger.flush();
     expect(recording.events, hasLength(1));
   });
 
