@@ -94,9 +94,23 @@ jobs:
             --dart-define=PZD_DIAGNOSTIC_ENV=staging \
             --dart-define=PZD_STAGING_DIAGNOSTICS=true
           test -s build/app/outputs/flutter-apk/app-release.apk
-          mapfile -t RESOURCES < <(find build -type f -path '*/generated/res/google-services/*/values/values.xml' -print)
-          test "${#RESOURCES[@]}" -gt 0
-          grep -l 'puzzle-duel-staging' "${RESOURCES[@]}" >/dev/null
+          # Gradle may generate google-services resources in different build roots.
+          # Keep this a fail-closed release gate; do not distribute an unconfigured APK.
+          mapfile -t RESOURCES < <(
+            find build android -type f -path '*/generated/res/google-services/*/values/values.xml' -print
+          )
+          if (( ${#RESOURCES[@]} == 0 )); then
+            echo "::error::No generated Google Services values.xml found; staging Firebase configuration was not verified"
+            echo "Google Services generated files (diagnostic paths):"
+            find build android -type f -path '*/google-services/*' -print | head -80
+            exit 1
+          fi
+          if ! grep -lF 'puzzle-duel-staging' "${RESOURCES[@]}" >/dev/null; then
+            echo "::error::Generated Google Services resources do not identify puzzle-duel-staging"
+            printf 'Generated resources: %s\n' "${RESOURCES[@]}"
+            exit 1
+          fi
+          printf 'Verified staging Firebase resources: %s\n' "${RESOURCES[@]}"
           test "$PZD_ANDROID_CD_SIGNING" = "true"
       - name: Firebase App Distribution
         env:
