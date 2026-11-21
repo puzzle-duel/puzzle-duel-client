@@ -88,37 +88,28 @@ jobs:
           set -euo pipefail
           flutter pub get --enforce-lockfile
           printf '\npzdStagingFirebase=true\n' >> android/gradle.properties
-          # Flutter creates the ignored Gradle wrapper on first Android build.
+          # Flutter bootstraps the ignored Gradle wrapper during its first build.
           flutter build apk --release \
             --dart-define=PZD_ENV=staging \
             --dart-define=PZD_FIREBASE_CONFIGURED=true \
             --dart-define=PZD_DIAGNOSTIC_ENV=staging \
             --dart-define=PZD_STAGING_DIAGNOSTICS=true
-          # Require the real Google Services task and rebuild to package its outputs.
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          # Require the native Google Services generation task to be present and valid.
           (cd android && bash ./gradlew :app:processReleaseGoogleServices --no-daemon --console=plain)
-          flutter build apk --release \
-            --dart-define=PZD_ENV=staging \
-            --dart-define=PZD_FIREBASE_CONFIGURED=true \
-            --dart-define=PZD_DIAGNOSTIC_ENV=staging \
-            --dart-define=PZD_STAGING_DIAGNOSTICS=true
-          test -s build/app/outputs/flutter-apk/app-release.apk
-          # Gradle may generate google-services resources in different build roots.
-          # Keep this a fail-closed release gate; do not distribute an unconfigured APK.
-          mapfile -t RESOURCES < <(
-            find build android -type f -path '*/generated/res/google-services/*/values/values.xml' -print
-          )
-          if (( ${#RESOURCES[@]} == 0 )); then
-            echo "::error::No generated Google Services values.xml found; staging Firebase configuration was not verified"
-            echo "Google Services generated files (diagnostic paths):"
-            find build android -type f -path '*/google-services/*' -print | head -80
+          # Verify the *packaged APK resources*, not AGP's version-dependent intermediate
+          # directory layout. Do not release an APK missing staging Firebase settings.
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 -print | sort -V | tail -n 1)"
+          test -n "$AAPT2" && test -x "$AAPT2"
+          "$AAPT2" dump resources "$APK" > "$RUNNER_TEMP/pzd-apk-resources.txt"
+          if ! grep -Fq 'string/google_app_id' "$RUNNER_TEMP/pzd-apk-resources.txt" ||
+             ! grep -Fq 'string/project_id' "$RUNNER_TEMP/pzd-apk-resources.txt" ||
+             ! grep -Fq 'puzzle-duel-staging' "$RUNNER_TEMP/pzd-apk-resources.txt"; then
+            echo "::error::Release APK is missing the staging Firebase resource values"
             exit 1
           fi
-          if ! grep -lF 'puzzle-duel-staging' "${RESOURCES[@]}" >/dev/null; then
-            echo "::error::Generated Google Services resources do not identify puzzle-duel-staging"
-            printf 'Generated resources: %s\n' "${RESOURCES[@]}"
-            exit 1
-          fi
-          printf 'Verified staging Firebase resources: %s\n' "${RESOURCES[@]}"
+          echo "Verified native staging Firebase identifiers inside signed APK"
           test "$PZD_ANDROID_CD_SIGNING" = "true"
       - name: Firebase App Distribution
         env:
