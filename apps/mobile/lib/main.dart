@@ -51,8 +51,8 @@ Future<void> main() async {
     );
     return;
   }
-  // Staging guest mode is explicit. Failed auth falls back to offline, never a different guest identity.
-  // alternate identity or block offline practice.
+  // Staging guest mode is explicit. Authentication failures fall back to offline
+  // practice without silently creating a replacement guest identity.
   const staging = String.fromEnvironment('PZD_STAGING_BASE_URL');
   if (staging.isNotEmpty) {
     try {
