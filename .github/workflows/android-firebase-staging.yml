@@ -35,6 +35,7 @@ jobs:
       - working-directory: apps/mobile
         run: |
           flutter pub get
+          git diff --exit-code -- pubspec.lock
           flutter analyze
           flutter test
 
