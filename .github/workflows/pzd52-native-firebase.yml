@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
-          if git -C ../.. diff --quiet -- pubspec.lock; then
+          if git -C ../.. diff --quiet -- apps/mobile/pubspec.lock; then
             echo "pubspec.lock is already current"
           else
             git -C ../.. config user.name "github-actions[bot]"
