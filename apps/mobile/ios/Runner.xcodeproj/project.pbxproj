@@ -287,7 +287,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nDEST=\\"\u0024{TARGET_BUILD_DIR}/\u0024{UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\\"\nrm -f \\"\u0024DEST\\"\nif [ \\"\u0024{PZD_STAGING_FIREBASE:-0}\\" = \\"1\\" ]; then\n  SOURCE=\\"\u0024{PROJECT_DIR}/../firebase/staging/GoogleService-Info.plist\\"\n  test -f \\"\u0024SOURCE\\" || { echo \\"error: Missing staging Firebase plist\\" >&2; exit 1; }\n  cp \\"\u0024SOURCE\\" \\"\u0024DEST\\"\nfi\n";
+			shellScript = "set -eu\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nrm -f \"$DEST\"\nif [ \"${PZD_STAGING_FIREBASE:-0}\" = \"1\" ]; then\n  SOURCE=\"${PROJECT_DIR}/../firebase/staging/GoogleService-Info.plist\"\n  test -f \"$SOURCE\" || { echo \"error: Missing staging Firebase plist\" >&2; exit 1; }\n  cp \"$SOURCE\" \"$DEST\"\nfi\n";
 		};
 
 		14CE265D87A1A83B31B83E6C /* [CP] Check Pods Manifest.lock */ = {
