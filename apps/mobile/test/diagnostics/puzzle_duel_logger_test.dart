@@ -12,6 +12,16 @@ class _RecordingSink implements LogSink {
   void write(LogEvent event) => events.add(event);
 }
 
+class _AsyncOrderedSink implements LogSink {
+  _AsyncOrderedSink(this.seen);
+  final List<int> seen;
+  @override
+  Future<void> write(LogEvent event) async {
+    await Future<void>.delayed(Duration(milliseconds: 10 - event.durationMs!));
+    seen.add(event.durationMs!);
+  }
+}
+
 void main() {
   test('UTC and strict metadata allowlist', () {
     final event = LogEvent(
@@ -61,6 +71,22 @@ void main() {
     await logger.log(LogEvent(level: LogLevel.error,
       code: LogCode.authRefreshFailed, operation: 'auth_refresh'));
     expect(recording.events, hasLength(1));
+  });
+
+  test('flush preserves FIFO ordering for asynchronous sink', () async {
+    final seen = <int>[];
+    final sink = _AsyncOrderedSink(seen);
+    final logger = PuzzleDuelLogger(sinks: [sink]);
+    for (var i = 0; i < 10; i++) {
+      await logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.httpCompleted,
+        operation: 'http_request',
+        durationMs: i,
+      ));
+    }
+    await logger.flush();
+    expect(seen, List<int>.generate(10, (i) => i));
   });
 
   test('minimum log level filters verbose in production', () async {
