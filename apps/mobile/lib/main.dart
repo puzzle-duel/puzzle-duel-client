@@ -12,6 +12,7 @@ import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
+import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +65,10 @@ Future<void> main() async {
         baseUrl: staging,
         bearer: access.accessToken,
         playerLabel: 'Guest',
+      ), api: UatApi(
+        baseUrl: UatApi.apiOrigin(staging),
+        bearer: access.accessToken,
+        accessTokenProvider: () async => (await auth.authenticate()).accessToken,
       ));
       return;
     } on GuestAuthException {
