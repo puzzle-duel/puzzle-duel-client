@@ -16,20 +16,29 @@ final class GuestAccess {
   final String accessToken;
   final DateTime expiresAt;
 
-  /// Local vault namespace only; the server must verify the JWT signature.
-  /// Never use this unverified claim as authorization or a player ID.
+  /// Local vault namespace only. Server-side JWT verification remains mandatory.
   String get sessionVaultBinding {
     try {
       final parts = accessToken.split('.');
       if (parts.length != 3) throw const FormatException('jwt');
       final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
-      if (claims is! Map || claims['iss'] != 'https://staging.puzzle-duel.app' ||
-          claims['aud'] != 'puzzle-duel-api' || claims['account_type'] != 'guest') {
+      if (claims is! Map ||
+          claims['iss'] != 'https://staging.puzzle-duel.app' ||
+          claims['aud'] != 'puzzle-duel-api' ||
+          claims['account_type'] != 'guest') {
         throw const FormatException('claims');
       }
       final subject = claims['sub'];
-      if (subject is! String ||
-          !RegExp(r'^[0-9a-fA-F-]{36}
+      if (subject is! String || subject.length != 36 ||
+          !RegExp(r'^[0-9a-fA-F-]+$').hasMatch(subject)) {
+        throw const FormatException('subject');
+      }
+      return 'staging-guest:$subject';
+    } catch (_) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+  }
+}
 
 /// Backend contract: POST /v1/auth/guest -> {accessToken,refreshToken,expiresAt}
 /// POST /v1/auth/refresh {refreshToken} -> same shape.
