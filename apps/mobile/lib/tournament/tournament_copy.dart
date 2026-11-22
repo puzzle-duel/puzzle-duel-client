@@ -369,6 +369,30 @@ final class TournamentCopy {
     };
   }
 
+  /// Home/refresh errors must never imply a move was submitted.
+  String forTournamentRefreshError(String? code) {
+    return switch (code) {
+      'TIMEOUT' => timedOut,
+      'OFFLINE' => offline,
+      'UNAUTHENTICATED' => unauthorized,
+      'WRITER_NOT_AUTHORIZED' => writerBlocked,
+      'RATE_LIMITED' => pick(
+        'Too many tournament requests. Please try again shortly.',
+        'Çok fazla turnuva isteği gönderildi. Biraz sonra yeniden dene.',
+      ),
+      'NOT_FOUND' => pick(
+        'Tournament service is not available. Please try again later.',
+        'Turnuva servisine ulaşılamıyor. Daha sonra yeniden dene.',
+      ),
+      'RECOVERY_NOT_ELIGIBLE' => pick(
+        'This session cannot resume the challenge. Your progress is preserved.',
+        'Bu oturum mücadeleye devam edemiyor. İlerlemen korunuyor.',
+      ),
+      null || '' => genericFailure,
+      _ => genericFailure,
+    };
+  }
+
   String forError(String? code) {
     return switch (code) {
       'TIMEOUT' => timedOut,
