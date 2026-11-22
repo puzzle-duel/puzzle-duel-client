@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
@@ -51,9 +52,16 @@ Future<void> main() async {
     );
     return;
   }
-  // Staging guest mode is explicit. Authentication failures fall back to offline
-  // practice without silently creating a replacement guest identity.
+  // A staging build must NEVER silently switch to offline Practice.
+  // Fail visibly when the HTTPS endpoint is missing or authentication fails.
   const staging = String.fromEnvironment('PZD_STAGING_BASE_URL');
+  const diagnosticEnv = String.fromEnvironment('PZD_DIAGNOSTIC_ENV');
+  const stagingBuild = diagnosticEnv == 'staging' ||
+      bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS');
+  if (staging.isEmpty && stagingBuild) {
+    runApp(const _StagingStartupError('STAGING_BASE_URL_MISSING'));
+    return;
+  }
   if (staging.isNotEmpty) {
     try {
       final auth = GuestAuthClient(
@@ -71,12 +79,47 @@ Future<void> main() async {
         bearer: access.accessToken,
         accessTokenProvider: () async => (await auth.authenticate()).accessToken,
       ));
-      return;
-    } on GuestAuthException {
-      // Offline Practice remains available; no credentials in diagnostics.
+    } on GuestAuthException catch (error) {
+      // A guest identity must never be replaced by an offline session.
+      runApp(_StagingStartupError(error.code));
     } on Exception {
-      // Configuration/storage errors also fail closed to offline Practice.
+      // Never show raw exceptions, URLs, tokens, or response bodies.
+      runApp(const _StagingStartupError('STAGING_CONFIGURATION_UNAVAILABLE'));
     }
+    return;
   }
   runPuzzleDuelApp(GameSession());
+}
+
+/// This is shown ONLY for staging configuration/auth failures.
+@visibleForTesting
+final class StagingStartupErrorScreen extends StatelessWidget {
+  const StagingStartupErrorScreen(this.errorCode, {super.key});
+
+  final String errorCode;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Puzzle Duel Staging',
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Tournament staging unavailable'),
+              const SizedBox(height: 12),
+              Text(errorCode, key: const Key('staging-startup-error')),
+              const SizedBox(height: 12),
+              const Text('Check staging HTTPS configuration and restart the app.'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _StagingStartupError extends StagingStartupErrorScreen {
+  const _StagingStartupError(super.errorCode);
 }
