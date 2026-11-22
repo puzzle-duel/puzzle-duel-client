@@ -388,10 +388,7 @@ final class TournamentController extends ChangeNotifier {
       }
     }
     _openedFreshSession = false;
-    final view = await api.get(
-      '/v1/tournament/series/$id/board',
-      traceId: moveTraceId,
-    );
+    final view = await api.get('/v1/tournament/series/$id/board');
     if (activeEpoch != _tournamentEpoch) return;
     if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
     _applyBoard(view.map, reveal: false);
@@ -529,9 +526,7 @@ final class TournamentController extends ChangeNotifier {
     }
     final originalSeries = seriesId;
     final originalOrdinal = day?.ordinal;
-    final writerReady = await _ensureLiveWriterSession();
-    _movePhase('move_writer_checked', moveTraceId, moveClock);
-    if (!writerReady) return;
+    if (!await _ensureLiveWriterSession()) return;
     if (!tournamentReady || rankedWriterLocked ||
         originalSeries != seriesId || originalOrdinal != day?.ordinal) {
       return;
@@ -603,7 +598,9 @@ final class TournamentController extends ChangeNotifier {
     // Renewal happens BEFORE constructing the command and does not replay it.
     final originalRevision = board['boardRevision'];
     final originalOrdinal = board['ordinal'];
-    if (!await _ensureLiveWriterSession()) return;
+    final writerReady = await _ensureLiveWriterSession();
+    _movePhase('move_writer_checked', moveTraceId, moveClock);
+    if (!writerReady) return;
     if (!tournamentReady || rankedWriterLocked || seriesId != id ||
         board['boardRevision'] != originalRevision ||
         board['ordinal'] != originalOrdinal ||
@@ -1060,7 +1057,10 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     final id = seriesId;
     if (id == null) return false;
-    final view = await api.get('/v1/tournament/series/$id/board');
+    final view = await api.get(
+      '/v1/tournament/series/$id/board',
+      traceId: moveTraceId,
+    );
     if (!_accepted(view, const {200}, degradedOnFailure: localReady)) {
       return false;
     }
