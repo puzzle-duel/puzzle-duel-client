@@ -90,16 +90,23 @@ class UatApi {
   }
 
   Future<UatHttpResult> get(String path, {String? traceId}) =>
-      _send('GET', path, traceId: traceId);
+      _send('GET', path, null, traceId: traceId);
 
-  Future<UatHttpResult> patch(String path) => _send('PATCH', path);
+  Future<UatHttpResult> patch(String path) => _send('PATCH', path, null);
 
-  Future<UatHttpResult> post(String path, [Object? body], {String? traceId}) =>
-      _send('POST', path, body, traceId: traceId);
+  Future<UatHttpResult> post(String path, [Object? body]) =>
+      _send('POST', path, body);
+
+  /// Same HTTP operation, with a safe per-move correlation ID.
+  Future<UatHttpResult> postTraced(
+    String path,
+    Object? body, {
+    required String traceId,
+  }) => _send('POST', path, body, traceId: traceId);
 
   Future<UatHttpResult> _send(
     String method,
-    String path, [
+    String path,
     Object? body, {
     String? traceId,
   }) async {
