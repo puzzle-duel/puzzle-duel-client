@@ -591,15 +591,20 @@ final class TournamentController extends ChangeNotifier {
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
-    final moveTraceId = _newMoveTraceId();
-    final moveClock = Stopwatch()..start();
-    _movePhase('move_tap_accepted', moveTraceId, moveClock);
+    final tracing = DiagnosticRuntime.policy.captureMemory;
+    final moveTraceId = tracing ? _newMoveTraceId() : null;
+    final moveClock = tracing ? (Stopwatch()..start()) : null;
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_tap_accepted', moveTraceId, moveClock);
+    }
     // Do not submit a move with an expired session or stale writer generation.
     // Renewal happens BEFORE constructing the command and does not replay it.
     final originalRevision = board['boardRevision'];
     final originalOrdinal = board['ordinal'];
     final writerReady = await _ensureLiveWriterSession();
-    _movePhase('move_writer_checked', moveTraceId, moveClock);
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_writer_checked', moveTraceId, moveClock);
+    }
     if (!writerReady) return;
     if (!tournamentReady || rankedWriterLocked || seriesId != id ||
         board['boardRevision'] != originalRevision ||
