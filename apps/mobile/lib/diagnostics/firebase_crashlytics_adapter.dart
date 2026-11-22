@@ -10,7 +10,7 @@ import 'puzzle_duel_logger.dart';
 final class FirebaseDiagnostics {
   FirebaseDiagnostics._();
   static bool enabled = false;
-  static const bool stagingDiagnosticsEnabled =
+  static bool get stagingDiagnosticsEnabled =>
       bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS', defaultValue: false) &&
       bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false) &&
       DiagnosticPolicy.fromBuild() == DiagnosticEnvironment.staging;
