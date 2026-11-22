@@ -157,7 +157,7 @@ class UatApi {
         }
       }
       final category = categoryForStatus(response.statusCode);
-      _structuredAuthStatus(response.statusCode, json);
+      _structuredAuthStatus(response.statusCode, json, requestId);
 
       return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
@@ -206,8 +206,9 @@ class UatApi {
     }
   }
 
-  static void _structuredAuthStatus(int status, Object? response) {
+  static void _structuredAuthStatus(int status, Object? response, String requestId) {
     LogCode? code;
+    String? reason;
     if (status == 401) {
       code = LogCode.authExpired;
     } else if (status == 409 && response is Map) {
@@ -216,6 +217,7 @@ class UatApi {
           safeCode == 'WRITER_NOT_AUTHORIZED' ||
           safeCode == 'WRITER_STILL_ACTIVE') {
         code = LogCode.writerBindingRejected;
+        reason = safeCode;
       }
     }
     if (code == null) return;
@@ -223,6 +225,8 @@ class UatApi {
       level: LogLevel.warning,
       code: code,
       operation: 'tournament_session',
+      requestId: requestId,
+      errorCode: reason,
       httpStatus: status,
     )));
   }

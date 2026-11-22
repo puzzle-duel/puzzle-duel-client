@@ -100,7 +100,7 @@ jobs:
             --dart-define=PZD_DIAGNOSTIC_ENV=staging \
             --dart-define=PZD_STAGING_DIAGNOSTICS=true
           # AGP/Flutter can move generated outputs between versions; inspect the generated resources.
-          mapfile -t RESOURCES < <(find build -type f -path '*/generated/res/google-services/*/values/values.xml' -print)
+          mapfile -t RESOURCES < <(find build -type f \( -path '*/generated/res/google-services/*/values/values.xml' -o -path '*/generated/res/process*GoogleServices/values/values.xml' \) -print)
           if [ "${#RESOURCES[@]}" -eq 0 ]; then
             echo "::error::Firebase google-services generated resources not found"
             find build -iname '*google*services*' -print || true
@@ -142,8 +142,8 @@ jobs:
           set -euo pipefail
           flutter pub get --enforce-lockfile
           flutter build apk --release
-          RESOURCE=build/app/generated/res/google-services/release/values/values.xml
-          test ! -e "$RESOURCE"
+          # Reject staging Firebase resources at either legacy or AGP 9 output location.
+          ! find build -type f \( -path '*/generated/res/google-services/*/values/values.xml' -o -path '*/generated/res/process*GoogleServices/values/values.xml' \) -print -quit | grep -q .
 
   ios-staging:
     needs: flutter-quality

@@ -34,6 +34,7 @@ class LogEvent {
     this.httpVerb,
     this.httpStatus,
     this.durationMs,
+    this.errorCode,
   }) : timestamp = (timestamp ?? DateTime.now()).toUtc() {
     if (!_safeIdentifier.hasMatch(operation)) {
       throw ArgumentError.value(operation, 'operation', 'Must be an allowlisted-style identifier');
@@ -46,12 +47,16 @@ class LogEvent {
     if (httpStatus != null && (httpStatus! < 100 || httpStatus! > 599)) {
       throw ArgumentError('Invalid HTTP status');
     }
+    if (errorCode != null && !_safeErrorCode.hasMatch(errorCode!)) {
+      throw ArgumentError('Unsafe protocol error code');
+    }
     if (durationMs != null && durationMs! < 0) {
       throw ArgumentError('Negative duration');
     }
   }
 
   static final _safeIdentifier = RegExp(r'^[a-zA-Z0-9_-]{1,64}$');
+  static final _safeErrorCode = RegExp(r'^[A-Z][A-Z0-9_]{0,63}$');
   final LogLevel level;
   final LogCode code;
   final String operation;
@@ -61,6 +66,7 @@ class LogEvent {
   final HttpVerb? httpVerb;
   final int? httpStatus;
   final int? durationMs;
+  final String? errorCode;
 
   Map<String, Object> toJson() => {
     'timestamp': timestamp.toIso8601String(),
@@ -72,6 +78,7 @@ class LogEvent {
     'httpMethod': ?httpVerb?.name.toUpperCase(),
     'httpStatus': ?httpStatus,
     'durationMs': ?durationMs,
+    'errorCode': ?errorCode,
   };
 }
 
