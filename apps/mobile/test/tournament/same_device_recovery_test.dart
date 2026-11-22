@@ -121,7 +121,24 @@ void main() {
     expect(paths.single, endsWith('/recovery-challenge'));
   });
 
-  test('default platform guard is fail closed outside iOS', () async {
+  test('missing platform signer never sends a registration request', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+    var httpCalls = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      httpCalls++;
+      return const UatHttpResult(200, {});
+    });
+    expect(await recovery.register(
+      api: api,
+      playerId: '11111111-1111-4111-8111-111111111111',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      origin: 'https://staging.puzzle-duel.app',
+    ), false);
+    expect(httpCalls, 0);
+  });
+
+  test('default platform guard is fail closed outside supported mobile OSes', () async {
     final api = ScriptedUatApi((method, path, body) async {
       fail('Must not call HTTP on unsupported platform');
     });
