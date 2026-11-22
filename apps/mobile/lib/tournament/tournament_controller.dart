@@ -770,7 +770,7 @@ final class TournamentController extends ChangeNotifier {
     noticeCode = null;
     notifyListeners();
     try {
-      final response = moveTraceId == null
+      final response = moveTraceId == null || !DiagnosticRuntime.policy.captureMemory
           ? await api.post('/v1/tournament/series/$id/commands', body)
           : await api.postTraced(
               '/v1/tournament/series/$id/commands',
@@ -1057,7 +1057,7 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     final id = seriesId;
     if (id == null) return false;
-    final view = moveTraceId == null
+    final view = moveTraceId == null || !DiagnosticRuntime.policy.captureMemory
         ? await api.get('/v1/tournament/series/$id/board')
         : await api.getTraced(
             '/v1/tournament/series/$id/board',
