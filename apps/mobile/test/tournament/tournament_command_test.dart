@@ -226,6 +226,8 @@ void main() {
     final document = _fixture('V3-02-single-wave.json');
     final directory = Directory.systemTemp.createTempSync('pzd50-resume');
     addTearDown(() => directory.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
     final api = ScriptedUatApi((method, path, body) async {
       if (method == 'POST' && path.endsWith('/session')) {
         return const UatHttpResult(201, {
@@ -263,6 +265,7 @@ void main() {
       ),
       api: api,
       stateDirectory: directory,
+      identity: identity,
       haptics: const SilentTournamentHaptics(),
     );
     addTearDown(controller.dispose);
@@ -276,6 +279,8 @@ void main() {
     final document = _fixture('V3-02-single-wave.json');
     final directory = Directory.systemTemp.createTempSync('pzd50-embedded');
     addTearDown(() => directory.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
     var boardReads = 0;
     final api = ScriptedUatApi((method, path, body) async {
       if (method == 'POST' && path.endsWith('/session')) {
@@ -331,6 +336,7 @@ void main() {
       ),
       api: api,
       stateDirectory: directory,
+      identity: identity,
       haptics: const SilentTournamentHaptics(),
     );
     addTearDown(controller.dispose);
