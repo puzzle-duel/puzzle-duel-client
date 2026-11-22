@@ -39,6 +39,25 @@ void main() {
       operation: 'request', traceId: 'token.with.dots'), throwsArgumentError);
   });
 
+  test('writer rejection emits correlatable and strictly bounded error code', () {
+    final event = LogEvent(
+      level: LogLevel.warning,
+      code: LogCode.writerBindingRejected,
+      operation: 'tournament_session',
+      requestId: '5c24f6868a73df6ed3c5e9513774bef3',
+      httpStatus: 409,
+      errorCode: 'WRITER_NOT_AUTHORIZED',
+    );
+    expect(event.toJson()['errorCode'], 'WRITER_NOT_AUTHORIZED');
+    expect(event.toJson()['requestId'], '5c24f6868a73df6ed3c5e9513774bef3');
+    expect(
+      () => LogEvent(level: LogLevel.warning,
+        code: LogCode.writerBindingRejected, operation: 'tournament_session',
+        errorCode: 'Bearer private-secret'),
+      throwsArgumentError,
+    );
+  });
+
   test('ring buffer caps and expires entries', () {
     var now = DateTime.utc(2026, 11, 21, 12);
     final sink = RingBufferLogSink(maxEvents: 2, clock: () => now);
