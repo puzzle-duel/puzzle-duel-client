@@ -10,6 +10,36 @@ void main() {
     expect(policy.manualReportEnabled, isTrue);
   });
 
+  test('staging endpoint enables reporting without diagnostic define', () {
+    expect(
+      DiagnosticPolicy.resolveEnvironment(
+        stagingBaseUrl: 'https://84-13-66-211.sslip.io',
+        diagnosticEnvironment: 'production',
+      ),
+      DiagnosticEnvironment.staging,
+    );
+  });
+
+  test('production endpoint remains diagnostics-disabled by default', () {
+    expect(
+      DiagnosticPolicy.resolveEnvironment(
+        stagingBaseUrl: '',
+        diagnosticEnvironment: 'production',
+      ),
+      DiagnosticEnvironment.production,
+    );
+  });
+
+  test('explicit staging diagnostic mode is supported', () {
+    expect(
+      DiagnosticPolicy.resolveEnvironment(
+        stagingBaseUrl: '',
+        diagnosticEnvironment: 'staging',
+      ),
+      DiagnosticEnvironment.staging,
+    );
+  });
+
   test('production is privacy-first by default', () {
     final policy = DiagnosticPolicy.forEnvironment(DiagnosticEnvironment.production);
     expect(policy.minimumLevel, LogLevel.warning);
