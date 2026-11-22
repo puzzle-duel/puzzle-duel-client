@@ -11,14 +11,14 @@ final class RecoveryAttempt {
   final String? errorCode;
 }
 
-/// UAT-only same-device recovery. Keys never leave iOS Secure Enclave.
+/// UAT-only same-device recovery. Private keys stay in the platform keystore.
 /// Backend decides writer entitlement; this class never mutates local scores.
 final class SameDeviceRecovery {
   const SameDeviceRecovery({this.isSupportedDevice});
 
-  /// Test seam only. Production uses Platform.isIOS.
+  /// Test seam only. Production supports iOS and Android device signing.
   final bool Function()? isSupportedDevice;
-  bool get _isSupported => isSupportedDevice?.call() ?? Platform.isIOS;
+  bool get _isSupported => isSupportedDevice?.call() ?? (Platform.isIOS || Platform.isAndroid);
 
   static const MethodChannel _signer = MethodChannel('pzd/device_signing');
 
