@@ -24,6 +24,31 @@ final class FakeGuestStore implements GuestCredentialStore {
 }
 
 void main() {
+  test('pending intent survives app restart and UTC 03:00 Türkiye cutover', () async {
+    final store = FakeGuestStore();
+    const fixedId = '0123456789abcdef0123456789abcdef';
+    var generated = 0;
+    String issueId() {
+      generated++;
+      return fixedId;
+    }
+    final beforeMidnight = await acquireVerifiedGuestRotationId(store, issueId);
+    // Simulates app process termination and new GuestAuthClient instance at
+    // 00:02 UTC. No device secret is regenerated or lost across this boundary.
+    final afterMidnight = await acquireVerifiedGuestRotationId(store, issueId);
+    expect(afterMidnight, beforeMidnight);
+    expect(generated, 1);
+    expect(store.rotationId, fixedId);
+  });
+  test('corrupt pending intent fails closed instead of overwriting it', () async {
+    final store = FakeGuestStore()..rotationId = 'bad';
+    await expectLater(
+      acquireVerifiedGuestRotationId(store, () => '0123456789abcdef0123456789abcdef'),
+      throwsA(isA<GuestAuthException>()),
+    );
+    expect(store.rotationId, 'bad');
+  });
+
   test('credential write must read back exactly before success', () async {
     final store = FakeGuestStore()..token = 'prior-secret';
     await persistVerifiedGuestCredential(store, 'next-secret');
