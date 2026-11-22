@@ -138,7 +138,7 @@ final class GuestAuthClient {
       }
       final result = await _post('/v1/auth/refresh', {
         'refreshToken': previous,
-        if (rotationId != null) 'rotationId': rotationId,
+        'rotationId': ?rotationId,
       });
       if (result.status == 200) {
         _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
