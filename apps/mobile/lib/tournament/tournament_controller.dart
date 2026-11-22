@@ -1057,10 +1057,12 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     final id = seriesId;
     if (id == null) return false;
-    final view = await api.get(
-      '/v1/tournament/series/$id/board',
-      traceId: moveTraceId,
-    );
+    final view = moveTraceId == null
+        ? await api.get('/v1/tournament/series/$id/board')
+        : await api.getTraced(
+            '/v1/tournament/series/$id/board',
+            traceId: moveTraceId,
+          );
     if (!_accepted(view, const {200}, degradedOnFailure: localReady)) {
       return false;
     }
