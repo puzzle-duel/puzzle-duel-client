@@ -32,13 +32,27 @@ class DiagnosticPolicy {
     }
   }
 
+  /// A build targeting the staging API must always offer safe diagnostic
+  /// reporting. Keeping this independent of PZD_DIAGNOSTIC_ENV prevents local
+  /// debug/release builds from silently hiding the Log Gönder action.
+  static DiagnosticEnvironment resolveEnvironment({
+    required String stagingBaseUrl,
+    required String diagnosticEnvironment,
+  }) {
+    if (stagingBaseUrl.trim().isNotEmpty ||
+        diagnosticEnvironment == 'staging') {
+      return DiagnosticEnvironment.staging;
+    }
+    return DiagnosticEnvironment.production;
+  }
+
   static DiagnosticEnvironment fromBuild() {
-    const value = String.fromEnvironment(
-      'PZD_DIAGNOSTIC_ENV',
-      defaultValue: 'production',
+    return resolveEnvironment(
+      stagingBaseUrl: const String.fromEnvironment('PZD_STAGING_BASE_URL'),
+      diagnosticEnvironment: const String.fromEnvironment(
+        'PZD_DIAGNOSTIC_ENV',
+        defaultValue: 'production',
+      ),
     );
-    return value == 'staging'
-        ? DiagnosticEnvironment.staging
-        : DiagnosticEnvironment.production;
   }
 }
