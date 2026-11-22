@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -221,4 +222,132 @@ void main() {
     expect(controller.session.applyMoveCallCount, 0);
     expect(controller.scoreDelta, isNull);
   });
+  test('resuming an await-advance board enters the transition screen', () async {
+    final document = _fixture('V3-02-single-wave.json');
+    final directory = Directory.systemTemp.createTempSync('pzd50-resume');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    final api = ScriptedUatApi((method, path, body) async {
+      if (method == 'POST' && path.endsWith('/session')) {
+        return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
+          'sessionSecret': 'secret',
+        });
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(200, {
+          'seriesId': '11111111-1111-4111-8111-111111111111',
+          'status': 'ACTIVE',
+          'original': true,
+        });
+      }
+      if (path.endsWith('/board')) {
+        return UatHttpResult(200, {
+          'ordinal': 1, 'ordinalLabel': 'E1',
+          'seriesScore': 100, 'score': 100,
+          'awaitAdvance': true,
+          'resultsPublished': false,
+          'boardRevision': 2,
+          'writerGeneration': 1,
+          'idleDeadlineAtMs': 5000,
+          'serverNowMs': 1000,
+          'state': (document['expected'] as Map)['finalState'],
+        });
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer test',
+        playerLabel: 'resume',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    expect(controller.route.place, TournamentPlace.home);
+    await controller.resume();
+    expect(controller.route.place, TournamentPlace.transition);
+  });
+
+  test('accepted move uses matching authoritativeBoard without second GET', () async {
+    final document = _fixture('V3-02-single-wave.json');
+    final directory = Directory.systemTemp.createTempSync('pzd50-embedded');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    var boardReads = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (method == 'POST' && path.endsWith('/session')) {
+        return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
+          'sessionSecret': 'secret',
+        });
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(201, {
+          'seriesId': '11111111-1111-4111-8111-111111111111',
+          'status': 'ACTIVE', 'original': true,
+        });
+      }
+      if (path.endsWith('/board')) {
+        boardReads++;
+        return UatHttpResult(200, {
+          'seriesId': '11111111-1111-4111-8111-111111111111',
+          'ordinal': 1, 'ordinalLabel': 'E1',
+          'seriesScore': 0, 'score': 0,
+          'awaitAdvance': false,
+          'resultsPublished': false,
+          'boardRevision': 1,
+          'stateHash': 'before',
+          'writerGeneration': 1,
+          'idleDeadlineAtMs': 5000, 'serverNowMs': 1000,
+          'state': document['initialState'],
+        });
+      }
+      if (path.endsWith('/commands')) {
+        return UatHttpResult(200, {
+          'decision': 'apply', 'boardRevision': 2, 'stateHash': 'after',
+          'score': 300, 'scoreDelta': 300,
+          'authoritativeBoard': {
+            'seriesId': '11111111-1111-4111-8111-111111111111',
+            'ordinal': 1, 'ordinalLabel': 'E1',
+            'seriesScore': 300, 'score': 300,
+            'awaitAdvance': false, 'resultsPublished': false,
+            'boardRevision': 2, 'stateHash': 'after',
+            'writerGeneration': 1,
+            'idleDeadlineAtMs': 5000, 'serverNowMs': 1000,
+            'state': (document['expected'] as Map)['finalState'],
+          },
+        });
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer test',
+        playerLabel: 'embedded',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    await controller.resume();
+    expect(boardReads, 2);
+    controller.session.selectOffer(0);
+    expect(controller.session.submitTap(Coordinate(row: 0, column: 2)), isTrue);
+    await pumpEventQueue();
+    expect(boardReads, 2);
+    expect(controller.session.applyMoveCallCount, 1);
+  });
+
 }

@@ -25,6 +25,19 @@ class UatApi {
   /// Optional staging token provider; UAT fixed-bearer mode remains unchanged.
   final Future<String> Function()? accessTokenProvider;
   final HttpClient Function() _httpClientFactory;
+  HttpClient? _reusableClient;
+
+  /// Keep HTTPS/TLS connections alive across requests. Creating and
+  /// force-closing HttpClient on EVERY move added repeated connect/handshake
+  /// latency. HttpClient itself manages an idle connection pool.
+  HttpClient get _connectionClient => _reusableClient ??=
+      (_httpClientFactory()..connectionTimeout = _connectTimeout);
+
+  /// Optional explicit app teardown; a later request may reopen the pool.
+  void close() {
+    _reusableClient?.close(force: true);
+    _reusableClient = null;
+  }
 
   /// Ensures `Authorization` is `Bearer <token>` without double-prefixing.
   static String normalizeBearer(String raw) {
@@ -120,8 +133,7 @@ class UatApi {
       operation: 'tournament_http', requestId: requestId,
       traceId: traceId,
     )));
-    final client = _httpClientFactory();
-    client.connectionTimeout = _connectTimeout;
+    final client = _connectionClient;
     var diagnosticStatus = 0;
     try {
       final uri = Uri.parse('$baseUrl$path');
@@ -216,7 +228,8 @@ class UatApi {
       _structuredHttp(method: method, status: diagnosticStatus,
           requestId: requestId, traceId: traceId,
           durationMs: started.elapsedMilliseconds);
-      client.close(force: true);
+      // Preserve pooled keep-alive sockets for the next ranked request.
+      // Do not force-close an entire pool after a successful HTTP response.
     }
   }
 
