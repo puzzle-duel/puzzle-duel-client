@@ -5,15 +5,14 @@ import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/game/game_screen.dart';
-import 'package:puzzle_duel_mobile/presentation/home/home_screen.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 
-/// Entry used by [main] and widget tests.
+/// Legacy isolated gameplay harness for widget tests only; never used by main.dart.
 void runPuzzleDuelApp(GameSession session, {GameSfx? sfx}) {
   runApp(PuzzleDuelApp(session: session, sfx: sfx));
 }
 
-/// Root application shell. Offline-capable; no backend URL required.
+/// Non-release gameplay test harness. The legacy difficulty selection UI is removed.
 final class PuzzleDuelApp extends StatefulWidget {
   const PuzzleDuelApp({super.key, required this.session, this.sfx});
 
@@ -73,7 +72,14 @@ final class _PuzzleDuelAppState extends State<PuzzleDuelApp> {
           builder: (context, _) {
             final phase = widget.session.view.phase;
             if (phase == GameScreenPhase.menu) {
-              return HomeScreen(session: widget.session);
+              return const Scaffold(
+                body: Center(
+                  child: Text(
+                    'Tournament staging is required',
+                    key: Key('tournament-only-gate'),
+                  ),
+                ),
+              );
             }
             return GameScreen(session: widget.session);
           },
