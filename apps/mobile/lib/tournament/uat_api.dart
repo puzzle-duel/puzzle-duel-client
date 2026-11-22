@@ -89,23 +89,26 @@ class UatApi {
     });
   }
 
-  Future<UatHttpResult> get(String path) => _send('GET', path);
+  Future<UatHttpResult> get(String path, {String? traceId}) =>
+      _send('GET', path, traceId: traceId);
 
   Future<UatHttpResult> patch(String path) => _send('PATCH', path);
 
-  Future<UatHttpResult> post(String path, [Object? body]) =>
-      _send('POST', path, body);
+  Future<UatHttpResult> post(String path, [Object? body], {String? traceId}) =>
+      _send('POST', path, body, traceId: traceId);
 
   Future<UatHttpResult> _send(
     String method,
     String path, [
-    Object? body,
-  ]) async {
+    Object? body, {
+    String? traceId,
+  }]) async {
     final started = Stopwatch()..start();
     final requestId = _newDiagnosticId();
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info, code: LogCode.httpStarted,
       operation: 'tournament_http', requestId: requestId,
+      traceId: traceId,
     )));
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
@@ -201,7 +204,8 @@ class UatApi {
     } finally {
       started.stop();
       _structuredHttp(method: method, status: diagnosticStatus,
-          requestId: requestId, durationMs: started.elapsedMilliseconds);
+          requestId: requestId, traceId: traceId,
+          durationMs: started.elapsedMilliseconds);
       client.close(force: true);
     }
   }
@@ -242,6 +246,7 @@ class UatApi {
     required String method,
     required int status,
     required String requestId,
+    String? traceId,
     required int durationMs,
   }) {
     // Crashlytics keeps both successful and failed requests as breadcrumbs.
@@ -257,6 +262,7 @@ class UatApi {
       code: status >= 200 && status < 400 ? LogCode.httpCompleted : LogCode.httpFailed,
       operation: 'tournament_http',
       requestId: requestId,
+      traceId: traceId,
       httpVerb: verb,
       httpStatus: status == 0 ? null : status,
       durationMs: durationMs,
