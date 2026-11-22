@@ -38,6 +38,10 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter analyze
           flutter test
+      - name: Compile Android native device-signing bridge (no distribution)
+        working-directory: apps/mobile
+        run: |
+          flutter build apk --debug --no-pub
 
   distribute:
     needs: verify
