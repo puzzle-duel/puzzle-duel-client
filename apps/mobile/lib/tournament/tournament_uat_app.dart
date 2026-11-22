@@ -452,11 +452,11 @@ final class _HomeScreen extends StatelessWidget {
     VoidCallback? onPrimary;
     if (syncing) {
       onPrimary = null;
-    } else if (!controller.tournamentReady) {
-      onPrimary = null;
-    } else if (phase == DayPhase.completed) {
+    } else if (phase == DayPhase.completed && controller.tournamentReady) {
       onPrimary = controller.openResults;
     } else {
+      // A degraded Home snapshot must offer a safe refresh/retry rather than
+      // showing a dead "Continue tournament" button.
       onPrimary = controller.resume;
     }
     return Scaffold(
