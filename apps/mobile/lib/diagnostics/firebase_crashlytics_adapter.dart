@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'crash_reporter.dart';
+import 'diagnostic_policy.dart';
 import 'puzzle_duel_logger.dart';
 
 /// Explicitly opt in only after platform Firebase files are provisioned.
@@ -12,7 +13,7 @@ final class FirebaseDiagnostics {
   static const bool stagingDiagnosticsEnabled =
       bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS', defaultValue: false) &&
       bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false) &&
-      String.fromEnvironment('PZD_DIAGNOSTIC_ENV') == 'staging';
+      DiagnosticPolicy.fromBuild() == DiagnosticEnvironment.staging;
 
   static Future<void> sendTestNonFatal() async {
     if (!stagingDiagnosticsEnabled || !enabled) return;
@@ -33,7 +34,7 @@ final class FirebaseDiagnostics {
     const configured = bool.fromEnvironment('PZD_FIREBASE_CONFIGURED', defaultValue: false);
     if (!configured) return const NoopCrashReporter();
     try {
-      if (const String.fromEnvironment('PZD_DIAGNOSTIC_ENV') != 'staging') {
+      if (DiagnosticPolicy.fromBuild() != DiagnosticEnvironment.staging) {
         return const NoopCrashReporter();
       }
       final options = Platform.isIOS
