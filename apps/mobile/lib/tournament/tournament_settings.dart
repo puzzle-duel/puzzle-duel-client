@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
@@ -79,6 +80,48 @@ final class TournamentSettingsScreen extends StatelessWidget {
                           messenger.showSnackBar(const SnackBar(
                             content: Text('Log gönderilemedi.'),
                           ));
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      key: const Key('settings-staging-crash-test'),
+                      leading: const Icon(Icons.warning_amber_rounded),
+                      title: const Text('Crash Test (STAGING)'),
+                      subtitle: Text(FirebaseDiagnostics.enabled &&
+                              FirebaseDiagnostics.stagingDiagnosticsEnabled
+                          ? 'Onaydan sonra test crash oluşturur'
+                          : 'Firebase Crashlytics staging yapılandırması gerekli'),
+                      onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (!FirebaseDiagnostics.enabled ||
+                            !FirebaseDiagnostics.stagingDiagnosticsEnabled) {
+                          messenger.showSnackBar(const SnackBar(
+                            content: Text(
+                                'Crash testi kullanılamıyor: staging Firebase yapılandırmasını kontrol edin.'),
+                          ));
+                          return;
+                        }
+                        final approved = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) => AlertDialog(
+                            title: const Text('Staging Crash Test'),
+                            content: const Text(
+                                'Bu işlem uygulamayı bilerek kapatır. Devam edilsin mi?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(dialogContext, false),
+                                child: const Text('İptal'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(dialogContext, true),
+                                child: const Text('Test crash oluştur'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (approved == true) {
+                          await FirebaseDiagnostics.forceTestCrash();
                         }
                       },
                     ),
