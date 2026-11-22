@@ -7,6 +7,7 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
       : _storage = storage ?? const FlutterSecureStorage();
 
   static const _key = 'pzd.staging.guest.refresh.v1';
+  static const _rotationKey = 'pzd.staging.guest.rotation.v1';
   final FlutterSecureStorage _storage;
 
   @override
@@ -18,4 +19,14 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
 
   @override
   Future<void> clearRefreshToken() => _storage.delete(key: _key);
+
+  @override
+  Future<String?> readPendingRotationId() => _storage.read(key: _rotationKey);
+
+  @override
+  Future<void> writePendingRotationId(String id) =>
+      _storage.write(key: _rotationKey, value: id);
+
+  @override
+  Future<void> clearPendingRotationId() => _storage.delete(key: _rotationKey);
 }
