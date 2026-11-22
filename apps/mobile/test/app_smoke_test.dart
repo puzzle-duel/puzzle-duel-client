@@ -30,21 +30,23 @@ Future<void> pumpGame(WidgetTester tester, GameSession session) async {
 }
 
 void main() {
-  testWidgets('home renders without backend or sign-in', (tester) async {
+  testWidgets('legacy difficulty menu is permanently unavailable', (tester) async {
     final session = GameSession();
     await pumpGame(tester, session);
-    expect(find.text('PUZZLE DUEL'), findsOneWidget);
-    expect(find.textContaining('Offline practice'), findsOneWidget);
-    expect(find.text('Easy'), findsOneWidget);
-    expect(find.text('Medium'), findsOneWidget);
-    expect(find.text('Hard'), findsOneWidget);
+    expect(find.byKey(const Key('tournament-only-gate')), findsOneWidget);
+    expect(find.textContaining('Offline practice'), findsNothing);
+    expect(find.text('Easy'), findsNothing);
+    expect(find.text('Medium'), findsNothing);
+    expect(find.text('Hard'), findsNothing);
   });
 
-  testWidgets('starts Easy round and shows board tray score', (tester) async {
+  testWidgets('explicit gameplay test setup still renders board tray score', (tester) async {
     final session = GameSession();
+    session.startRound(
+      profile: DifficultyProfile.easy,
+      seed: kUatChallengeSeed,
+    );
     await pumpGame(tester, session);
-    await tester.tap(find.text('Play').first);
-    await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(session.view.phase, GameScreenPhase.playing);
     expect(find.text('SCORE'), findsOneWidget);
