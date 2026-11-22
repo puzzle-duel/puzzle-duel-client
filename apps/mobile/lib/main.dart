@@ -17,7 +17,14 @@ Future<void> main() async {
   // Render a native Flutter frame immediately, before Firebase/network auth.
   // A cold launch must never sit on a black screen while HTTPS times out.
   runApp(const StagingStartupLoadingScreen());
-  final crashReporter = await FirebaseDiagnostics.initialize();
+  final CrashReporter crashReporter;
+  try {
+    crashReporter = await FirebaseDiagnostics.initialize();
+  } on Exception {
+    // Never strand the device on a loading screen if native Firebase fails.
+    runApp(const StagingStartupErrorScreen('FIREBASE_STARTUP_UNAVAILABLE'));
+    return;
+  }
   final crashHandler = DiagnosticCrashHandler(
     logger: DiagnosticRuntime.logger,
     reporter: crashReporter,
