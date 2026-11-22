@@ -59,7 +59,7 @@ Future<void> main() async {
   const stagingBuild = diagnosticEnv == 'staging' ||
       bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS');
   if (staging.isEmpty && stagingBuild) {
-    runApp(const _StagingStartupError('STAGING_BASE_URL_MISSING'));
+    runApp(const StagingStartupErrorScreen('STAGING_BASE_URL_MISSING'));
     return;
   }
   if (staging.isNotEmpty) {
@@ -81,10 +81,10 @@ Future<void> main() async {
       ));
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
-      runApp(_StagingStartupError(error.code));
+      runApp(StagingStartupErrorScreen(error.code));
     } on Exception {
       // Never show raw exceptions, URLs, tokens, or response bodies.
-      runApp(const _StagingStartupError('STAGING_CONFIGURATION_UNAVAILABLE'));
+      runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
     }
     return;
   }
@@ -120,6 +120,3 @@ final class StagingStartupErrorScreen extends StatelessWidget {
   }
 }
 
-final class _StagingStartupError extends StagingStartupErrorScreen {
-  const _StagingStartupError(super.errorCode);
-}
