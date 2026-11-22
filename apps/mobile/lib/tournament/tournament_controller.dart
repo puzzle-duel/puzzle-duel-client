@@ -443,9 +443,18 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> resume() {
-    if (!tournamentReady || rankedWriterLocked) return Future<void>.value();
+    if (!tournamentReady || rankedWriterLocked) {
+      // Do not silently ignore a visible "Continue tournament" action.
+      tournamentNoticeCode = rankedWriterLocked
+          ? (tournamentNoticeCode ?? 'WRITER_NOT_AUTHORIZED')
+          : (tournamentNoticeCode ?? 'TOURNAMENT_UNAVAILABLE');
+      notifyListeners();
+      return Future<void>.value();
+    }
     _cancelPendingResolutionNav();
-    return _reload(reveal: true, followGameplay: false);
+    // A resumed series may be at the inter-game transition; follow the
+    // authoritative phase instead of leaving the player stranded on Home.
+    return _reload(reveal: true, followGameplay: true);
   }
 
   Future<void> openResults() async {
@@ -803,11 +812,39 @@ final class TournamentController extends ChangeNotifier {
             preState != null &&
             offerIndex != null &&
             tap != null) {
-          final ok = await _reload(
-            reveal: false,
-            followGameplay: false,
-            moveTraceId: moveTraceId,
-          );
+          // The server can attach a post-admission authoritative snapshot
+          // to the command response. Trust it ONLY when its series, revision,
+          // hash and game-state shape match the committed decision. Otherwise
+          // keep the unchanged GET /board recovery path (no speculative play).
+          final attached = response.map['authoritativeBoard'];
+          Map<String, Object?>? attachedBoard;
+          if (attached is Map) {
+            try {
+              final candidate = Map<String, Object?>.from(attached);
+              if (candidate['seriesId'] == id &&
+                  candidate['boardRevision'] == response.map['boardRevision'] &&
+                  candidate['stateHash'] == response.map['stateHash'] &&
+                  candidate['state'] is Map &&
+                  candidate['writerGeneration'] != null) {
+                parseGameState(candidate['state'] as Map);
+                attachedBoard = candidate;
+              }
+            } catch (_) {
+              // Malformed/mismatched attached board must never be rendered.
+            }
+          }
+          final bool ok;
+          if (attachedBoard != null) {
+            _applyBoard(attachedBoard, reveal: false);
+            _movePhase('move_board_embedded', moveTraceId ?? '', moveClock ?? Stopwatch());
+            ok = true;
+          } else {
+            ok = await _reload(
+              reveal: false,
+              followGameplay: false,
+              moveTraceId: moveTraceId,
+            );
+          }
           if (moveTraceId != null && moveClock != null) {
             _movePhase('move_board_reloaded', moveTraceId, moveClock);
           }
