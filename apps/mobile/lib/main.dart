@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
