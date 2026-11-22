@@ -89,7 +89,10 @@ class UatApi {
     });
   }
 
-  Future<UatHttpResult> get(String path, {String? traceId}) =>
+  Future<UatHttpResult> get(String path) => _send('GET', path, null);
+
+  /// Traced variant without changing the existing mockable GET contract.
+  Future<UatHttpResult> getTraced(String path, {required String traceId}) =>
       _send('GET', path, null, traceId: traceId);
 
   Future<UatHttpResult> patch(String path) => _send('PATCH', path, null);
