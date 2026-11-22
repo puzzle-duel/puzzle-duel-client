@@ -442,19 +442,27 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resume() {
+  Future<void> resume() async {
+    // The Home action must never appear tappable but do nothing. A degraded
+    // session may be refreshed safely before deciding whether resume is legal.
+    if (!tournamentReady && !rankedWriterLocked) {
+      await refreshTournament(
+        origin: TournamentRefreshOrigin.pullToRefresh,
+        preserveRoute: true,
+      );
+    }
     if (!tournamentReady || rankedWriterLocked) {
-      // Do not silently ignore a visible "Continue tournament" action.
+      // Never bypass the server-owned writer fence or attempt an unsafe move.
       tournamentNoticeCode = rankedWriterLocked
           ? (tournamentNoticeCode ?? 'WRITER_NOT_AUTHORIZED')
           : (tournamentNoticeCode ?? 'TOURNAMENT_UNAVAILABLE');
       notifyListeners();
-      return Future<void>.value();
+      return;
     }
     _cancelPendingResolutionNav();
-    // A resumed series may be at the inter-game transition; follow the
-    // authoritative phase instead of leaving the player stranded on Home.
-    return _reload(reveal: true, followGameplay: true);
+    // An in-progress series may be at the between-game transition: follow
+    // the authoritative board phase instead of leaving the player on Home.
+    await _reload(reveal: true, followGameplay: true);
   }
 
   Future<void> openResults() async {
