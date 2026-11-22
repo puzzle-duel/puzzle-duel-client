@@ -14,6 +14,9 @@ import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Render a native Flutter frame immediately, before Firebase/network auth.
+  // A cold launch must never sit on a black screen while HTTPS times out.
+  runApp(const StagingStartupLoadingScreen());
   final crashReporter = await FirebaseDiagnostics.initialize();
   final crashHandler = DiagnosticCrashHandler(
     logger: DiagnosticRuntime.logger,
@@ -69,6 +72,32 @@ Future<void> main() async {
     return;
   }
   runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
+}
+
+
+@visibleForTesting
+final class StagingStartupLoadingScreen extends StatelessWidget {
+  const StagingStartupLoadingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Puzzle Duel',
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('Connecting to tournament…'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// This is shown ONLY for staging configuration/auth failures.
