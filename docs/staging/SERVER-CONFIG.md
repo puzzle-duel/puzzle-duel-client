@@ -58,23 +58,36 @@ flutter pub get --enforce-lockfile
 
 Last confirmed release commit **at initial branch verification**: `58f1d3e`; check current `origin/version/0.0.2` because commits may advance.
 
-**Only when an externally reachable, trusted HTTPS `PZD_STAGING_BASE_URL` is verified**, set the real origin in the Mac shell. Example (uses an already-configured variable; does not invent a value):
+## Standalone on-device iOS release: no terminal dependency
+
+**Do NOT use `flutter run --debug` or terminate an attached debug session and assume its installed app is a standalone release.** The standard local UAT workflow is to compile an iOS **release** app on the Mac, install the already-built app on the physical device, then open it **from the iPhone home screen** with the terminal detached.
+
+Use this only after a trusted public HTTPS staging origin is configured. The Oracle IP is `84.13.66.211`, but no verified public TLS origin exists at the last check. Do not substitute a broken hostname or `http://84.13.66.211:8787` (loopback-only backend, guest auth is HTTPS-only).
 
 ```sh
-: "${PZD_STAGING_BASE_URL:?Verified HTTPS staging origin is required}"
-curl -fsS --connect-timeout 5 --max-time 15 "${PZD_STAGING_BASE_URL%/}/healthz"
-PZD_STAGING_FIREBASE=1 flutter run \
-  -d 00008160-001C5C993E80000A \
-  --device-timeout 60 \
-  --release \
+cd ~/Desktop/workspace/puzzle-duel-client/apps/mobile
+
+# A real verified HTTPS origin must be supplied by the operator.
+: "${PZD_STAGING_BASE_URL:?Verified public HTTPS staging origin required}"
+case "$PZD_STAGING_BASE_URL" in https://*) ;; *) echo 'HTTPS staging origin required'; exit 1;; esac
+curl -fsS --connect-timeout 5 --max-time 15 "${PZD_STAGING_BASE_URL%/}/healthz" || exit 1
+
+flutter pub get --enforce-lockfile
+
+# Compile and sign LOCALLY on the Mac (do not use --no-codesign).
+PZD_STAGING_FIREBASE=1 flutter build ios --release \
   --dart-define=PZD_STAGING_BASE_URL="$PZD_STAGING_BASE_URL" \
   --dart-define=PZD_FIREBASE_CONFIGURED=true \
   --dart-define=PZD_DIAGNOSTIC_ENV=staging \
-  --dart-define=PZD_STAGING_DIAGNOSTICS=true \
-  2>&1 | tee /tmp/pzd-version-0.0.2-ios.log
+  --dart-define=PZD_STAGING_DIAGNOSTICS=true
+
+# Install the prebuilt release app; do NOT use flutter run for persistent device UAT.
+flutter install --release -d 00008160-001C5C993E80000A
 ```
 
-This compiles and installs on the **local Mac and physical iPhone**. It does not invoke remote iOS build or Android distribution.
+After installing, launch **Puzzle Duel from the iPhone icon**, force-quit the app, disconnect the cable / close the Mac terminal, and relaunch from the icon. Check that the **TournamentUatApp** opens (or displays a specific staging auth/connectivity error), **never** a black Flutter debug explanation, old Easy/Medium/Hard page, or indefinite blank screen. Reinstall the release over a previous debug install; do not uninstall the app casually, because guest credentials and local state might be lost.
+
+The 2026-11-22 iOS startup fix now renders a visible **Connecting to tournament…** frame before Firebase initialization and HTTPS guest authentication, and shows a specific failure screen if initialization throws. It does not make an unconfigured HTTPS endpoint work. A physical-device cold-launch/kill/relaunch regression test is still required before marking this issue fully closed.
 
 ## Oracle diagnostics are NOT Mac commands
 
