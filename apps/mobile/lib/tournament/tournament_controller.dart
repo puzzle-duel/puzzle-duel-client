@@ -836,7 +836,9 @@ final class TournamentController extends ChangeNotifier {
           final bool ok;
           if (attachedBoard != null) {
             _applyBoard(attachedBoard, reveal: false);
-            _movePhase('move_board_embedded', moveTraceId ?? '', moveClock ?? Stopwatch());
+            if (moveTraceId != null && moveClock != null) {
+              _movePhase('move_board_embedded', moveTraceId, moveClock);
+            }
             ok = true;
           } else {
             ok = await _reload(
