@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - "version/**"
     paths:
       - "apps/mobile/**"
       - "packages/puzzle_duel_rules/**"
