@@ -7,8 +7,6 @@ import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/app/portrait_lock.dart';
-import 'package:puzzle_duel_mobile/app/puzzle_duel_app.dart';
-import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
@@ -37,27 +35,10 @@ Future<void> main() async {
     operation: 'app_bootstrap',
   )));
   await lockPortraitOrientation();
-  const base = String.fromEnvironment('PZD_UAT_BASE_URL');
-  const bearer = String.fromEnvironment('PZD_UAT_BEARER');
-  const player = String.fromEnvironment('PZD_UAT_PLAYER');
-  if (base.isNotEmpty && bearer.isNotEmpty) {
-    await runTournamentUatApp(
-      UatConfig(
-        baseUrl: base,
-        bearer: bearer,
-        // Display-only label. Never used as practice persistence identity.
-        playerLabel: player.isEmpty ? 'UAT player' : player,
-      ),
-    );
-    return;
-  }
-  // A staging build must NEVER silently switch to offline Practice.
-  // Fail visibly when the HTTPS endpoint is missing or authentication fails.
+  // Staging release entrypoint: the tournament shell is the only application.
+  // Never route to the legacy offline difficulty menu, even with missing flags.
   const staging = String.fromEnvironment('PZD_STAGING_BASE_URL');
-  const diagnosticEnv = String.fromEnvironment('PZD_DIAGNOSTIC_ENV');
-  const stagingBuild = diagnosticEnv == 'staging' ||
-      bool.fromEnvironment('PZD_STAGING_DIAGNOSTICS');
-  if (staging.isEmpty && stagingBuild) {
+  if (staging.isEmpty) {
     runApp(const StagingStartupErrorScreen('STAGING_BASE_URL_MISSING'));
     return;
   }
@@ -87,7 +68,7 @@ Future<void> main() async {
     }
     return;
   }
-  runPuzzleDuelApp(GameSession());
+  runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
 }
 
 /// This is shown ONLY for staging configuration/auth failures.
