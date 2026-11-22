@@ -13,6 +13,9 @@ abstract interface class GuestCredentialStore {
   Future<String?> readRefreshToken();
   Future<void> writeRefreshToken(String token);
   Future<void> clearRefreshToken();
+  Future<String?> readPendingRotationId();
+  Future<void> writePendingRotationId(String id);
+  Future<void> clearPendingRotationId();
 }
 
 final class GuestAccess {
@@ -44,6 +47,35 @@ final class GuestAccess {
   }
 }
 
+/// Write and independently read back before reporting durable token rotation.
+Future<void> persistVerifiedGuestCredential(GuestCredentialStore store, String token) async {
+  await store.writeRefreshToken(token);
+  final confirmed = await store.readRefreshToken();
+  if (confirmed != token) throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+}
+
+/// Durable intent must exist before the network request. Its identity survives
+/// app termination, HTTP timeouts and the UTC daily tournament cutover.
+Future<String> acquireVerifiedGuestRotationId(
+  GuestCredentialStore store, String Function() newId,
+) async {
+  var id = await store.readPendingRotationId();
+  if (id == null || id.isEmpty) {
+    id = newId();
+    if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(id)) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+    await store.writePendingRotationId(id);
+    if (await store.readPendingRotationId() != id) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+  }
+  if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(id)) {
+    throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+  }
+  return id;
+}
+
 /// Backend contract: POST /v1/auth/guest -> {accessToken,refreshToken,expiresAt}
 /// POST /v1/auth/refresh {refreshToken} -> same shape.
 /// Server must atomically rotate refresh tokens and reject replay.
@@ -53,8 +85,11 @@ final class GuestAuthClient {
     required this.credentials,
     HttpClient Function()? httpClientFactory,
     PuzzleDuelLogger? logger,
+    bool? rotationRetryEnabled,
   }) : _factory = httpClientFactory ?? HttpClient.new,
-       _logger = logger ?? DiagnosticRuntime.logger {
+       _logger = logger ?? DiagnosticRuntime.logger,
+       _rotationRetryEnabled = rotationRetryEnabled ??
+           const bool.fromEnvironment('PZD_GUEST_RETRY_ENABLED', defaultValue: false) {
     final uri = Uri.parse(origin);
     if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty ||
         uri.hasQuery || uri.hasFragment || (uri.path.isNotEmpty && uri.path != '/')) {
@@ -66,6 +101,7 @@ final class GuestAuthClient {
   final GuestCredentialStore credentials;
   final HttpClient Function() _factory;
   final PuzzleDuelLogger _logger;
+  final bool _rotationRetryEnabled;
 
   // Fixed protocol vocabulary only. No token, identity, raw URL or body data.
   void _breadcrumb(LogCode code, String operation, {
@@ -107,10 +143,24 @@ final class GuestAuthClient {
         ? 'guest_refresh_absent' : 'guest_refresh_present');
     if (previous != null && previous.isNotEmpty) {
       // Never silently create a new player on transient refresh failures.
-      final result = await _post('/v1/auth/refresh', {'refreshToken': previous});
+      String? rotationId;
+      if (_rotationRetryEnabled) {
+        rotationId = await acquireVerifiedGuestRotationId(
+            credentials, _newRequestId);
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
+      }
+      final result = await _post('/v1/auth/refresh', {
+        'refreshToken': previous,
+        'rotationId': ?rotationId,
+      });
       if (result.status == 200) {
         _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
-        return _save(result.body);
+        final access = await _save(result.body);
+        if (_rotationRetryEnabled) {
+          await credentials.clearPendingRotationId();
+          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
+        }
+        return access;
       }
       if (result.status != 401 && result.status != 403) {
         _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_unavailable',
@@ -144,7 +194,7 @@ final class GuestAuthClient {
     }
     _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
     try {
-      await credentials.writeRefreshToken(refresh);
+      await persistVerifiedGuestCredential(credentials, refresh);
     } catch (_) {
       _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
           errorCode: 'SECURE_STORE_UNAVAILABLE');

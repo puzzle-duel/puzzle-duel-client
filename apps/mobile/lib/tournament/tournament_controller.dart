@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:flutter/services.dart';
 import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
@@ -557,6 +560,27 @@ final class TournamentController extends ChangeNotifier {
     _pendingTap = null;
   }
 
+  /// A single monotonic clock follows one accepted UI tap across writer
+  /// renewal, command POST, board GET and authoritative animation arming.
+  /// No coordinates, board state, player identity or auth data are emitted.
+  static String _newMoveTraceId() {
+    final random = Random.secure();
+    return List<int>.generate(16, (_) => random.nextInt(256))
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static void _movePhase(String phase, String traceId, Stopwatch clock) {
+    if (!DiagnosticRuntime.policy.captureMemory) return;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      // Report-store's established allowlist accepts this status-style code.
+      code: LogCode.httpCompleted,
+      operation: phase,
+      traceId: traceId,
+      durationMs: clock.elapsedMilliseconds,
+    )));
+  }
+
   Future<void> _submitTap(int offerIndex, Coordinate tap) async {
     if (!tournamentReady || rankedWriterLocked || _renewingWriter ||
         moveInFlight ||
@@ -567,11 +591,21 @@ final class TournamentController extends ChangeNotifier {
     if (route.place != TournamentPlace.playing) return;
     final id = seriesId;
     if (id == null) return;
+    final tracing = DiagnosticRuntime.policy.captureMemory;
+    final moveTraceId = tracing ? _newMoveTraceId() : null;
+    final moveClock = tracing ? (Stopwatch()..start()) : null;
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_tap_accepted', moveTraceId, moveClock);
+    }
     // Do not submit a move with an expired session or stale writer generation.
     // Renewal happens BEFORE constructing the command and does not replay it.
     final originalRevision = board['boardRevision'];
     final originalOrdinal = board['ordinal'];
-    if (!await _ensureLiveWriterSession()) return;
+    final writerReady = await _ensureLiveWriterSession();
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_writer_checked', moveTraceId, moveClock);
+    }
+    if (!writerReady) return;
     if (!tournamentReady || rankedWriterLocked || seriesId != id ||
         board['boardRevision'] != originalRevision ||
         board['ordinal'] != originalOrdinal ||
@@ -603,6 +637,8 @@ final class TournamentController extends ChangeNotifier {
       preState: preState,
       offerIndex: offerIndex,
       tap: tap,
+      moveTraceId: moveTraceId,
+      moveClock: moveClock,
     );
   }
 
@@ -728,6 +764,8 @@ final class TournamentController extends ChangeNotifier {
     GameState? preState,
     int? offerIndex,
     Coordinate? tap,
+    String? moveTraceId,
+    Stopwatch? moveClock,
   }) async {
     final id = seriesId;
     if (id == null) return;
@@ -737,10 +775,16 @@ final class TournamentController extends ChangeNotifier {
     noticeCode = null;
     notifyListeners();
     try {
-      final response = await api.post(
-        '/v1/tournament/series/$id/commands',
-        body,
-      );
+      final response = moveTraceId == null || !DiagnosticRuntime.policy.captureMemory
+          ? await api.post('/v1/tournament/series/$id/commands', body)
+          : await api.postTraced(
+              '/v1/tournament/series/$id/commands',
+              body,
+              traceId: moveTraceId,
+            );
+      if (moveTraceId != null && moveClock != null) {
+        _movePhase('move_command_returned', moveTraceId, moveClock);
+      }
       if (response.status == 0) {
         _pending = body;
         _pendingKey = key;
@@ -759,7 +803,14 @@ final class TournamentController extends ChangeNotifier {
             preState != null &&
             offerIndex != null &&
             tap != null) {
-          final ok = await _reload(reveal: false, followGameplay: false);
+          final ok = await _reload(
+            reveal: false,
+            followGameplay: false,
+            moveTraceId: moveTraceId,
+          );
+          if (moveTraceId != null && moveClock != null) {
+            _movePhase('move_board_reloaded', moveTraceId, moveClock);
+          }
           if (!ok ||
               commandNavEpoch != _resolutionNavEpoch ||
               route.place != TournamentPlace.playing ||
@@ -770,6 +821,8 @@ final class TournamentController extends ChangeNotifier {
             preState: preState,
             offerIndex: offerIndex,
             tap: tap,
+            moveTraceId: moveTraceId,
+            moveClock: moveClock,
           );
           return;
         }
@@ -818,6 +871,9 @@ final class TournamentController extends ChangeNotifier {
       }
       _haptic((feel) => feel.rejected());
     } finally {
+      if (moveTraceId != null && moveClock != null) {
+        _movePhase('move_pipeline_returned', moveTraceId, moveClock);
+      }
       moveInFlight = false;
       notifyListeners();
     }
@@ -829,6 +885,8 @@ final class TournamentController extends ChangeNotifier {
     required GameState preState,
     required int offerIndex,
     required Coordinate tap,
+    String? moveTraceId,
+    Stopwatch? moveClock,
   }) async {
     _cancelPendingResolutionNav();
     final epoch = _resolutionNavEpoch;
@@ -855,12 +913,18 @@ final class TournamentController extends ChangeNotifier {
     route = const TournamentRoute(place: TournamentPlace.playing);
     errorCode = null;
 
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_animation_arming', moveTraceId, moveClock);
+    }
     final applied = session.applyAuthoritativeResolution(
       preState: preState,
       offerIndex: offerIndex,
       tap: tap,
       authoritative: authoritative,
     );
+    if (moveTraceId != null && moveClock != null) {
+      _movePhase('move_resolution_applied', moveTraceId, moveClock);
+    }
     final delta = applied?.scoreDelta ?? 0;
     scoreDelta = delta > 0 ? delta : null;
     if (applied != null) {
@@ -994,10 +1058,16 @@ final class TournamentController extends ChangeNotifier {
   Future<bool> _reload({
     required bool reveal,
     required bool followGameplay,
+    String? moveTraceId,
   }) async {
     final id = seriesId;
     if (id == null) return false;
-    final view = await api.get('/v1/tournament/series/$id/board');
+    final view = moveTraceId == null || !DiagnosticRuntime.policy.captureMemory
+        ? await api.get('/v1/tournament/series/$id/board')
+        : await api.getTraced(
+            '/v1/tournament/series/$id/board',
+            traceId: moveTraceId,
+          );
     if (!_accepted(view, const {200}, degradedOnFailure: localReady)) {
       return false;
     }

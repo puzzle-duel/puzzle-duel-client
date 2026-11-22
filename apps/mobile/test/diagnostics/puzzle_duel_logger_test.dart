@@ -58,6 +58,35 @@ void main() {
     );
   });
 
+  test('move timing phases and HTTP completion share a safe traceId', () {
+    const trace = 'aabbccddeeff00112233445566778899';
+    const commandRequest = '00112233445566778899aabbccddeeff';
+    const boardRequest = 'ffeeddccbbaa99887766554433221100';
+    final events = [
+      LogEvent(level: LogLevel.info, code: LogCode.httpCompleted,
+        operation: 'move_tap_accepted', traceId: trace, durationMs: 0),
+      LogEvent(level: LogLevel.info, code: LogCode.httpCompleted,
+        operation: 'tournament_http', traceId: trace,
+        requestId: commandRequest, durationMs: 630,
+        httpVerb: HttpVerb.post, httpStatus: 200),
+      LogEvent(level: LogLevel.info, code: LogCode.httpCompleted,
+        operation: 'tournament_http', traceId: trace,
+        requestId: boardRequest, durationMs: 510,
+        httpVerb: HttpVerb.get, httpStatus: 200),
+      LogEvent(level: LogLevel.info, code: LogCode.httpCompleted,
+        operation: 'move_animation_arming', traceId: trace,
+        durationMs: 1180),
+    ];
+    expect(events.map((e) => e.toJson()['traceId']).toSet(), {trace});
+    expect(events[1].toJson()['requestId'], commandRequest);
+    expect(events[2].toJson()['requestId'], boardRequest);
+    expect(events.last.toJson()['durationMs'], 1180);
+    for (final event in events) {
+      expect(event.toJson().keys, isNot(contains('body')));
+      expect(event.toJson().keys, isNot(contains('token')));
+    }
+  });
+
   test('ring buffer caps and expires entries', () {
     var now = DateTime.utc(2026, 11, 21, 12);
     final sink = RingBufferLogSink(maxEvents: 2, clock: () => now);
