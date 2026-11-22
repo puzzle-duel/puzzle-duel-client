@@ -54,6 +54,28 @@ Future<void> persistVerifiedGuestCredential(GuestCredentialStore store, String t
   if (confirmed != token) throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
 }
 
+/// Durable intent must exist before the network request. Its identity survives
+/// app termination, HTTP timeouts and the UTC daily tournament cutover.
+Future<String> acquireVerifiedGuestRotationId(
+  GuestCredentialStore store, String Function() newId,
+) async {
+  var id = await store.readPendingRotationId();
+  if (id == null || id.isEmpty) {
+    id = newId();
+    if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(id)) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+    await store.writePendingRotationId(id);
+    if (await store.readPendingRotationId() != id) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+  }
+  if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(id)) {
+    throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+  }
+  return id;
+}
+
 /// Backend contract: POST /v1/auth/guest -> {accessToken,refreshToken,expiresAt}
 /// POST /v1/auth/refresh {refreshToken} -> same shape.
 /// Server must atomically rotate refresh tokens and reject replay.
@@ -123,18 +145,9 @@ final class GuestAuthClient {
       // Never silently create a new player on transient refresh failures.
       String? rotationId;
       if (_rotationRetryEnabled) {
-        rotationId = await credentials.readPendingRotationId();
-        if (rotationId == null || rotationId.isEmpty) {
-          rotationId = _newRequestId();
-          await credentials.writePendingRotationId(rotationId);
-          if (await credentials.readPendingRotationId() != rotationId) {
-            throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
-          }
-          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
-        }
-        if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(rotationId)) {
-          throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
-        }
+        rotationId = await acquireVerifiedGuestRotationId(
+            credentials, _newRequestId);
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
       }
       final result = await _post('/v1/auth/refresh', {
         'refreshToken': previous,
