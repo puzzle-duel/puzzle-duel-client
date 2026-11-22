@@ -102,7 +102,7 @@ class UatApi {
     String path, [
     Object? body, {
     String? traceId,
-  }]) async {
+  }) async {
     final started = Stopwatch()..start();
     final requestId = _newDiagnosticId();
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
