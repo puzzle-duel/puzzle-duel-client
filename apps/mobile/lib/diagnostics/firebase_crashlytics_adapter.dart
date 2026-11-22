@@ -88,6 +88,7 @@ final class CrashlyticsLogSink implements LogSink {
       if (event.requestId != null) 'requestId=${event.requestId}',
       if (event.traceId != null) 'traceId=${event.traceId}',
       if (event.httpStatus != null) 'status=${event.httpStatus}',
+      if (event.errorCode != null) 'errorCode=${event.errorCode}',
       if (event.durationMs != null) 'durationMs=${event.durationMs}',
     ].join(' ');
     await FirebaseCrashlytics.instance.log(
