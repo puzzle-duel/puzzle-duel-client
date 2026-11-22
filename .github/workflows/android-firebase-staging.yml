@@ -9,10 +9,6 @@ on:
       - "packages/puzzle_duel_rules/**"
   push:
     branches: ["version/**"]
-    paths:
-      - "apps/mobile/**"
-      - "packages/puzzle_duel_rules/**"
-      - ".github/workflows/android-firebase-staging.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,7 +41,7 @@ jobs:
 
   distribute:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/version/0.0.1'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/version/')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: pzd-android-staging
