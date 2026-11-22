@@ -135,4 +135,29 @@ void main() {
       expect(_framedLikeTournamentReadBody(seen[i], bodies[i]), isTrue);
     }
   });
+  test('sequential tournament requests reuse a persistent HTTP connection', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    final remotePorts = <int>[];
+    server.listen((request) async {
+      remotePorts.add(request.connectionInfo!.remotePort);
+      await request.drain<void>();
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'ok': true}));
+      await request.response.close();
+    });
+    final api = UatApi(
+      baseUrl: 'http://127.0.0.1:${server.port}',
+      bearer: 'Bearer uat-player-a',
+    );
+    addTearDown(api.close);
+    expect((await api.post('/v1/tournament/series/example/commands', {
+      'commandType': 'move',
+    })).status, 200);
+    expect((await api.get('/v1/tournament/series/example/board')).status, 200);
+    expect(remotePorts, hasLength(2));
+    expect(remotePorts[0], remotePorts[1],
+        reason: 'The second request should not open a new TCP/TLS connection');
+  });
+
 }
