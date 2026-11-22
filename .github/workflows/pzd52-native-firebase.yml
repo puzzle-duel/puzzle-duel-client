@@ -9,10 +9,6 @@ on:
       - ".github/workflows/android-firebase-staging.yml"
   push:
     branches: ["version/**"]
-    paths:
-      - "apps/mobile/**"
-      - ".github/workflows/pzd52-native-firebase.yml"
-      - ".github/workflows/android-firebase-staging.yml"
   workflow_dispatch:
 
 permissions:
