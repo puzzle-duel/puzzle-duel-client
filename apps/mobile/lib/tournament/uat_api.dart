@@ -82,9 +82,9 @@ class UatApi {
         .where((event) => event.code != LogCode.httpStarted && event.code != LogCode.screenOpened)
         .toList();
     return post('/v1/diagnostics/reports', {
-      'events': events.length <= 40
+      'events': events.length <= 64
           ? events.map((event) => event.toJson()).toList()
-          : events.skip(events.length - 40)
+          : events.skip(events.length - 64)
               .map((event) => event.toJson()).toList(),
     });
   }
