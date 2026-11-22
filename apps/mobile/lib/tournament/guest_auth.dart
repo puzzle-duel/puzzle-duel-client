@@ -13,6 +13,9 @@ abstract interface class GuestCredentialStore {
   Future<String?> readRefreshToken();
   Future<void> writeRefreshToken(String token);
   Future<void> clearRefreshToken();
+  Future<String?> readPendingRotationId();
+  Future<void> writePendingRotationId(String id);
+  Future<void> clearPendingRotationId();
 }
 
 final class GuestAccess {
@@ -44,6 +47,15 @@ final class GuestAccess {
   }
 }
 
+/// Save and independently read back the credential before declaring refresh successful.
+/// Verification does not eliminate the server-commit/client-crash window; the
+/// separate durable rotation ID is needed to recover that transaction.
+Future<void> persistVerifiedGuestCredential(GuestCredentialStore store, String token) async {
+  await store.writeRefreshToken(token);
+  final verified = await store.readRefreshToken();
+  if (verified != token) throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+}
+
 /// Backend contract: POST /v1/auth/guest -> {accessToken,refreshToken,expiresAt}
 /// POST /v1/auth/refresh {refreshToken} -> same shape.
 /// Server must atomically rotate refresh tokens and reject replay.
@@ -53,8 +65,11 @@ final class GuestAuthClient {
     required this.credentials,
     HttpClient Function()? httpClientFactory,
     PuzzleDuelLogger? logger,
+    bool? rotationRetryEnabled,
   }) : _factory = httpClientFactory ?? HttpClient.new,
-       _logger = logger ?? DiagnosticRuntime.logger {
+       _logger = logger ?? DiagnosticRuntime.logger,
+       _rotationRetryEnabled = rotationRetryEnabled ??
+           const bool.fromEnvironment('PZD_GUEST_RETRY_ENABLED', defaultValue: false) {
     final uri = Uri.parse(origin);
     if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty ||
         uri.hasQuery || uri.hasFragment || (uri.path.isNotEmpty && uri.path != '/')) {
@@ -66,6 +81,7 @@ final class GuestAuthClient {
   final GuestCredentialStore credentials;
   final HttpClient Function() _factory;
   final PuzzleDuelLogger _logger;
+  final bool _rotationRetryEnabled;
 
   // Fixed protocol vocabulary only. No token, identity, raw URL or body data.
   void _breadcrumb(LogCode code, String operation, {
@@ -107,7 +123,130 @@ final class GuestAuthClient {
         ? 'guest_refresh_absent' : 'guest_refresh_present');
     if (previous != null && previous.isNotEmpty) {
       // Never silently create a new player on transient refresh failures.
-      final result = await _post('/v1/auth/refresh', {'refreshToken': previous});
+      String? rotationId;
+      if (_rotationRetryEnabled) {
+        rotationId = await credentials.readPendingRotationId();
+        if (rotationId == null || rotationId.isEmpty) {
+          rotationId = _newRequestId();
+          await credentials.writePendingRotationId(rotationId);
+          if (await credentials.readPendingRotationId() != rotationId) {
+            throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+          }
+          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
+        }
+        if (!RegExp(r'^[0-9a-f]{32}
+      if (result.status == 200) {
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
+        final access = await _save(result.body);
+        if (_rotationRetryEnabled) {
+          await credentials.clearPendingRotationId();
+          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
+        }
+        return access;
+      }
+      if (result.status != 401 && result.status != 403) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_unavailable',
+            httpStatus: result.status, errorCode: 'REFRESH_UNAVAILABLE');
+        throw const GuestAuthException('REFRESH_UNAVAILABLE');
+      }
+      // Invalid/revoked credentials must not be silently replaced: the user
+      // may have ranked progress tied to this guest identity.
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_rejected',
+          httpStatus: result.status, errorCode: 'GUEST_RECOVERY_REQUIRED');
+      throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
+    }
+    final result = await _post('/v1/auth/guest', const {});
+    if (result.status != 201 && result.status != 200) {
+      throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
+    }
+    return _save(result.body);
+  }
+
+  Future<GuestAccess> _save(Map<String, dynamic> data) async {
+    final access = data['accessToken'];
+    final refresh = data['refreshToken'];
+    final expiry = data['expiresAt'];
+    if (access is! String || access.isEmpty || refresh is! String ||
+        refresh.isEmpty || expiry is! String) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    final expiresAt = DateTime.tryParse(expiry)?.toUtc();
+    if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
+    try {
+      await persistVerifiedGuestCredential(credentials, refresh);
+    } catch (_) {
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
+          errorCode: 'SECURE_STORE_UNAVAILABLE');
+      throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_completed');
+    return _current = GuestAccess(accessToken: access, expiresAt: expiresAt);
+  }
+
+  Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {
+    final client = _factory();
+    final requestId = _newRequestId();
+    final operation = path == '/v1/auth/refresh' ? 'guest_auth_refresh' : 'guest_auth_create';
+    _breadcrumb(LogCode.httpStarted, operation, requestId: requestId);
+    client.connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await client.postUrl(Uri.parse(origin).resolve(path))
+          .timeout(const Duration(seconds: 8));
+      request.headers.contentType = ContentType.json;
+      request.headers.set('x-request-id', requestId);
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+      final payload = utf8.encode(jsonEncode(body));
+      request.contentLength = payload.length;
+      request.add(payload);
+      final response = await request.close().timeout(const Duration(seconds: 12));
+      final bytes = await response.fold<List<int>>(<int>[], (a, b) => a..addAll(b))
+          .timeout(const Duration(seconds: 12));
+      if (bytes.length > 16384) throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      final parsed = jsonDecode(utf8.decode(bytes));
+      if (parsed is! Map<String, dynamic>) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      _breadcrumb(LogCode.httpCompleted, operation, requestId: requestId,
+          httpStatus: response.statusCode,
+          errorCode: response.statusCode >= 400 ? 'AUTH_HTTP_REJECTED' : null);
+      return _GuestResponse(response.statusCode, parsed);
+    } on GuestAuthException {
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_INVALID_RESPONSE');
+      rethrow;
+    } catch (_) {
+      // Never include request/response content or credentials in diagnostics.
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_NETWORK_UNAVAILABLE');
+      throw const GuestAuthException('AUTH_NETWORK_UNAVAILABLE');
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+final class _GuestResponse {
+  const _GuestResponse(this.status, this.body);
+  final int status;
+  final Map<String, dynamic> body;
+}
+
+final class GuestAuthException implements Exception {
+  const GuestAuthException(this.code);
+  final String code;
+  @override
+  String toString() => code;
+}).hasMatch(rotationId)) {
+          throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+        }
+      }
+      final result = await _post('/v1/auth/refresh', {
+        'refreshToken': previous,
+        if (rotationId != null) 'rotationId': rotationId,
+      });
       if (result.status == 200) {
         _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
         return _save(result.body);
