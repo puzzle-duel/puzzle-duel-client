@@ -30,7 +30,7 @@
 
 **Configured Caddy hostname:** `84-13-66-211.sslip.io` → `127.0.0.1:8787`. Oracle IPv4 remains `84.13.66.211`. Forest Dash is separately hosted on `:80` / port `3001` and must not be modified.
 
-**Candidate external Flutter API origin:** `https://84-13-66-211.sslip.io`. This is from the **actual live /etc/caddy/Caddyfile**, unlike the obsolete `staging.puzzle-duel.app` placeholder. **Public HTTPS/TLS verification is still required** before running a release build.
+**Verified external Flutter API origin:** `https://84-13-66-211.sslip.io`. Mac HTTPS health check passed on 2026-11-22 (trusted TLS; no -k).
 
 From Mac:
 ```sh
@@ -42,6 +42,20 @@ export PZD_STAGING_BASE_URL=https://84-13-66-211.sslip.io
 ```
 The guest JWT `iss` value remains `https://staging.puzzle-duel.app` in both client and backend **as an issuer identity**; it does **not** need to match the Caddy connection origin. Do not casually rewrite it or invalidate existing guest tokens.
 
+### External HTTPS verification — PASS (2026-11-22, Mac)
+
+The operator ran `curl -i --connect-timeout 5 --max-time 12 https://84-13-66-211.sslip.io/healthz` **without `-k`** and obtained:
+
+```text
+HTTP/2 200
+server: Caddy
+content-type: application/json
+x-request-id: 65fafbc00cb4ff3dc4c14bf2eeeaa713
+{"status":"ok","service":"pzd-staging-bootstrap"}
+```
+
+**VERIFIED PUBLIC STAGING HTTPS ORIGIN: `https://84-13-66-211.sslip.io`**. TLS validation and the public `/healthz` route pass from Mac. This does not by itself verify guest auth, tournament endpoints, iPhone TLS, or a full cold-start UAT.
+
 ## HTTPS and auth: DO NOT PRETEND THE DOMAIN WORKS
 
 2026-11-22 tests:
@@ -50,7 +64,7 @@ The guest JWT `iss` value remains `https://staging.puzzle-duel.app` in both clie
 - `curl --resolve staging.puzzle-duel.app:443:84.13.66.211 https://staging.puzzle-duel.app/healthz` → TLS handshake failed.
 - Oracle local backend health check succeeded via GitHub CD, but that **does not** prove external TLS or API access.
 
-**The live Caddy hostname is now known (above), but public HTTPS is not yet confirmed working.** Do not blindly substitute the Oracle IP or an invented hostname in `PZD_STAGING_BASE_URL`.
+**The live Caddy hostname is known and external HTTPS health check has passed (2026-11-22).** Do not blindly substitute the Oracle IP or an invented hostname in `PZD_STAGING_BASE_URL`.
 
 The client `GuestAuthClient` requires a valid HTTPS origin, and its `sessionVaultBinding` currently expects JWT issuer `https://staging.puzzle-duel.app`; the backend signs tokens with the same issuer. The issuer is an identity claim and can remain unchanged when the HTTPS transport uses the verified sslip.io hostname. TLS must still be valid and trusted.
 
