@@ -26,6 +26,22 @@
 | Backend diagnostic log | `/home/pzd-staging/pzd-staging/http-diagnostics.log` on Oracle |
 | Proposed hostname in legacy code/contracts | `staging.puzzle-duel.app` — **NOT VERIFIED WORKING** |
 
+## Actual Oracle HTTPS hostname (operator Caddyfile, 2026-11-22)
+
+**Configured Caddy hostname:** `84-13-66-211.sslip.io` → `127.0.0.1:8787`. Oracle IPv4 remains `84.13.66.211`. Forest Dash is separately hosted on `:80` / port `3001` and must not be modified.
+
+**Candidate external Flutter API origin:** `https://84-13-66-211.sslip.io`. This is from the **actual live /etc/caddy/Caddyfile**, unlike the obsolete `staging.puzzle-duel.app` placeholder. **Public HTTPS/TLS verification is still required** before running a release build.
+
+From Mac:
+```sh
+curl -i --connect-timeout 5 --max-time 12 https://84-13-66-211.sslip.io/healthz
+```
+Only use the candidate origin in `PZD_STAGING_BASE_URL` if the above returns HTTP 200 with valid trusted TLS (no `-k`). Example after success:
+```sh
+export PZD_STAGING_BASE_URL=https://84-13-66-211.sslip.io
+```
+The guest JWT `iss` value remains `https://staging.puzzle-duel.app` in both client and backend **as an issuer identity**; it does **not** need to match the Caddy connection origin. Do not casually rewrite it or invalidate existing guest tokens.
+
 ## HTTPS and auth: DO NOT PRETEND THE DOMAIN WORKS
 
 2026-11-22 tests:
@@ -34,9 +50,9 @@
 - `curl --resolve staging.puzzle-duel.app:443:84.13.66.211 https://staging.puzzle-duel.app/healthz` → TLS handshake failed.
 - Oracle local backend health check succeeded via GitHub CD, but that **does not** prove external TLS or API access.
 
-**No verified public HTTPS staging origin is recorded as of this revision.** Do not blindly substitute the Oracle IP or an invented hostname in `PZD_STAGING_BASE_URL`.
+**The live Caddy hostname is now known (above), but public HTTPS is not yet confirmed working.** Do not blindly substitute the Oracle IP or an invented hostname in `PZD_STAGING_BASE_URL`.
 
-The client `GuestAuthClient` requires a valid HTTPS origin, and its `sessionVaultBinding` currently expects JWT issuer `https://staging.puzzle-duel.app`. The backend guest issuer is tied to the same value. Any move to IP-based HTTPS or another hostname requires a real trusted certificate and coordinated auth-issuer changes, not just a build flag.
+The client `GuestAuthClient` requires a valid HTTPS origin, and its `sessionVaultBinding` currently expects JWT issuer `https://staging.puzzle-duel.app`; the backend signs tokens with the same issuer. The issuer is an identity claim and can remain unchanged when the HTTPS transport uses the verified sslip.io hostname. TLS must still be valid and trusted.
 
 The app has an intentionally **fail-closed** startup on `version/0.0.2`: missing HTTPS config or failed guest auth displays an explicit error; never silently opens offline practice. The old `presentation/home/home_screen.dart` difficulty-choice UI has been deleted on this branch. Do not change game mechanics or animations.
 
