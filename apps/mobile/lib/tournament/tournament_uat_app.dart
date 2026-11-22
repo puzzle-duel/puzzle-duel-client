@@ -726,10 +726,10 @@ final class _TournamentStatusHostState extends State<_TournamentStatusHost>
         notice == 'WRITER_NOT_AUTHORIZED') {
       // Auth/writer: red notice, never treat as wifi outage.
       nextKind = _NotifyKind.error;
-      nextText = widget.copy.forError(notice);
+      nextText = widget.copy.forTournamentRefreshError(notice);
     } else if (notice != null) {
       nextKind = _NotifyKind.error;
-      nextText = widget.copy.forError(notice);
+      nextText = widget.copy.forTournamentRefreshError(notice);
     } else if (infoOk &&
         fromSyncEdge &&
         widget.controller.tournamentReady) {
