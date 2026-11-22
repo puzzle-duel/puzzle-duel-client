@@ -6,7 +6,7 @@ void main() {
   test('home refresh failure never claims a move was rejected', () {
     for (final locale in [const Locale('tr'), const Locale('en')]) {
       final copy = TournamentCopy(locale);
-      for (final code in ['NOT_FOUND', 'MALFORMED_REQUEST', 'RATE_LIMITED', 'UNKNOWN_ERROR']) {
+      for (final code in ['NOT_FOUND', 'MALFORMED_REQUEST', 'RATE_LIMITED', 'BOOTSTRAP_FAILED', 'RECOVERY_NOT_ELIGIBLE', 'UNKNOWN_ERROR']) {
         final home = copy.forTournamentRefreshError(code);
         expect(home, isNot(equals(copy.rejectedMove)));
         expect(home, isNot(contains(locale.languageCode == 'tr'
