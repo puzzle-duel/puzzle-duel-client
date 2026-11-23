@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
@@ -36,6 +38,7 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
     }
     setState(() { _busy = true; _error = null; });
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    var phase = 'connect';
     try {
       final base = Uri.parse(widget.origin);
       if (base.scheme != 'https' || base.host.isEmpty || base.userInfo.isNotEmpty ||
@@ -50,6 +53,7 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
       final bytes = utf8.encode(jsonEncode({'code': code}));
       request.contentLength = bytes.length;
       request.add(bytes);
+      phase = 'response';
       final response = await request.close().timeout(const Duration(seconds: 12));
       final body = await response.fold<List<int>>(<int>[], (a, b) => a..addAll(b))
           .timeout(const Duration(seconds: 12));
@@ -57,6 +61,7 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
       if (response.statusCode != 200) {
         throw const GuestAuthException('ENROLLMENT_REJECTED');
       }
+      phase = 'decode';
       final json = jsonDecode(utf8.decode(body));
       if (json is! Map<String, dynamic>) throw const GuestAuthException('INVALID_AUTH_RESPONSE');
       final refresh = json['refreshToken'];
@@ -74,17 +79,37 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
         throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
       }
       // Save identity first and token last; startup fails closed if interrupted.
+      phase = 'keychain';
       await widget.store.writeNamedPlayerId(subject);
       if (await widget.store.readNamedPlayerId() != subject) {
         throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
       }
       await persistVerifiedGuestCredential(widget.store, refresh);
       _controller.clear();
+      phase = 'startup';
       await widget.onEnrolled();
     } on GuestAuthException catch (e) {
       if (mounted) setState(() => _error = e.code);
+    } on TimeoutException {
+      if (mounted) setState(() => _error = 'ENROLLMENT_NETWORK_TIMEOUT');
+    } on SocketException {
+      if (mounted) setState(() => _error = 'ENROLLMENT_NETWORK_UNAVAILABLE');
+    } on HandshakeException {
+      if (mounted) setState(() => _error = 'ENROLLMENT_TLS_FAILED');
+    } on PlatformException {
+      // Do not log Keychain exception text, codes, device IDs or credentials.
+      if (mounted) setState(() => _error = 'ENROLLMENT_KEYCHAIN_UNAVAILABLE');
+    } on FormatException {
+      if (mounted) setState(() => _error = 'ENROLLMENT_RESPONSE_FORMAT_INVALID');
     } catch (_) {
-      if (mounted) setState(() => _error = 'ENROLLMENT_UNAVAILABLE');
+      // Phase names only; never expose raw exceptions, HTTP bodies or secrets.
+      if (mounted) setState(() => _error = switch (phase) {
+        'connect' || 'response' => 'ENROLLMENT_NETWORK_UNAVAILABLE',
+        'decode' => 'ENROLLMENT_RESPONSE_FORMAT_INVALID',
+        'keychain' => 'ENROLLMENT_KEYCHAIN_UNAVAILABLE',
+        'startup' => 'ENROLLMENT_STARTUP_UNAVAILABLE',
+        _ => 'ENROLLMENT_UNAVAILABLE',
+      });
     } finally {
       client.close(force: true);
       if (mounted) setState(() => _busy = false);
