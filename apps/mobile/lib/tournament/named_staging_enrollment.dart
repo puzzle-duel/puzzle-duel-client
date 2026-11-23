@@ -95,27 +95,27 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
       phase = 'startup';
       await widget.onEnrolled();
     } on GuestAuthException catch (e) {
-      if (mounted) setState(() => _error = e.code);
+      if (mounted) { setState(() => _error = e.code); }
     } on TimeoutException {
-      if (mounted) setState(() => _error = 'ENROLLMENT_NETWORK_TIMEOUT');
+      if (mounted) { setState(() => _error = 'ENROLLMENT_NETWORK_TIMEOUT'); }
     } on SocketException {
-      if (mounted) setState(() => _error = 'ENROLLMENT_NETWORK_UNAVAILABLE');
+      if (mounted) { setState(() => _error = 'ENROLLMENT_NETWORK_UNAVAILABLE'); }
     } on HandshakeException {
-      if (mounted) setState(() => _error = 'ENROLLMENT_TLS_FAILED');
+      if (mounted) { setState(() => _error = 'ENROLLMENT_TLS_FAILED'); }
     } on PlatformException {
       // Do not log Keychain exception text, codes, device IDs or credentials.
-      if (mounted) setState(() => _error = 'ENROLLMENT_KEYCHAIN_UNAVAILABLE');
+      if (mounted) { setState(() => _error = 'ENROLLMENT_KEYCHAIN_UNAVAILABLE'); }
     } on FormatException {
-      if (mounted) setState(() => _error = 'ENROLLMENT_RESPONSE_FORMAT_INVALID');
+      if (mounted) { setState(() => _error = 'ENROLLMENT_RESPONSE_FORMAT_INVALID'); }
     } catch (_) {
       // Phase names only; never expose raw exceptions, HTTP bodies or secrets.
-      if (mounted) setState(() => _error = switch (phase) {
+      if (mounted) { setState(() => _error = switch (phase) {
         'connect' || 'response' => 'ENROLLMENT_NETWORK_UNAVAILABLE',
         'decode' => 'ENROLLMENT_RESPONSE_FORMAT_INVALID',
         'keychain' => 'ENROLLMENT_KEYCHAIN_UNAVAILABLE',
         'startup' => 'ENROLLMENT_STARTUP_UNAVAILABLE',
         _ => 'ENROLLMENT_UNAVAILABLE',
-      });
+      }); }
     } finally {
       client.close(force: true);
       if (mounted) setState(() => _busy = false);
