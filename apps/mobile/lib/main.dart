@@ -150,11 +150,9 @@ final class _NamedPlayerEnrollmentScreenState extends State<NamedPlayerEnrollmen
     setState(() { working = true; error = null; });
     try {
       final store = SecureGuestCredentialStore(slot: widget.slot);
-      final access = await GuestAuthClient(
+      await GuestAuthClient(
         origin: widget.origin, credentials: store,
-      ).enrollNamedDevice(code);
-      final subject = access.sessionVaultBinding.substring('staging-guest:'.length);
-      await store.saveNamedPlayerId(subject);
+      ).enrollNamedDevice(code, saveBinding: store.saveNamedPlayerId);
       if (!mounted) return;
       widget.onComplete();
     } on Exception {
