@@ -60,6 +60,13 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
   final StagingGuestSlot slot;
   final FlutterSecureStorage _storage;
 
+  String get _namedPlayerKey => 'pzd.staging.guest.${slot.name}.player-id.v1';
+
+  Future<String?> readNamedPlayerId() => _storage.read(key: _namedPlayerKey);
+
+  Future<void> writeNamedPlayerId(String playerId) =>
+      _storage.write(key: _namedPlayerKey, value: playerId);
+
   String get _refreshKey => StagingGuestCredentialKeys.forSlot(slot).refresh;
   String get _rotationKey => StagingGuestCredentialKeys.forSlot(slot).rotation;
 
