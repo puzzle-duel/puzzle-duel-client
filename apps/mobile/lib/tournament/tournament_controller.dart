@@ -15,6 +15,8 @@ import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -273,6 +275,16 @@ final class TournamentController extends ChangeNotifier {
     super.dispose();
   }
 
+
+  // Staging-safe state-transition markers; never serialize IDs or secrets.
+  void _traceResume(String stage, {bool failure = false}) {
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: failure ? LogLevel.warning : LogLevel.info,
+      code: failure ? LogCode.sessionRestoreFailed : LogCode.sessionRestored,
+      operation: stage,
+    )));
+  }
+
   /// Local-only boot: Home + Practice usable without Tournament HTTP.
   Future<void> beginLocal() async {
     InteractionPerf.mark('tournament.beginLocal');
@@ -317,7 +329,9 @@ final class TournamentController extends ChangeNotifier {
     tournamentNoticeCode = null;
     errorCode = null;
     notifyListeners();
+    _traceResume('refresh_session_restore_begin');
     final sessionOk = await _restoreSession(degradedOnFailure: true);
+    _traceResume(sessionOk ? 'refresh_session_restore_ok' : 'refresh_session_restore_failed', failure: !sessionOk);
     if (epoch != _tournamentEpoch) return;
     if (!sessionOk || api.sessionSecret == null) {
       if (epoch == _tournamentEpoch &&
@@ -341,11 +355,13 @@ final class TournamentController extends ChangeNotifier {
     final activeEpoch = epoch ?? _tournamentEpoch;
     busy = true;
     notifyListeners();
+    _traceResume('manifest_claim_begin');
     final claim = await api.post('/v1/tournament/claims/daily', {
       'originalUtcDate': _today(),
     });
     if (activeEpoch != _tournamentEpoch) return;
     if (!_accepted(claim, const {200, 201}, degradedOnFailure: true)) return;
+    _traceResume('manifest_claim_accepted');
     _claim = claim.map;
     seriesId = claim.map['seriesId']?.toString();
     final id = seriesId;
@@ -365,6 +381,7 @@ final class TournamentController extends ChangeNotifier {
       if (_sameDeviceRegistered &&
           _verifiedSessionPlayerId != null &&
           _verifiedSessionId != null) {
+        _traceResume('same_device_recovery_begin');
         final attempt = await _deviceRecovery.recoverDetailed(
           api: api,
           playerId: _verifiedSessionPlayerId!,
@@ -373,6 +390,7 @@ final class TournamentController extends ChangeNotifier {
           seriesId: id,
         );
         if (activeEpoch != _tournamentEpoch) return;
+        _traceResume(attempt.succeeded ? 'same_device_recovery_ok' : 'same_device_recovery_denied', failure: !attempt.succeeded);
         if (!attempt.succeeded) {
           recoveryDenial = UatApi.diagnosticErrorCode(attempt.errorCode) ??
               'RECOVERY_NOT_ELIGIBLE';
@@ -382,9 +400,11 @@ final class TournamentController extends ChangeNotifier {
       }
     }
     _openedFreshSession = false;
+    _traceResume('manifest_board_fetch_begin');
     final view = await api.get('/v1/tournament/series/$id/board');
     if (activeEpoch != _tournamentEpoch) return;
     if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
+    _traceResume('manifest_board_fetch_ok');
     _applyBoard(view.map, reveal: false);
     if (day?.phase == DayPhase.completed) {
       await _loadResults();
@@ -396,6 +416,7 @@ final class TournamentController extends ChangeNotifier {
     booting = false;
     errorCode = null;
     rankedWriterLocked = recoveryDenial != null;
+    _traceResume(recoveryDenial == null ? 'manifest_resume_ready' : 'manifest_resume_writer_locked', failure: recoveryDenial != null);
     tournamentNoticeCode = recoveryDenial;
     tournamentSync = recoveryDenial == null
         ? TournamentSyncState.ready
@@ -653,6 +674,7 @@ final class TournamentController extends ChangeNotifier {
     final originalPlayerId = _verifiedSessionPlayerId;
     if (originalSessionId == null || originalPlayerId == null) return false;
     InteractionPerf.mark('tournament.session.renew.proactive');
+    _traceResume('session_renew_begin');
     final response = await api.patch('/v1/tournament/session');
     if (_disposed || originalSecret != api.sessionSecret ||
         originalSessionId != _verifiedSessionId) {
@@ -666,6 +688,7 @@ final class TournamentController extends ChangeNotifier {
           nextExpiry <= DateTime.now().toUtc().millisecondsSinceEpoch) {
         return false;
       }
+      _traceResume('session_renew_ok');
       _sessionExpiresAtMs = nextExpiry;
       InteractionPerf.mark('tournament.session.renew.proactive.ready');
       _scheduleSessionRenewal();
@@ -673,6 +696,7 @@ final class TournamentController extends ChangeNotifier {
     }
     // Do not create a second writer or replay a command from a timer.
     // An expired/revoked session is handled by explicit signed recovery.
+    _traceResume('session_renew_failed', failure: true);
     if (response.status == 401) {
       // Keep the expired timestamp so the next command enters signed recovery.
       _sessionExpiresAtMs = DateTime.now().toUtc().millisecondsSinceEpoch - 1;
@@ -728,6 +752,7 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     final id = seriesId;
     if (id == null) return;
+    _traceResume('writer_command_begin');
     final commandNavEpoch = _resolutionNavEpoch;
     moveInFlight = true;
     scoreDelta = null;
@@ -797,6 +822,7 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
       if (response.error == 'WRITER_NOT_AUTHORIZED') {
+        _traceResume('writer_command_denied', failure: true);
         // Soft, non-network notice: do not auto-retry or invent scores.
         _clearPendingCommand();
         session.clearAuthoritativeUnknown();
@@ -1237,6 +1263,7 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionId = null;
     _sessionExpiresAtMs = null;
     final saved = _readBoundSession(binding: binding, origin: origin);
+    _traceResume(saved == null ? 'session_vault_miss' : 'session_vault_hit');
     if (saved != null) {
       api.sessionSecret = saved;
       final current = await api.get('/v1/tournament/session');
@@ -1260,6 +1287,7 @@ final class TournamentController extends ChangeNotifier {
             origin: origin,
           );
         }
+        _traceResume(_sameDeviceRegistered ? 'session_restored_device_registered' : 'session_restored_device_unregistered', failure: !_sameDeviceRegistered);
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
         await _hydrateHomeSnapshot();
@@ -1280,6 +1308,7 @@ final class TournamentController extends ChangeNotifier {
         await identity.clearAuthenticatedPlayer();
         await _hydrateHomeSnapshot();
       }
+      _traceResume('session_vault_validation_rejected', failure: true);
       InteractionPerf.mark('tournament.session.restore.rejected');
     } else {
       api.sessionSecret = null;
@@ -1293,6 +1322,7 @@ final class TournamentController extends ChangeNotifier {
       );
     }
 
+    _traceResume('session_open_begin');
     final opened = await api.post('/v1/tournament/session');
     _diagSession(
       operation: 'POST',
@@ -1329,6 +1359,7 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionPlayerId = opened.map['playerId']?.toString();
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
+    _traceResume('session_open_created');
     if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
       _sameDeviceRegistered = await _deviceRecovery.register(
         api: api,
@@ -1344,6 +1375,7 @@ final class TournamentController extends ChangeNotifier {
       binding: binding,
       origin: origin,
     );
+    _traceResume(_sameDeviceRegistered ? 'session_open_device_registered' : 'session_open_device_unregistered', failure: !_sameDeviceRegistered);
     InteractionPerf.mark('tournament.session.restore.opened');
     return api.sessionSecret != null && api.sessionSecret!.isNotEmpty;
   }
