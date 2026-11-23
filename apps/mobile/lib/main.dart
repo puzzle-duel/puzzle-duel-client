@@ -70,6 +70,106 @@ Future<void> main() async {
         runApp(const StagingStartupErrorScreen('NAMED_PLAYER_ENROLLMENT_REQUIRED'));
         return;
       }
+      // A named slot is bound to its server-issued subject, not a UI label.
+      // The expected UUID is non-secret configuration, obtained from the
+      // authoritative staging DB via the approved enrollment workflow.
+      const expectedSubject = String.fromEnvironment('PZD_STAGING_EXPECTED_PLAYER_ID');
+      if (namedPlayer && !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}
+        origin: staging,
+        credentials: store,
+      );
+      final access = await auth.authenticate();
+      if (namedPlayer && access.sessionVaultBinding != 'staging-guest:$expectedSubject') {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_IDENTITY_MISMATCH'));
+        return;
+      }
+      await runTournamentUatApp(UatConfig(
+        baseUrl: staging,
+        bearer: access.accessToken,
+        playerLabel: guestSlot == 'gokhan' ? 'Gökhan Aydın' : guestSlot == 'serap' ? 'Serap Nazlı Aydın' : 'Guest',
+        stagingSessionBinding: access.sessionVaultBinding,
+      ), api: UatApi(
+        baseUrl: UatApi.apiOrigin(staging),
+        bearer: access.accessToken,
+        accessTokenProvider: () async {
+          final refreshed = await auth.authenticate();
+          if (namedPlayer && refreshed.sessionVaultBinding != 'staging-guest:$expectedSubject') {
+            throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
+          }
+          return refreshed.accessToken;
+        },
+      ), stagingGuestSlot: guestSlot);
+    } on GuestAuthException catch (error) {
+      // A guest identity must never be replaced by an offline session.
+      runApp(StagingStartupErrorScreen(error.code));
+    } on Exception {
+      // Never show raw exceptions, URLs, tokens, or response bodies.
+      runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
+    }
+    return;
+  }
+  runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
+}
+
+
+@visibleForTesting
+final class StagingStartupLoadingScreen extends StatelessWidget {
+  const StagingStartupLoadingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Puzzle Duel',
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('Connecting to tournament…'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// This is shown ONLY for staging configuration/auth failures.
+@visibleForTesting
+final class StagingStartupErrorScreen extends StatelessWidget {
+  const StagingStartupErrorScreen(this.errorCode, {super.key});
+
+  final String errorCode;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Puzzle Duel Staging',
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Tournament staging unavailable'),
+              const SizedBox(height: 12),
+              Text(errorCode, key: const Key('staging-startup-error')),
+              const SizedBox(height: 12),
+              const Text('Check staging HTTPS configuration and restart the app.'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+).hasMatch(expectedSubject)) {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_BINDING_REQUIRED'));
+        return;
+      }
       final auth = GuestAuthClient(
         origin: staging,
         credentials: store,
