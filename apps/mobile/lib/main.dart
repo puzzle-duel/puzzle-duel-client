@@ -75,7 +75,7 @@ Future<void> main() async {
         baseUrl: UatApi.apiOrigin(staging),
         bearer: access.accessToken,
         accessTokenProvider: () async => (await auth.authenticate()).accessToken,
-      ));
+      ), stagingGuestSlot: guestSlot);
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
       runApp(StagingStartupErrorScreen(error.code));
