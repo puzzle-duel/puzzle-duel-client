@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
 
@@ -29,6 +30,14 @@ void main() {
     expect(StagingGuestSlot.parse('player-b'), StagingGuestSlot.playerB);
     expect(() => StagingGuestSlot.parse(''), throwsA(isA<GuestAuthException>()));
     expect(() => StagingGuestSlot.parse('guest-b'), throwsA(isA<GuestAuthException>()));
+  });
+
+  test('all UAT session vault and cache directories are isolated', () {
+    expect(AppStateDirectory.relativePathForGuestSlot('legacy'), '');
+    expect(AppStateDirectory.relativePathForGuestSlot('player-a'), 'staging-guests/player-a');
+    expect(AppStateDirectory.relativePathForGuestSlot('player-b'), 'staging-guests/player-b');
+    expect(() => AppStateDirectory.relativePathForGuestSlot('../legacy'),
+        throwsArgumentError);
   });
 
   test('slot constructor remains non-destructive to legacy identity', () {
