@@ -158,7 +158,7 @@ class UatApi {
         }
       }
       final category = categoryForStatus(response.statusCode);
-      _structuredAuthStatus(response.statusCode, json);
+      _structuredAuthStatus(response.statusCode, json, requestId, diagnosticOperation);
 
       return UatHttpResult(response.statusCode, json, category: category);
     } on _UatTimeout catch (error) {
@@ -208,7 +208,7 @@ class UatApi {
     }
   }
 
-  static void _structuredAuthStatus(int status, Object? response) {
+  static void _structuredAuthStatus(int status, Object? response, String requestId, String operation) {
     LogCode? code;
     if (status == 401) {
       code = LogCode.authExpired;
@@ -224,7 +224,8 @@ class UatApi {
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.warning,
       code: code,
-      operation: 'tournament_session',
+      operation: operation,
+      requestId: requestId,
       httpStatus: status,
     )));
   }
