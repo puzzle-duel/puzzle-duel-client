@@ -102,21 +102,15 @@ class UatApi {
     final requestId = _newDiagnosticId();
     // Staging incident correlation: classify the operation without recording
     // URLs, identifiers, bearer material, or the session secret itself.
-    final diagnosticOperation = _diagnosticOperation(method, path);
+    final baseOperation = _diagnosticOperation(path);
+    final diagnosticOperation = method == 'POST' &&
+            path.startsWith('/v1/tournament/')
+        ? '${baseOperation}_${sessionSecret?.isNotEmpty == true ? 'secret_present' : 'secret_missing'}'
+        : baseOperation;
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info, code: LogCode.httpStarted,
       operation: diagnosticOperation, requestId: requestId,
     )));
-    if (path.startsWith('/v1/tournament/') && method == 'POST') {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        // httpStarted events are excluded from manual diagnostic reports.
-        // Persist this safe preflight marker under a reportable event code.
-        level: LogLevel.info, code: LogCode.sessionRestored,
-        operation: sessionSecret?.isNotEmpty == true
-            ? 'writer_secret_present' : 'writer_secret_missing',
-        requestId: requestId,
-      )));
-    }
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
     var diagnosticStatus = 0;
@@ -242,7 +236,7 @@ class UatApi {
         .join();
   }
 
-  static String _diagnosticOperation(String method, String path) {
+  static String _diagnosticOperation(String path) {
     final route = path.split('?').first;
     if (route == '/v1/tournament/session') return 'tournament_session_http';
     if (route == '/v1/diagnostics/reports') return 'diagnostic_report_http';
