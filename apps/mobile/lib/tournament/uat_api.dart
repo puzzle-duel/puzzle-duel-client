@@ -100,10 +100,21 @@ class UatApi {
   ]) async {
     final started = Stopwatch()..start();
     final requestId = _newDiagnosticId();
+    // Staging incident correlation: classify the operation without recording
+    // URLs, identifiers, bearer material, or the session secret itself.
+    final diagnosticOperation = _diagnosticOperation(method, path);
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info, code: LogCode.httpStarted,
-      operation: 'tournament_http', requestId: requestId,
+      operation: diagnosticOperation, requestId: requestId,
     )));
+    if (path.startsWith('/v1/tournament/') && method == 'POST') {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info, code: LogCode.httpStarted,
+        operation: sessionSecret?.isNotEmpty == true
+            ? 'writer_secret_present' : 'writer_secret_missing',
+        requestId: requestId,
+      )));
+    }
     final client = _httpClientFactory();
     client.connectionTimeout = _connectTimeout;
     var diagnosticStatus = 0;
@@ -195,7 +206,8 @@ class UatApi {
     } finally {
       started.stop();
       _structuredHttp(method: method, status: diagnosticStatus,
-          requestId: requestId, durationMs: started.elapsedMilliseconds);
+          requestId: requestId, durationMs: started.elapsedMilliseconds,
+          operation: diagnosticOperation);
       client.close(force: true);
     }
   }
@@ -228,11 +240,23 @@ class UatApi {
         .join();
   }
 
+  static String _diagnosticOperation(String method, String path) {
+    final route = path.split('?', 1).first;
+    if (route == '/v1/tournament/session') return 'tournament_session_http';
+    if (route == '/v1/diagnostics/reports') return 'diagnostic_report_http';
+    if (route.contains('/commands') || route.contains('/command')) return 'tournament_command_http';
+    if (route.contains('/recover') || route.contains('/handoff')) return 'tournament_recovery_http';
+    if (route.contains('/manifest')) return 'tournament_manifest_http';
+    if (route.contains('/series')) return 'tournament_series_http';
+    return 'tournament_other_http';
+  }
+
   static void _structuredHttp({
     required String method,
     required int status,
     required String requestId,
     required int durationMs,
+    required String operation,
   }) {
     // Crashlytics keeps both successful and failed requests as breadcrumbs.
     final verb = switch (method) {
@@ -245,7 +269,7 @@ class UatApi {
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: status >= 200 && status < 400 ? LogLevel.info : LogLevel.warning,
       code: status >= 200 && status < 400 ? LogCode.httpCompleted : LogCode.httpFailed,
-      operation: 'tournament_http',
+      operation: operation,
       requestId: requestId,
       httpVerb: verb,
       httpStatus: status == 0 ? null : status,
