@@ -241,7 +241,7 @@ class UatApi {
   }
 
   static String _diagnosticOperation(String method, String path) {
-    final route = path.split('?', 1).first;
+    final route = path.split('?').first;
     if (route == '/v1/tournament/session') return 'tournament_session_http';
     if (route == '/v1/diagnostics/reports') return 'diagnostic_report_http';
     if (route.contains('/commands') || route.contains('/command')) return 'tournament_command_http';
