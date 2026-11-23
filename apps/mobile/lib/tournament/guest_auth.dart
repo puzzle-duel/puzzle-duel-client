@@ -120,6 +120,310 @@ final class GuestAuthClient {
         .map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
 
+  /// Redeem operator-approved device challenge; never falls back to guest creation.
+  Future<GuestAccess> enrollNamedDevice(String code) async {
+    if (!RegExp(r'^[0-9a-f]{32}
+  GuestAccess? _current;
+
+  /// Coalesces concurrent app startup/foreground authentication attempts.
+  Future<GuestAccess> authenticate({bool forceRefresh = false}) {
+    final cached = _current;
+    if (!forceRefresh && cached != null &&
+        cached.expiresAt.isAfter(DateTime.now().toUtc().add(const Duration(minutes: 1)))) {
+      return Future.value(cached);
+    }
+    final pending = _pending;
+    if (pending != null) return pending;
+    final next = _authenticate();
+    _pending = next;
+    return next.whenComplete(() => _pending = null);
+  }
+
+  Future<GuestAccess> _authenticate() async {
+    final previous = await credentials.readRefreshToken();
+    _breadcrumb(LogCode.authExpired, previous == null || previous.isEmpty
+        ? 'guest_refresh_absent' : 'guest_refresh_present');
+    if (previous != null && previous.isNotEmpty) {
+      // Never silently create a new player on transient refresh failures.
+      String? rotationId;
+      if (_rotationRetryEnabled) {
+        rotationId = await acquireVerifiedGuestRotationId(
+            credentials, _newRequestId);
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
+      }
+      final result = await _post('/v1/auth/refresh', {
+        'refreshToken': previous,
+        'rotationId': ?rotationId,
+      });
+      if (result.status == 200) {
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
+        final access = await _save(result.body);
+        if (_rotationRetryEnabled) {
+          await credentials.clearPendingRotationId();
+          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
+        }
+        return access;
+      }
+      if (result.status != 401 && result.status != 403) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_unavailable',
+            httpStatus: result.status, errorCode: 'REFRESH_UNAVAILABLE');
+        throw const GuestAuthException('REFRESH_UNAVAILABLE');
+      }
+      // Invalid/revoked credentials must not be silently replaced: the user
+      // may have ranked progress tied to this guest identity.
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_rejected',
+          httpStatus: result.status, errorCode: 'GUEST_RECOVERY_REQUIRED');
+      throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
+    }
+    final result = await _post('/v1/auth/guest', const {});
+    if (result.status != 201 && result.status != 200) {
+      throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
+    }
+    return _save(result.body);
+  }
+
+  Future<GuestAccess> _save(Map<String, dynamic> data) async {
+    final access = data['accessToken'];
+    final refresh = data['refreshToken'];
+    final expiry = data['expiresAt'];
+    if (access is! String || access.isEmpty || refresh is! String ||
+        refresh.isEmpty || expiry is! String) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    final expiresAt = DateTime.tryParse(expiry)?.toUtc();
+    if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
+    try {
+      await persistVerifiedGuestCredential(credentials, refresh);
+    } catch (_) {
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
+          errorCode: 'SECURE_STORE_UNAVAILABLE');
+      throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_completed');
+    return _current = GuestAccess(accessToken: access, expiresAt: expiresAt);
+  }
+
+  Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {
+    final client = _factory();
+    final requestId = _newRequestId();
+    final operation = path == '/v1/auth/refresh' ? 'guest_auth_refresh' : 'guest_auth_create';
+    _breadcrumb(LogCode.httpStarted, operation, requestId: requestId);
+    client.connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await client.postUrl(Uri.parse(origin).resolve(path))
+          .timeout(const Duration(seconds: 8));
+      request.headers.contentType = ContentType.json;
+      request.headers.set('x-request-id', requestId);
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+      final payload = utf8.encode(jsonEncode(body));
+      request.contentLength = payload.length;
+      request.add(payload);
+      final response = await request.close().timeout(const Duration(seconds: 12));
+      final bytes = await response.fold<List<int>>(<int>[], (a, b) => a..addAll(b))
+          .timeout(const Duration(seconds: 12));
+      if (bytes.length > 16384) throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      final parsed = jsonDecode(utf8.decode(bytes));
+      if (parsed is! Map<String, dynamic>) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      _breadcrumb(LogCode.httpCompleted, operation, requestId: requestId,
+          httpStatus: response.statusCode,
+          errorCode: response.statusCode >= 400 ? 'AUTH_HTTP_REJECTED' : null);
+      return _GuestResponse(response.statusCode, parsed);
+    } on GuestAuthException {
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_INVALID_RESPONSE');
+      rethrow;
+    } catch (_) {
+      // Never include request/response content or credentials in diagnostics.
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_NETWORK_UNAVAILABLE');
+      throw const GuestAuthException('AUTH_NETWORK_UNAVAILABLE');
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+final class _GuestResponse {
+  const _GuestResponse(this.status, this.body);
+  final int status;
+  final Map<String, dynamic> body;
+}
+
+final class GuestAuthException implements Exception {
+  const GuestAuthException(this.code);
+  final String code;
+  @override
+  String toString() => code;
+}).hasMatch(code)) {
+      throw const GuestAuthException('INVALID_ENROLLMENT_CODE');
+    }
+    final result = await _post('/v1/auth/enroll', {'code': code});
+    if (result.status != 200) {
+      throw const GuestAuthException('ENROLLMENT_NOT_AUTHORIZED');
+    }
+    final playerId = result.body['playerId'];
+    if (playerId is! String ||
+        !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}
+  GuestAccess? _current;
+
+  /// Coalesces concurrent app startup/foreground authentication attempts.
+  Future<GuestAccess> authenticate({bool forceRefresh = false}) {
+    final cached = _current;
+    if (!forceRefresh && cached != null &&
+        cached.expiresAt.isAfter(DateTime.now().toUtc().add(const Duration(minutes: 1)))) {
+      return Future.value(cached);
+    }
+    final pending = _pending;
+    if (pending != null) return pending;
+    final next = _authenticate();
+    _pending = next;
+    return next.whenComplete(() => _pending = null);
+  }
+
+  Future<GuestAccess> _authenticate() async {
+    final previous = await credentials.readRefreshToken();
+    _breadcrumb(LogCode.authExpired, previous == null || previous.isEmpty
+        ? 'guest_refresh_absent' : 'guest_refresh_present');
+    if (previous != null && previous.isNotEmpty) {
+      // Never silently create a new player on transient refresh failures.
+      String? rotationId;
+      if (_rotationRetryEnabled) {
+        rotationId = await acquireVerifiedGuestRotationId(
+            credentials, _newRequestId);
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_saved');
+      }
+      final result = await _post('/v1/auth/refresh', {
+        'refreshToken': previous,
+        'rotationId': ?rotationId,
+      });
+      if (result.status == 200) {
+        _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
+        final access = await _save(result.body);
+        if (_rotationRetryEnabled) {
+          await credentials.clearPendingRotationId();
+          _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
+        }
+        return access;
+      }
+      if (result.status != 401 && result.status != 403) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_unavailable',
+            httpStatus: result.status, errorCode: 'REFRESH_UNAVAILABLE');
+        throw const GuestAuthException('REFRESH_UNAVAILABLE');
+      }
+      // Invalid/revoked credentials must not be silently replaced: the user
+      // may have ranked progress tied to this guest identity.
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_rejected',
+          httpStatus: result.status, errorCode: 'GUEST_RECOVERY_REQUIRED');
+      throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
+    }
+    final result = await _post('/v1/auth/guest', const {});
+    if (result.status != 201 && result.status != 200) {
+      throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
+    }
+    return _save(result.body);
+  }
+
+  Future<GuestAccess> _save(Map<String, dynamic> data) async {
+    final access = data['accessToken'];
+    final refresh = data['refreshToken'];
+    final expiry = data['expiresAt'];
+    if (access is! String || access.isEmpty || refresh is! String ||
+        refresh.isEmpty || expiry is! String) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    final expiresAt = DateTime.tryParse(expiry)?.toUtc();
+    if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
+    try {
+      await persistVerifiedGuestCredential(credentials, refresh);
+    } catch (_) {
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
+          errorCode: 'SECURE_STORE_UNAVAILABLE');
+      throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+    }
+    _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_completed');
+    return _current = GuestAccess(accessToken: access, expiresAt: expiresAt);
+  }
+
+  Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {
+    final client = _factory();
+    final requestId = _newRequestId();
+    final operation = path == '/v1/auth/refresh' ? 'guest_auth_refresh' : 'guest_auth_create';
+    _breadcrumb(LogCode.httpStarted, operation, requestId: requestId);
+    client.connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await client.postUrl(Uri.parse(origin).resolve(path))
+          .timeout(const Duration(seconds: 8));
+      request.headers.contentType = ContentType.json;
+      request.headers.set('x-request-id', requestId);
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+      final payload = utf8.encode(jsonEncode(body));
+      request.contentLength = payload.length;
+      request.add(payload);
+      final response = await request.close().timeout(const Duration(seconds: 12));
+      final bytes = await response.fold<List<int>>(<int>[], (a, b) => a..addAll(b))
+          .timeout(const Duration(seconds: 12));
+      if (bytes.length > 16384) throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      final parsed = jsonDecode(utf8.decode(bytes));
+      if (parsed is! Map<String, dynamic>) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      _breadcrumb(LogCode.httpCompleted, operation, requestId: requestId,
+          httpStatus: response.statusCode,
+          errorCode: response.statusCode >= 400 ? 'AUTH_HTTP_REJECTED' : null);
+      return _GuestResponse(response.statusCode, parsed);
+    } on GuestAuthException {
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_INVALID_RESPONSE');
+      rethrow;
+    } catch (_) {
+      // Never include request/response content or credentials in diagnostics.
+      _breadcrumb(LogCode.httpFailed, operation, requestId: requestId,
+          errorCode: 'AUTH_NETWORK_UNAVAILABLE');
+      throw const GuestAuthException('AUTH_NETWORK_UNAVAILABLE');
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+final class _GuestResponse {
+  const _GuestResponse(this.status, this.body);
+  final int status;
+  final Map<String, dynamic> body;
+}
+
+final class GuestAuthException implements Exception {
+  const GuestAuthException(this.code);
+  final String code;
+  @override
+  String toString() => code;
+}).hasMatch(playerId)) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    // Check server-returned subject before persisting the credential.
+    final accessToken = result.body['accessToken'];
+    final expiry = result.body['expiresAt'];
+    if (accessToken is! String || expiry is! String) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    final candidate = GuestAccess(
+      accessToken: accessToken,
+      expiresAt: DateTime.tryParse(expiry)?.toUtc() ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    if (candidate.sessionVaultBinding != 'staging-guest:$playerId') {
+      throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
+    }
+    return _save(result.body);
+  }
+
   Future<GuestAccess>? _pending;
   GuestAccess? _current;
 
