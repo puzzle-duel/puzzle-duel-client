@@ -12,13 +12,18 @@ abstract final class AppStateDirectory {
   /// Application-support root used by the real app.
   /// Separate each explicitly chosen UAT guest's local session vault,
   /// home cache and practice state. Existing legacy storage is untouched.
+  static String relativePathForGuestSlot(String slot) => switch (slot) {
+    'legacy' => '',
+    'player-a' => 'staging-guests/player-a',
+    'player-b' => 'staging-guests/player-b',
+    _ => throw ArgumentError.value(slot, 'slot', 'Invalid staging guest slot'),
+  };
+
   static Future<Directory> resolveForGuestSlot(String slot) async {
+    final subpath = relativePathForGuestSlot(slot);
     final root = await resolve();
-    if (slot == 'legacy') return root;
-    if (slot != 'player-a' && slot != 'player-b') {
-      throw ArgumentError.value(slot, 'slot', 'Invalid staging guest slot');
-    }
-    final directory = Directory('${root.path}/staging-guests/$slot');
+    if (subpath.isEmpty) return root;
+    final directory = Directory('${root.path}/$subpath');
     await directory.create(recursive: true);
     return directory;
   }
