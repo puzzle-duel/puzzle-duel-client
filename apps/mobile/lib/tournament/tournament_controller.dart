@@ -359,15 +359,21 @@ final class TournamentController extends ChangeNotifier {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
       return;
     }
-    // A readable board is not proof of writer entitlement. A fresh session
-    // attempting an existing claim must recover via the pinned device proof.
-    // On any denial keep the board readable, but disable ranked commands.
+    // Ownership does not prove the CURRENT session owns the writer. Do not
+    // rely on the once-per-fresh-session flag: a denied recovery can become
+    // eligible after the original writer expires.
     String? recoveryDenial;
-    // Completed series are read-only: results and leaderboards must remain
-    // accessible after session rotation without a writer takeover.
-    if (_openedFreshSession &&
+    final openedFresh = _openedFreshSession;
+    _openedFreshSession = false;
+    final view = await api.get('/v1/tournament/series/$id/board');
+    if (activeEpoch != _tournamentEpoch) return;
+    if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
+    final activeClaim = claim.map['status'] != 'COMPLETED';
+    final writerMatches = view.map['writerSessionMatches'];
+    final needsRecovery = activeClaim &&
         claim.map['original'] == false &&
-        claim.map['status'] != 'COMPLETED') {
+        (writerMatches == false || (writerMatches == null && openedFresh));
+    if (needsRecovery) {
       if (_sameDeviceRegistered &&
           _verifiedSessionPlayerId != null &&
           _verifiedSessionId != null) {
@@ -382,16 +388,25 @@ final class TournamentController extends ChangeNotifier {
         if (!attempt.succeeded) {
           recoveryDenial = UatApi.diagnosticErrorCode(attempt.errorCode) ??
               'RECOVERY_NOT_ELIGIBLE';
+        } else {
+          // Proof acceptance must be followed by fresh server-owned writer
+          // metadata, not an assumption about entitlement.
+          final verified = await api.get('/v1/tournament/series/$id/board');
+          if (activeEpoch != _tournamentEpoch) return;
+          if (!_accepted(verified, const {200}, degradedOnFailure: true)) return;
+          if (verified.map['writerSessionMatches'] == false) {
+            recoveryDenial = 'WRITER_NOT_AUTHORIZED';
+          } else {
+            _applyBoard(verified.map, reveal: false);
+          }
         }
       } else {
         recoveryDenial = 'RECOVERY_NOT_ELIGIBLE';
       }
     }
-    _openedFreshSession = false;
-    final view = await api.get('/v1/tournament/series/$id/board');
-    if (activeEpoch != _tournamentEpoch) return;
-    if (!_accepted(view, const {200}, degradedOnFailure: true)) return;
-    _applyBoard(view.map, reveal: false);
+    if (!needsRecovery || recoveryDenial != null) {
+      _applyBoard(view.map, reveal: false);
+    }
     if (day?.phase == DayPhase.completed) {
       await _loadResults();
     }
@@ -445,7 +460,9 @@ final class TournamentController extends ChangeNotifier {
   Future<void> resume() async {
     // The Home action must never appear tappable but do nothing. A degraded
     // session may be refreshed safely before deciding whether resume is legal.
-    if (!tournamentReady && !rankedWriterLocked) {
+    if (!tournamentReady || rankedWriterLocked) {
+      // Explicit user action can retry same-device proof after the original
+      // session expires; it must never bypass the server writer fence.
       await refreshTournament(
         origin: TournamentRefreshOrigin.pullToRefresh,
         preserveRoute: true,
