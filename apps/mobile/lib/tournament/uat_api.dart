@@ -109,7 +109,9 @@ class UatApi {
     )));
     if (path.startsWith('/v1/tournament/') && method == 'POST') {
       unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info, code: LogCode.httpStarted,
+        // httpStarted events are excluded from manual diagnostic reports.
+        // Persist this safe preflight marker under a reportable event code.
+        level: LogLevel.info, code: LogCode.sessionRestored,
         operation: sessionSecret?.isNotEmpty == true
             ? 'writer_secret_present' : 'writer_secret_missing',
         requestId: requestId,
