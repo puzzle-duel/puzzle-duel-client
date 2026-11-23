@@ -62,6 +62,17 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
 
   String get _refreshKey => StagingGuestCredentialKeys.forSlot(slot).refresh;
   String get _rotationKey => StagingGuestCredentialKeys.forSlot(slot).rotation;
+  String get _bindingKey => 'pzd.staging.guest.${slot.name}.subject.v1';
+
+  Future<String?> readNamedPlayerId() => _storage.read(key: _bindingKey);
+
+  Future<void> saveNamedPlayerId(String playerId) async {
+    await _storage.write(key: _bindingKey, value: playerId);
+    if (await _storage.read(key: _bindingKey) != playerId) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+  }
+
 
   @override
   Future<String?> readRefreshToken() => _storage.read(key: _refreshKey);
