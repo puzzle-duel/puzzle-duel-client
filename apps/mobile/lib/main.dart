@@ -61,20 +61,47 @@ Future<void> main() async {
         defaultValue: 'legacy',
       );
       final slot = StagingGuestSlot.parse(guestSlot);
+      final namedPlayer = guestSlot == 'gokhan' || guestSlot == 'serap';
+      final store = SecureGuestCredentialStore(slot: slot);
+      // Named staging identities must never silently become new guests.
+      // The matching Oracle-issued refresh token must first be imported
+      // through a separate, approved secure device enrollment flow.
+      if (namedPlayer && (await store.readRefreshToken()) == null) {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_ENROLLMENT_REQUIRED'));
+        return;
+      }
+      // A named slot is bound to its server-issued subject, not a UI label.
+      // The expected UUID is non-secret configuration, obtained from the
+      // authoritative staging DB via the approved enrollment workflow.
+      const expectedSubject = String.fromEnvironment('PZD_STAGING_EXPECTED_PLAYER_ID');
+      if (namedPlayer && !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$').hasMatch(expectedSubject)) {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_BINDING_REQUIRED'));
+        return;
+      }
       final auth = GuestAuthClient(
         origin: staging,
-        credentials: SecureGuestCredentialStore(slot: slot),
+        credentials: store,
       );
       final access = await auth.authenticate();
+      if (namedPlayer && access.sessionVaultBinding != 'staging-guest:$expectedSubject') {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_IDENTITY_MISMATCH'));
+        return;
+      }
       await runTournamentUatApp(UatConfig(
         baseUrl: staging,
         bearer: access.accessToken,
-        playerLabel: 'Guest',
+        playerLabel: guestSlot == 'gokhan' ? 'Gökhan Aydın' : guestSlot == 'serap' ? 'Serap Nazlı Aydın' : 'Guest',
         stagingSessionBinding: access.sessionVaultBinding,
       ), api: UatApi(
         baseUrl: UatApi.apiOrigin(staging),
         bearer: access.accessToken,
-        accessTokenProvider: () async => (await auth.authenticate()).accessToken,
+        accessTokenProvider: () async {
+          final refreshed = await auth.authenticate();
+          if (namedPlayer && refreshed.sessionVaultBinding != 'staging-guest:$expectedSubject') {
+            throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
+          }
+          return refreshed.accessToken;
+        },
       ), stagingGuestSlot: guestSlot);
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
