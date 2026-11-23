@@ -16,8 +16,6 @@ abstract final class AppStateDirectory {
     'legacy' => '',
     'player-a' => 'staging-guests/player-a',
     'player-b' => 'staging-guests/player-b',
-    'gokhan' => 'staging-guests/gokhan',
-    'serap' => 'staging-guests/serap',
     _ => throw ArgumentError.value(slot, 'slot', 'Invalid staging guest slot'),
   };
 
