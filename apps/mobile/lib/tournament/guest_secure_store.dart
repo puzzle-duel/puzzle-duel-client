@@ -5,16 +5,12 @@ import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 enum StagingGuestSlot {
   legacy,
   playerA,
-  playerB,
-  gokhan,
-  serap;
+  playerB;
 
   static StagingGuestSlot parse(String name) => switch (name) {
     'legacy' => StagingGuestSlot.legacy,
     'player-a' => StagingGuestSlot.playerA,
     'player-b' => StagingGuestSlot.playerB,
-    'gokhan' => StagingGuestSlot.gokhan,
-    'serap' => StagingGuestSlot.serap,
     _ => throw const GuestAuthException('INVALID_GUEST_SLOT'),
   };
 }
@@ -39,14 +35,6 @@ final class StagingGuestCredentialKeys {
             'pzd.staging.guest.player-b.refresh.v1',
             'pzd.staging.guest.player-b.rotation.v1',
           ),
-        StagingGuestSlot.gokhan => const StagingGuestCredentialKeys._(
-            'pzd.staging.guest.gokhan.refresh.v1',
-            'pzd.staging.guest.gokhan.rotation.v1',
-          ),
-        StagingGuestSlot.serap => const StagingGuestCredentialKeys._(
-            'pzd.staging.guest.serap.refresh.v1',
-            'pzd.staging.guest.serap.rotation.v1',
-          ),
       };
 }
 
@@ -59,13 +47,6 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
 
   final StagingGuestSlot slot;
   final FlutterSecureStorage _storage;
-
-  String get _namedPlayerKey => 'pzd.staging.guest.${slot.name}.player-id.v1';
-
-  Future<String?> readNamedPlayerId() => _storage.read(key: _namedPlayerKey);
-
-  Future<void> writeNamedPlayerId(String playerId) =>
-      _storage.write(key: _namedPlayerKey, value: playerId);
 
   String get _refreshKey => StagingGuestCredentialKeys.forSlot(slot).refresh;
   String get _rotationKey => StagingGuestCredentialKeys.forSlot(slot).rotation;
