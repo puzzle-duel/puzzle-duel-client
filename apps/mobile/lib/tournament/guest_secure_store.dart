@@ -5,12 +5,16 @@ import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 enum StagingGuestSlot {
   legacy,
   playerA,
-  playerB;
+  playerB,
+  gokhan,
+  serap;
 
   static StagingGuestSlot parse(String name) => switch (name) {
     'legacy' => StagingGuestSlot.legacy,
     'player-a' => StagingGuestSlot.playerA,
     'player-b' => StagingGuestSlot.playerB,
+    'gokhan' => StagingGuestSlot.gokhan,
+    'serap' => StagingGuestSlot.serap,
     _ => throw const GuestAuthException('INVALID_GUEST_SLOT'),
   };
 }
@@ -34,6 +38,14 @@ final class StagingGuestCredentialKeys {
         StagingGuestSlot.playerB => const StagingGuestCredentialKeys._(
             'pzd.staging.guest.player-b.refresh.v1',
             'pzd.staging.guest.player-b.rotation.v1',
+          ),
+        StagingGuestSlot.gokhan => const StagingGuestCredentialKeys._(
+            'pzd.staging.guest.gokhan.refresh.v1',
+            'pzd.staging.guest.gokhan.rotation.v1',
+          ),
+        StagingGuestSlot.serap => const StagingGuestCredentialKeys._(
+            'pzd.staging.guest.serap.refresh.v1',
+            'pzd.staging.guest.serap.rotation.v1',
           ),
       };
 }
