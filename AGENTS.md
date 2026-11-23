@@ -17,6 +17,9 @@ Implement placement-first arrow move, runs >=3, unique union clear, simultaneous
 - Backend is source of truth for ranked score; never use local score as confirmed rank.
 - No third-party assets with unclear commercial license; no club logos/names or implied endorsement.
 
+## Mandatory observability reading gate — EVERY development task
+Before planning or editing any screen, route, API call, error handling, CI, Firebase or staging code, **MUST READ** `docs/staging/STAGING-OBSERVABILITY-RELEASE-GATE.md` and `docs/staging/SERVER-CONFIG.md`. The observability guide is binding for all client features (not just release): screen/important action breadcrumbs, HTTP start/completed/failed with the same 32-hex `x-request-id`, Firebase Crashlytics custom logs, Report ID/Request ID Inspector, redaction and honest NOT_RUN gates. All changes must document instrumentation impact and tests. If the feature needs a new diagnostic event code or report field, update client/backend contract and inspector together; never bypass allowlists or log secrets. No changes to game mechanics/animations under a logging task. Gökhan/Serap named-player enrollment was reverted; do not recreate it to satisfy logging.
+
 ## Workflow / quality gates
 Before code: cite feature ID, impacted blueprint rules, ADRs and test plan. Make minimum scoped diff. Provide unit tests for each ruleset change, widget/e2e tests for relevant UX, and contract/golden fixture parity with backend. Run formatting/lint/tests and report exact results; do not claim unrun tests passed.
 Do NOT push to main, merge PR, modify organization settings, deploy or publish without explicit approval. Ask before adding dependencies, analytics SDKs, IAP or changing auth/privacy.
