@@ -10,6 +10,19 @@ abstract final class AppStateDirectory {
   static const subdirectory = 'puzzle_duel';
 
   /// Application-support root used by the real app.
+  /// Separate each explicitly chosen UAT guest's local session vault,
+  /// home cache and practice state. Existing legacy storage is untouched.
+  static Future<Directory> resolveForGuestSlot(String slot) async {
+    final root = await resolve();
+    if (slot == 'legacy') return root;
+    if (slot != 'player-a' && slot != 'player-b') {
+      throw ArgumentError.value(slot, 'slot', 'Invalid staging guest slot');
+    }
+    final directory = Directory('${root.path}/staging-guests/$slot');
+    await directory.create(recursive: true);
+    return directory;
+  }
+
   static Future<Directory> resolve() async {
     final support = await getApplicationSupportDirectory();
     final directory = Directory('${support.path}/$subdirectory');
