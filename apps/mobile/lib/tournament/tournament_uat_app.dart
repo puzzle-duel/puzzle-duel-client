@@ -26,8 +26,12 @@ import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 export 'tournament_controller.dart';
 
-Future<void> runTournamentUatApp(UatConfig config, {UatApi? api}) async {
-  final directory = await AppStateDirectory.resolve();
+Future<void> runTournamentUatApp(
+  UatConfig config, {
+  UatApi? api,
+  String stagingGuestSlot = 'legacy',
+}) async {
+  final directory = await AppStateDirectory.resolveForGuestSlot(stagingGuestSlot);
   runApp(
     TournamentUatApp(
       config: config,
