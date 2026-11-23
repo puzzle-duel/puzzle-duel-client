@@ -74,7 +74,11 @@ Future<void> main() async {
       // The expected UUID is non-secret configuration, obtained from the
       // authoritative staging DB via the approved enrollment workflow.
       const expectedSubject = String.fromEnvironment('PZD_STAGING_EXPECTED_PLAYER_ID');
-      if (namedPlayer && !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}
+      if (namedPlayer && !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$').hasMatch(expectedSubject)) {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_BINDING_REQUIRED'));
+        return;
+      }
+      final auth = GuestAuthClient(
         origin: staging,
         credentials: store,
       );
