@@ -61,15 +61,24 @@ Future<void> main() async {
         defaultValue: 'legacy',
       );
       final slot = StagingGuestSlot.parse(guestSlot);
+      final namedPlayer = guestSlot == 'gokhan' || guestSlot == 'serap';
+      final store = SecureGuestCredentialStore(slot: slot);
+      // Named staging identities must never silently become new guests.
+      // The matching Oracle-issued refresh token must first be imported
+      // through a separate, approved secure device enrollment flow.
+      if (namedPlayer && (await store.readRefreshToken()) == null) {
+        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_ENROLLMENT_REQUIRED'));
+        return;
+      }
       final auth = GuestAuthClient(
         origin: staging,
-        credentials: SecureGuestCredentialStore(slot: slot),
+        credentials: store,
       );
       final access = await auth.authenticate();
       await runTournamentUatApp(UatConfig(
         baseUrl: staging,
         bearer: access.accessToken,
-        playerLabel: 'Guest',
+        playerLabel: guestSlot == 'gokhan' ? 'Gökhan Aydın' : guestSlot == 'serap' ? 'Serap Nazlı Aydın' : 'Guest',
         stagingSessionBinding: access.sessionVaultBinding,
       ), api: UatApi(
         baseUrl: UatApi.apiOrigin(staging),
