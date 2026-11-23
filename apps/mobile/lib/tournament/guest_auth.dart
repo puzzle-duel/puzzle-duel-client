@@ -121,7 +121,7 @@ final class GuestAuthClient {
   }
 
   /// Redeem an operator-authorized challenge. No guest creation fallback.
-  Future<GuestAccess> enrollNamedDevice(String code) async {
+  Future<GuestAccess> enrollNamedDevice(String code, {Future<void> Function(String)? saveBinding}) async {
     if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(code)) {
       throw const GuestAuthException('INVALID_ENROLLMENT_CODE');
     }
@@ -144,6 +144,9 @@ final class GuestAuthClient {
     if (candidate.sessionVaultBinding != 'staging-guest:$playerId') {
       throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
     }
+    // Persist the subject before the refresh token: abrupt process termination
+    // must never leave an unbound named credential.
+    if (saveBinding != null) await saveBinding(playerId);
     return _save(result.body);
   }
 
