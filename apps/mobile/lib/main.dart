@@ -75,180 +75,10 @@ Future<void> main() async {
         ));
         return;
       }
-      // Binding is pinned on-device during the one-time authorized enrollment.
-      // Neither a Dart define nor a display name is an authentication proof.
+      // The device remembers its enrollment binding, never an arbitrary Dart flag.
       final expectedSubject = namedPlayer ? await store.readNamedPlayerId() : null;
       if (namedPlayer && (expectedSubject == null ||
-          !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}
-      final auth = GuestAuthClient(
-        origin: staging,
-        credentials: store,
-      );
-      final access = await auth.authenticate();
-      if (namedPlayer && access.sessionVaultBinding != 'staging-guest:$expectedSubject') {
-        runApp(const StagingStartupErrorScreen('NAMED_PLAYER_IDENTITY_MISMATCH'));
-        return;
-      }
-      await runTournamentUatApp(UatConfig(
-        baseUrl: staging,
-        bearer: access.accessToken,
-        playerLabel: guestSlot == 'gokhan' ? 'Gökhan Aydın' : guestSlot == 'serap' ? 'Serap Nazlı Aydın' : 'Guest',
-        stagingSessionBinding: access.sessionVaultBinding,
-      ), api: UatApi(
-        baseUrl: UatApi.apiOrigin(staging),
-        bearer: access.accessToken,
-        accessTokenProvider: () async {
-          final refreshed = await auth.authenticate();
-          if (namedPlayer && refreshed.sessionVaultBinding != 'staging-guest:$expectedSubject') {
-            throw const GuestAuthException('NAMED_PLAYER_IDENTITY_MISMATCH');
-          }
-          return refreshed.accessToken;
-        },
-      ), stagingGuestSlot: guestSlot);
-    } on GuestAuthException catch (error) {
-      // A guest identity must never be replaced by an offline session.
-      runApp(StagingStartupErrorScreen(error.code));
-    } on Exception {
-      // Never show raw exceptions, URLs, tokens, or response bodies.
-      runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
-    }
-    return;
-  }
-  runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
-}
-
-
-@visibleForTesting
-final class NamedPlayerEnrollmentScreen extends StatefulWidget {
-  const NamedPlayerEnrollmentScreen({
-    required this.origin,
-    required this.slot,
-    required this.onComplete,
-    super.key,
-  });
-
-  final String origin;
-  final StagingGuestSlot slot;
-  final VoidCallback onComplete;
-
-  @override
-  State<NamedPlayerEnrollmentScreen> createState() => _NamedPlayerEnrollmentScreenState();
-}
-
-final class _NamedPlayerEnrollmentScreenState extends State<NamedPlayerEnrollmentScreen> {
-  late final String code = List<int>.generate(16, (_) => Random.secure().nextInt(256))
-      .map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
-  bool working = false;
-  String? error;
-
-  Future<void> enroll() async {
-    if (working) return;
-    setState(() { working = true; error = null; });
-    try {
-      final store = SecureGuestCredentialStore(slot: widget.slot);
-      final access = await GuestAuthClient(origin: widget.origin, credentials: store)
-          .enrollNamedDevice(code);
-      final subject = access.sessionVaultBinding.substring('staging-guest:'.length);
-      await store.saveNamedPlayerId(subject);
-      if (!mounted) return;
-      widget.onComplete();
-    } on Exception {
-      if (mounted) setState(() => error = 'Authorization not ready or expired. Check the staging workflow.');
-    } finally {
-      if (mounted) setState(() => working = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Puzzle Duel Staging',
-    home: Scaffold(
-      appBar: AppBar(title: const Text('Staging device pairing')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(widget.slot == StagingGuestSlot.gokhan ? 'Gökhan Aydın' : 'Serap Nazlı Aydın'),
-              const SizedBox(height: 20),
-              const Text('In GitHub Actions run "Authorize named iOS staging enrollment" '
-                  'on version/0.0.2. Select the matching player and enter this device code:'),
-              const SizedBox(height: 16),
-              SelectableText(code, key: const Key('named-enrollment-code')),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: working ? null : enroll,
-                child: Text(working ? 'Connecting…' : 'Complete pairing'),
-              ),
-              if (error != null) ...[
-                const SizedBox(height: 12),
-                Text(error!, key: const Key('named-enrollment-error')),
-              ],
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-
-@visibleForTesting
-final class StagingStartupLoadingScreen extends StatelessWidget {
-  const StagingStartupLoadingScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Puzzle Duel',
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              const Text('Connecting to tournament…'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// This is shown ONLY for staging configuration/auth failures.
-@visibleForTesting
-final class StagingStartupErrorScreen extends StatelessWidget {
-  const StagingStartupErrorScreen(this.errorCode, {super.key});
-
-  final String errorCode;
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Puzzle Duel Staging',
-      home: Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Tournament staging unavailable'),
-              const SizedBox(height: 12),
-              Text(errorCode, key: const Key('staging-startup-error')),
-              const SizedBox(height: 12),
-              const Text('Check staging HTTPS configuration and restart the app.'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-).hasMatch(expectedSubject))) {
+          !RegExp(r'^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$').hasMatch(expectedSubject))) {
         runApp(const StagingStartupErrorScreen('NAMED_PLAYER_BINDING_REQUIRED'));
         return;
       }
@@ -289,6 +119,87 @@ final class StagingStartupErrorScreen extends StatelessWidget {
   runApp(const StagingStartupErrorScreen('STAGING_CONFIGURATION_UNAVAILABLE'));
 }
 
+
+
+@visibleForTesting
+final class NamedPlayerEnrollmentScreen extends StatefulWidget {
+  const NamedPlayerEnrollmentScreen({
+    required this.origin,
+    required this.slot,
+    required this.onComplete,
+    super.key,
+  });
+  final String origin;
+  final StagingGuestSlot slot;
+  final VoidCallback onComplete;
+
+  @override
+  State<NamedPlayerEnrollmentScreen> createState() =>
+      _NamedPlayerEnrollmentScreenState();
+}
+
+final class _NamedPlayerEnrollmentScreenState extends State<NamedPlayerEnrollmentScreen> {
+  late final String code = List<int>.generate(
+    16, (_) => Random.secure().nextInt(256),
+  ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  bool working = false;
+  String? error;
+
+  Future<void> enroll() async {
+    if (working) return;
+    setState(() { working = true; error = null; });
+    try {
+      final store = SecureGuestCredentialStore(slot: widget.slot);
+      final access = await GuestAuthClient(
+        origin: widget.origin, credentials: store,
+      ).enrollNamedDevice(code);
+      final subject = access.sessionVaultBinding.substring('staging-guest:'.length);
+      await store.saveNamedPlayerId(subject);
+      if (!mounted) return;
+      widget.onComplete();
+    } on Exception {
+      if (mounted) {
+        setState(() => error = 'Authorization not ready or expired. Check staging workflow.');
+      }
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'Puzzle Duel Staging',
+    home: Scaffold(
+      appBar: AppBar(title: const Text('Staging device pairing')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.slot == StagingGuestSlot.gokhan
+                  ? 'Gökhan Aydın' : 'Serap Nazlı Aydın'),
+              const SizedBox(height: 20),
+              const Text('In GitHub Actions run "Authorize named iOS staging enrollment" '
+                  'on version/0.0.2. Select the matching player and enter this code:'),
+              const SizedBox(height: 16),
+              SelectableText(code, key: const Key('named-enrollment-code')),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: working ? null : enroll,
+                child: Text(working ? 'Connecting…' : 'Complete pairing'),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 12),
+                Text(error!, key: const Key('named-enrollment-error')),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 @visibleForTesting
 final class StagingStartupLoadingScreen extends StatelessWidget {
