@@ -917,14 +917,38 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
       if (response.error == 'WRITER_NOT_AUTHORIZED') {
-        // Soft, non-network notice: do not auto-retry or invent scores.
+        // Do not replay the rejected move or weaken the server writer fence.
         _clearPendingCommand();
         session.clearAuthoritativeUnknown();
         session.showServerRejection('WRITER_NOT_AUTHORIZED');
         rankedWriterLocked = true;
         noticeCode = 'WRITER_NOT_AUTHORIZED';
         errorCode = null;
-        // Floating banner owns copy — do not push raw codes into board feedback.
+        // Once only: ask the server to restore/verify this session and the
+        // writer binding, then explicitly re-read writerSessionMatches.
+        // Never treat readable board/claim as writer authorization.
+        if (_verifiedSessionId != null && api.sessionSecret != null) {
+          await refreshTournament(preserveRoute: true);
+          if (id == seriesId && route.place == TournamentPlace.playing &&
+              api.sessionSecret != null && !session.authoritativeOutcomeUnknown) {
+            final verified = await api.get('/v1/tournament/series/$id/board');
+            if (verified.status == 200 &&
+                verified.map['writerSessionMatches'] == true) {
+              _applyBoard(verified.map, reveal: false);
+              rankedWriterLocked = false;
+              tournamentNoticeCode = null;
+              tournamentSync = TournamentSyncState.ready;
+              noticeCode = null;
+              notifyListeners();
+            } else {
+              rankedWriterLocked = true;
+              noticeCode = 'WRITER_NOT_AUTHORIZED';
+              tournamentNoticeCode = 'WRITER_NOT_AUTHORIZED';
+              notifyListeners();
+            }
+          }
+        }
+        // Existing rejection copy / haptics; no speculative score or move.
         _haptic((feel) => feel.rejected());
         return;
       }
