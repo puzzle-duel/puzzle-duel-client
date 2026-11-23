@@ -43,7 +43,7 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
           (base.path.isNotEmpty && base.path != '/')) {
         throw const GuestAuthException('STAGING_HTTPS_REQUIRED');
       }
-      final request = await client.postUrl(base.resolve('/v1/auth/named-enroll'))
+      final request = await client.postUrl(base.resolve('/v1/auth/guest?named-enrollment=1'))
           .timeout(const Duration(seconds: 8));
       request.headers.contentType = ContentType.json;
       request.headers.set('cache-control', 'no-store');
