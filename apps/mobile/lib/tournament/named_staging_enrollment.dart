@@ -58,6 +58,12 @@ class _NamedStagingEnrollmentScreenState extends State<NamedStagingEnrollmentScr
       final body = await response.fold<List<int>>(<int>[], (a, b) => a..addAll(b))
           .timeout(const Duration(seconds: 12));
       if (body.length > 16384) throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      if (response.statusCode == 503) {
+        throw const GuestAuthException('ENROLLMENT_SERVER_UNAVAILABLE');
+      }
+      if (response.statusCode == 429) {
+        throw const GuestAuthException('ENROLLMENT_RATE_LIMITED');
+      }
       if (response.statusCode != 200) {
         throw const GuestAuthException('ENROLLMENT_REJECTED');
       }
