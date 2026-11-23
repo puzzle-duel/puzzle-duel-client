@@ -54,9 +54,16 @@ Future<void> main() async {
   }
   if (staging.isNotEmpty) {
     try {
+      // Explicit UAT selection, independent of Git worktree and iOS bundle ID.
+      // Legacy remains the default so existing Player B tokens are not moved.
+      const guestSlot = String.fromEnvironment(
+        'PZD_STAGING_GUEST_SLOT',
+        defaultValue: 'legacy',
+      );
+      final slot = StagingGuestSlot.parse(guestSlot);
       final auth = GuestAuthClient(
         origin: staging,
-        credentials: const SecureGuestCredentialStore(),
+        credentials: SecureGuestCredentialStore(slot: slot),
       );
       final access = await auth.authenticate();
       await runTournamentUatApp(UatConfig(
@@ -68,7 +75,7 @@ Future<void> main() async {
         baseUrl: UatApi.apiOrigin(staging),
         bearer: access.accessToken,
         accessTokenProvider: () async => (await auth.authenticate()).accessToken,
-      ));
+      ), stagingGuestSlot: guestSlot);
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
       runApp(StagingStartupErrorScreen(error.code));
