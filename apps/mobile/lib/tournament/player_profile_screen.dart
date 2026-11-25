@@ -401,30 +401,50 @@ final class _AccountStatusCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(GameTokens.radiusMd),
           border: Border.all(color: GameTokens.border),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              verified ? Icons.verified_user_rounded : Icons.person_outline,
-              color: verified ? GameTokens.success : GameTokens.textSecondary,
+            Row(
+              children: [
+                Icon(
+                  verified
+                      ? Icons.verified_user_rounded
+                      : Icons.person_outline,
+                  color: verified
+                      ? GameTokens.success
+                      : GameTokens.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    verified
+                        ? copy.accountStatusVerified
+                        : copy.accountStatusGuest,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: GameTokens.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                verified
-                    ? copy.accountStatusVerified
-                    : copy.accountStatusGuest,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: GameTokens.textPrimary,
+            if (!verified && onSignIn != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: const Key('profile-sign-in'),
+                  onPressed: onSignIn,
+                  child: Text(
+                    copy.signInToPlay,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
-            ),
-            if (!verified && onSignIn != null)
-              TextButton(
-                key: const Key('profile-sign-in'),
-                onPressed: onSignIn,
-                child: Text(copy.signInToPlay),
-              ),
+            ],
           ],
         ),
       ),
@@ -668,35 +688,39 @@ final class _BadgeGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final columns = width >= 420
-            ? 3
-            : width >= 280
-            ? 2
-            : 1;
-        final gap = 10.0;
-        final tileWidth = columns == 1
-            ? width
-            : (width - gap * (columns - 1)) / columns;
-        return Wrap(
-          key: const Key('badge-grid'),
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (final badge in snapshot.badges)
-              SizedBox(
-                width: tileWidth,
-                child: _BadgeTile(
-                  badge: badge,
-                  copy: copy,
-                  onTap: () => onSelect(badge),
+    // Key lives outside LayoutBuilder so finders/scroll helpers can locate the
+    // section before the wrap is laid out in the ListView cache window.
+    return KeyedSubtree(
+      key: const Key('badge-grid'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final columns = width >= 420
+              ? 3
+              : width >= 280
+              ? 2
+              : 1;
+          final gap = 10.0;
+          final tileWidth = columns == 1
+              ? width
+              : (width - gap * (columns - 1)) / columns;
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              for (final badge in snapshot.badges)
+                SizedBox(
+                  width: tileWidth,
+                  child: _BadgeTile(
+                    badge: badge,
+                    copy: copy,
+                    onTap: () => onSelect(badge),
+                  ),
                 ),
-              ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 }
