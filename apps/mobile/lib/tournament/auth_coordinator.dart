@@ -308,10 +308,18 @@ final class AuthCoordinator {
         );
       }
 
-      // Uncommitted link: guest session still valid for the expected player.
+      // Probe only with a server-backed refresh. A cached unexpired guest JWT
+      // is not proof the backend family is still active after a committed link.
       try {
-        final existing = await session.authenticate();
-        if (existing.isGuest && existing.playerId == pending.playerId) {
+        final existing = await session.authenticate(
+          forceRefresh: true,
+          allowGuestCreate: false,
+        );
+        if (existing.playerId != pending.playerId) {
+          _breadcrumb('auth_recovery_probe_identity_mismatch',
+              errorCode: 'RECOVERY_IDENTITY_MISMATCH');
+          // Keep marker; fall through to create-forbidden recover.
+        } else if (existing.isGuest) {
           _breadcrumb('auth_recovery_retry_link');
           return AuthFlowResult(
             outcome: AuthFlowOutcome.failed,
@@ -319,16 +327,25 @@ final class AuthCoordinator {
             recoveryProvider: provider,
             expectedPlayerId: pending.playerId,
           );
-        }
-        if (existing.isVerified && existing.playerId == pending.playerId) {
+        } else if (existing.isVerified) {
           await session.clearPendingLinkProvider();
           return AuthFlowResult(
             outcome: AuthFlowOutcome.loggedIn,
             access: existing,
           );
         }
-      } on GuestAuthException {
-        // Proceed to server-side recover.
+      } on GuestAuthException catch (error) {
+        if (error.code == 'REFRESH_UNAVAILABLE' ||
+            error.code == 'AUTH_NETWORK_UNAVAILABLE') {
+          // Temporary network failure — keep marker; do not invent guest/recover.
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: error.code,
+            recoveryProvider: provider,
+            expectedPlayerId: pending.playerId,
+          );
+        }
+        // Revoked/rejected family or pending-link recovery → provider recover.
       }
 
       _breadcrumb('auth_recovery_started_${provider.name}');

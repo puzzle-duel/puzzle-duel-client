@@ -277,7 +277,17 @@ final class GuestAuthClient {
 
   /// Coalesces concurrent authentication. Stale `_pending` futures from a prior
   /// generation (after logout/link) are never reused.
-  Future<GuestAccess> authenticate({bool forceRefresh = false}) {
+  ///
+  /// [forceRefresh] skips the local JWT cache and requires a server-backed
+  /// refresh (or guest create when [allowGuestCreate] is true). Cached JWT
+  /// expiry alone is never proof that a backend family is still active.
+  ///
+  /// [allowGuestCreate] must be false for recovery probes so an uncertain
+  /// pending-link state cannot mint a replacement guest player.
+  Future<GuestAccess> authenticate({
+    bool forceRefresh = false,
+    bool allowGuestCreate = true,
+  }) {
     final cached = _current;
     if (!forceRefresh &&
         cached != null &&
@@ -290,7 +300,11 @@ final class GuestAuthClient {
       return pending;
     }
     final generation = _credentialGeneration;
-    final next = _authenticate(generation: generation);
+    final next = _authenticate(
+      generation: generation,
+      forceNetworkRefresh: forceRefresh,
+      allowGuestCreate: allowGuestCreate,
+    );
     _pending = next;
     _pendingGeneration = generation;
     return next.whenComplete(() {
@@ -412,6 +426,7 @@ final class GuestAuthClient {
   Future<GuestAccess> _authenticate({
     required int generation,
     bool forceNetworkRefresh = false,
+    bool allowGuestCreate = true,
   }) async {
     if (generation != _credentialGeneration) {
       throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
@@ -462,13 +477,13 @@ final class GuestAuthClient {
           httpStatus: result.status, errorCode: 'GUEST_RECOVERY_REQUIRED');
       throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
     }
-    if (forceNetworkRefresh) {
-      throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
-    }
     final recovery = await _pendingLinkRecoveryCode();
     if (recovery != null) {
       // Never silently mint a new guest while a link may have upgraded identity.
       throw GuestAuthException(recovery);
+    }
+    if (forceNetworkRefresh || !allowGuestCreate) {
+      throw const GuestAuthException('GUEST_RECOVERY_REQUIRED');
     }
     final result = await _post('/v1/auth/guest', const {});
     if (result.status != 201 && result.status != 200) {

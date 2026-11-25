@@ -42,7 +42,8 @@ Do **not** weaken backend nonce verification. Do **not** introduce Firebase Auth
 - Before link HTTP: durable marker `provider|<playerId>` (never tokens/nonces).
 - Backend success + lost response / timeout / vault failure → `recoveryRequired`.
 - Recovery UI calls **`recoverPendingLink`** → backend **`POST /v1/auth/providers/recover`** (create-forbidden). Never generic `login`.
-- If guest session still valid (link never committed) → `RECOVERY_RETRY_LINK` and UI returns to link buttons.
+- Guest-validity probe uses **`authenticate(forceRefresh: true, allowGuestCreate: false)`** (single-flight). Cached JWT expiry is not proof the backend family is still active; only a successful server refresh of the expected guest player yields `RECOVERY_RETRY_LINK`.
+- Temporary probe network failures (`REFRESH_UNAVAILABLE` / `AUTH_NETWORK_UNAVAILABLE`) keep the durable marker and do not mint a guest or call recover.
 - Server rejects unknown subject (`RECOVERY_NOT_LINKED`) / wrong linked player (`ACCOUNT_CONFLICT`) before creating player/link/family.
 - Client also refuses vault commit if returned `playerId` ≠ marker (belt-and-suspenders).
 - Generic `loginExisting` remains for intentional ACCOUNT_CONFLICT account switch only.

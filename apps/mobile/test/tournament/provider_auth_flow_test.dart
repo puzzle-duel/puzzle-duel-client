@@ -685,7 +685,7 @@ void main() {
     expect(providers.loginCalls, 0);
   });
 
-  test('recoverPendingLink asks to retry link when guest session still valid',
+  test('recoverPendingLink retries link only after server confirms guest family',
       () async {
     final store = _MemoryStore()
       ..token = 'guest-refresh'
@@ -694,10 +694,25 @@ void main() {
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
     );
+    // Cached JWT alone must not decide — forceRefresh must hit the server.
     session.debugSeedAccess(GuestAccess.parse(
       accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
       expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
     ));
+    var refreshPosts = 0;
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      refreshPosts++;
+      return (
+        status: 200,
+        body: {
+          'accessToken': _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+          'refreshToken': 'guest-refresh-still-valid',
+          'expiresAt':
+              DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String(),
+        },
+      );
+    };
     final providers = _FakeProviders();
     final coordinator = AuthCoordinator(
       session: session,
@@ -707,10 +722,161 @@ void main() {
     final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
     expect(result.outcome, AuthFlowOutcome.failed);
     expect(result.errorCode, 'RECOVERY_RETRY_LINK');
+    expect(refreshPosts, 1);
     expect(store.pendingLink, 'google|$guestId');
-    expect(store.token, 'guest-refresh');
+    expect(store.token, 'guest-refresh-still-valid');
     expect(providers.recoverCalls, 0);
     expect(providers.loginCalls, 0);
+  });
+
+  test('cached guest JWT after committed link still forces recover', () async {
+    final store = _MemoryStore()
+      ..token = 'revoked-guest-refresh'
+      ..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    var refreshPosts = 0;
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      refreshPosts++;
+      return (status: 401, body: {'error': 'INVALID_REFRESH'});
+    };
+    final providers = _FakeProviders(loginPlayerId: guestId);
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.loggedIn);
+    expect(result.access?.playerId, guestId);
+    expect(refreshPosts, 1);
+    expect(providers.recoverCalls, 1);
+    expect(providers.loginCalls, 0);
+    expect(store.pendingLink, isNull);
+    expect(store.token, 'verified-refresh-recover');
+  });
+
+  test('revoked guest family keeps marker until recover succeeds', () async {
+    final store = _MemoryStore()
+      ..token = 'revoked-guest-refresh'
+      ..pendingLink = 'apple|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugTransport = (path, body) async =>
+        (status: 403, body: {'error': 'INVALID_REFRESH'});
+    final providers = _FakeProviders()
+      ..recoverError = const ProviderAuthException('RECOVERY_NOT_LINKED');
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.apple);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.errorCode, 'RECOVERY_NOT_LINKED');
+    expect(store.pendingLink, 'apple|$guestId');
+    expect(providers.recoverCalls, 1);
+  });
+
+  test('temporary refresh network failure keeps marker without recover',
+      () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugTransport = (path, body) async =>
+        (status: 503, body: {'error': 'AUTH_UNAVAILABLE'});
+    final providers = _FakeProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.errorCode, 'REFRESH_UNAVAILABLE');
+    expect(store.pendingLink, 'google|$guestId');
+    expect(providers.recoverCalls, 0);
+  });
+
+  test('socket-class probe failure keeps marker without recover', () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugTransport = (path, body) async {
+      throw const GuestAuthException('AUTH_NETWORK_UNAVAILABLE');
+    };
+    final providers = _FakeProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.errorCode, 'AUTH_NETWORK_UNAVAILABLE');
+    expect(store.pendingLink, 'google|$guestId');
+    expect(providers.recoverCalls, 0);
+  });
+
+  test('recovery probe shares single-flight with concurrent forceRefresh',
+      () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final gate = Completer<void>();
+    var refreshPosts = 0;
+    session.debugTransport = (path, body) async {
+      refreshPosts++;
+      await gate.future;
+      return (
+        status: 200,
+        body: {
+          'accessToken': _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+          'refreshToken': 'guest-refresh-shared',
+          'expiresAt':
+              DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String(),
+        },
+      );
+    };
+    final providers = _FakeProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final recovery = coordinator.recoverPendingLink(AuthProviderKind.google);
+    final concurrent = session.authenticate(forceRefresh: true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(refreshPosts, 1);
+    gate.complete();
+    final result = await recovery;
+    final refreshed = await concurrent;
+    expect(result.errorCode, 'RECOVERY_RETRY_LINK');
+    expect(refreshed.playerId, guestId);
+    expect(refreshed.isGuest, isTrue);
+    expect(refreshPosts, 1);
+    expect(providers.recoverCalls, 0);
   });
 
   test('recoverPendingLink rejects wrong provider without clearing marker',
