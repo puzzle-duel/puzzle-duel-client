@@ -109,11 +109,25 @@ PZD_STAGING_FIREBASE=1 flutter build ios --release \
   --dart-define=PZD_STAGING_BASE_URL="$PZD_STAGING_BASE_URL" \
   --dart-define=PZD_FIREBASE_CONFIGURED=true \
   --dart-define=PZD_DIAGNOSTIC_ENV=staging \
-  --dart-define=PZD_STAGING_DIAGNOSTICS=true
+  --dart-define=PZD_STAGING_DIAGNOSTICS=true \
+  --dart-define=PZD_GOOGLE_SERVER_CLIENT_ID=450107669068-a4l8vrgas78rqdm8aou7kvnhsldkafbi.apps.googleusercontent.com \
+  --dart-define=PZD_GOOGLE_IOS_CLIENT_ID=450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse.apps.googleusercontent.com
 
 # Install the prebuilt release app; do NOT use flutter run for persistent device UAT.
 flutter install --release -d 00008160-001C5C993E80000A
 ```
+
+Google Sign-In staging helper (fails closed unless provider challenge returns 201):
+
+```sh
+cd ~/Desktop/workspace/puzzle-duel-client/apps/mobile
+bash scripts/ios_staging_google_uat.sh
+```
+
+iOS `Info.plist` includes the staging Google reversed client ID URL scheme
+`com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse`.
+OAuth client IDs stay in dart-defines (staging vs production isolation). No Firebase Auth.
+
 
 After installing, launch **Puzzle Duel from the iPhone icon**, force-quit the app, disconnect the cable / close the Mac terminal, and relaunch from the icon. Check that the **TournamentUatApp** opens (or displays a specific staging auth/connectivity error), **never** a black Flutter debug explanation, old Easy/Medium/Hard page, or indefinite blank screen. Reinstall the release over a previous debug install; do not uninstall the app casually, because guest credentials and local state might be lost.
 

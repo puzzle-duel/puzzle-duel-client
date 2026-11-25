@@ -65,16 +65,54 @@ Staging vs production must use separate OAuth clients.
 ## Native configuration checklist
 
 ### iOS (`app.puzzleduel.puzzleDuelMobile`) — do not change bundle ID
-- [ ] Sign in with Apple capability + entitlements
-- [ ] Apple Services / App ID configured for backend audiences
-- [ ] Google URL scheme / reversed client ID in `Info.plist`
+- [ ] Sign in with Apple capability + entitlements *(Google-only staging UAT may proceed without Apple entitlement; Apple remains fail-closed)*
+- [ ] Apple Services / App ID configured for backend audiences *(deferred until Apple enrollment)*
+- [x] Google URL scheme / reversed client ID in `Info.plist` — staging: `com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse`
 - [ ] Deployment target compatible with `sign_in_with_apple` 6.x
-- [ ] Provisioning profile includes Sign in with Apple
+- [ ] Provisioning profile includes Sign in with Apple *(not required for Google-only staging UAT)*
 
 ### Android (`app.puzzleduel.puzzle_duel_mobile`) — do not change application ID
 - [ ] SHA-1 / SHA-256 for debug and release registered in Google Cloud
 - [ ] Server/Web client ID matches `PZD_GOOGLE_SERVER_CLIENT_ID`
 - [ ] Apple on Android: **not** equivalent to iOS; Services ID + browser callback required — currently fail-closed until owner configures and accepts UAT
+- Android Debug Client ID (record only; out of this task): `450107669068-m6upi7tq3rsstadcik4n4c7qfolb6lk6.apps.googleusercontent.com`
+
+## Staging Google OAuth (owner-provided; not secrets)
+
+| Role | Value |
+|---|---|
+| Web / Server Client ID (`PZD_GOOGLE_SERVER_CLIENT_ID` + backend `aud`) | `450107669068-a4l8vrgas78rqdm8aou7kvnhsldkafbi.apps.googleusercontent.com` |
+| iOS Client ID (`PZD_GOOGLE_IOS_CLIENT_ID` + backend `azp`) | `450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse.apps.googleusercontent.com` |
+| iOS reversed Client ID / URL scheme | `com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse` |
+
+Backend `PZD_STAGING_GOOGLE_AUDIENCES` must include **both** Web and iOS client IDs (token `aud` + `azp` verification). Do not add Android until Android UAT is in scope. No Google client secret. No Firebase Auth.
+
+## Physical iPhone staging UAT command
+
+Verified HTTPS origin: `https://84-13-66-211.sslip.io`. Device: `00008160-001C5C993E80000A`.
+
+```sh
+cd ~/Desktop/workspace/puzzle-duel-client/apps/mobile
+# Prefer the helper (fails closed if provider challenge ≠ 201):
+bash scripts/ios_staging_google_uat.sh
+```
+
+Equivalent one-shot (after staging migrations 0005–0007 + Google audiences + service restart):
+
+```sh
+cd ~/Desktop/workspace/puzzle-duel-client/apps/mobile
+curl -fsS --connect-timeout 5 --max-time 15 https://84-13-66-211.sslip.io/healthz >/dev/null
+PZD_STAGING_FIREBASE=1 flutter build ios --release \
+  --dart-define=PZD_STAGING_BASE_URL=https://84-13-66-211.sslip.io \
+  --dart-define=PZD_FIREBASE_CONFIGURED=true \
+  --dart-define=PZD_DIAGNOSTIC_ENV=staging \
+  --dart-define=PZD_STAGING_DIAGNOSTICS=true \
+  --dart-define=PZD_GOOGLE_SERVER_CLIENT_ID=450107669068-a4l8vrgas78rqdm8aou7kvnhsldkafbi.apps.googleusercontent.com \
+  --dart-define=PZD_GOOGLE_IOS_CLIENT_ID=450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse.apps.googleusercontent.com
+flutter install --release -d 00008160-001C5C993E80000A
+```
+
+Launch from the iPhone home screen. Real signed Google nonce UAT is **NOT_RUN** until device evidence is recorded.
 
 ## Contract notes (from merged PZD-26 source)
 - Link challenge response has **no** `binding` field (server binds `link:{playerId}:{fid}`).
@@ -90,10 +128,12 @@ Staging vs production must use separate OAuth clients.
 |---|---|
 | Mock unit/widget coverage | Implemented / run in CI |
 | Real Apple device UAT (nonce claim) | **BLOCKED** / **NOT_RUN** — needs Apple capability + audiences; SDK path implemented |
-| Real Google device UAT (nonce claim) | **BLOCKED** / **NOT_RUN** — needs OAuth client IDs; SDK 7.x nonce path implemented (config blocker only) |
+| Real Google device UAT (nonce claim) | **BLOCKED** / **NOT_RUN** — client OAuth IDs + URL scheme prepared; waiting backend migrations 0005–0007 + `PZD_STAGING_GOOGLE_AUDIENCES` + owner device evidence |
 | Android Apple Sign-In | **BLOCKED** until Services ID callback proven |
 | Account deletion + Apple token revocation APIs | **Production release blocker** — backend documents requirement; no client fake success |
-| Backend staging deploy / migrations 0005–0007 | **NOT_RUN** without owner approval |
+| Backend staging deploy code (PR #74) | **Deployed** @ `b340f7d` (2026-11-25 CD) — provider routes still unmounted until schema + audiences |
+| Backend staging migrations 0005–0007 | **NOT applied** (owner approval required) |
+| Backend `PZD_STAGING_GOOGLE_AUDIENCES` | **MISSING** on Oracle `staging.env` (owner action) |
 
 ## Observability
 Breadcrumb operations (reuse existing `LogCode`; never log tokens/nonces/subjects/emails):
