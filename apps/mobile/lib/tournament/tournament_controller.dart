@@ -11,6 +11,7 @@ import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
@@ -137,6 +138,7 @@ final class TournamentController extends ChangeNotifier {
     TournamentHaptics? haptics,
     GameSfx? sfx,
     LocalSettings? settings,
+    this.sessionAuth,
     this._reduceMotion,
   }) : api =
            api ??
@@ -156,6 +158,8 @@ final class TournamentController extends ChangeNotifier {
   final UatConfig config;
   final Directory stateDirectory;
   final PracticeIdentityStore identity;
+  /// When set, guest accounts are gated before ranked claim (PZD-27).
+  final GuestAuthClient? sessionAuth;
   final UatApi api;
   final TournamentHaptics haptics;
   final GameSfx sfx;
@@ -244,6 +248,19 @@ final class TournamentController extends ChangeNotifier {
 
   /// Ranked play fenced after WRITER_NOT_AUTHORIZED until a new writer session.
   bool rankedWriterLocked = false;
+
+  /// Guest must complete Apple/Google verification before claim (PZD-27).
+  bool rankedAuthRequired = false;
+
+  /// Set when the user explicitly requests ranked entry; consumed once after
+  /// successful verification so claim is not auto-replayed.
+  bool _pendingRankedEntryOnce = false;
+
+  /// UI hook: present the authentication sheet without starting a claim.
+  VoidCallback? onRequestRankedAuth;
+
+  /// UI hook: sign out verified session and restore a guest Practice session.
+  VoidCallback? onRequestSignOut;
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
@@ -347,11 +364,56 @@ final class TournamentController extends ChangeNotifier {
     final activeEpoch = epoch ?? _tournamentEpoch;
     busy = true;
     notifyListeners();
+    if (sessionAuth != null) {
+      try {
+        final access = await sessionAuth!.authenticate();
+        api.bearer = UatApi.normalizeBearer(access.accessToken);
+        if (!access.isVerified) {
+          unawaited(DiagnosticRuntime.logger.log(LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'tournament_auth_gate',
+          )));
+          rankedAuthRequired = true;
+          busy = false;
+          booting = false;
+          errorCode = null;
+          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+          tournamentSync = TournamentSyncState.degraded;
+          if (presentHome) route = const TournamentRoute();
+          notifyListeners();
+          return;
+        }
+        rankedAuthRequired = false;
+      } on GuestAuthException catch (error) {
+        _fail(error.code, degradedOnFailure: true);
+        return;
+      }
+    }
     final claim = await api.post('/v1/tournament/claims/daily', {
       'originalUtcDate': _today(),
     });
     if (activeEpoch != _tournamentEpoch) return;
+    if (claim.status == 403 && claim.error == 'RANKED_AUTH_REQUIRED') {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.httpFailed,
+        operation: 'tournament_auth_gate',
+        httpStatus: 403,
+        errorCode: 'RANKED_AUTH_REQUIRED',
+      )));
+      rankedAuthRequired = true;
+      busy = false;
+      booting = false;
+      errorCode = null;
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+      if (presentHome) route = const TournamentRoute();
+      notifyListeners();
+      return;
+    }
     if (!_accepted(claim, const {200, 201}, degradedOnFailure: true)) return;
+    rankedAuthRequired = false;
     _claim = claim.map;
     seriesId = claim.map['seriesId']?.toString();
     final id = seriesId;
@@ -455,6 +517,76 @@ final class TournamentController extends ChangeNotifier {
     _cancelPendingResolutionNav();
     route = const TournamentRoute(place: TournamentPlace.overview);
     notifyListeners();
+  }
+
+  /// Home primary action when ranked auth may be required (PZD-27).
+  Future<void> requestRankedEntry() async {
+    if (sessionAuth == null) {
+      await resume();
+      return;
+    }
+    GuestAccess access;
+    try {
+      access = await sessionAuth!.authenticate();
+      api.bearer = UatApi.normalizeBearer(access.accessToken);
+    } on GuestAuthException catch (error) {
+      _fail(error.code, degradedOnFailure: true);
+      return;
+    }
+    if (!access.isVerified) {
+      _pendingRankedEntryOnce = true;
+      rankedAuthRequired = true;
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      notifyListeners();
+      onRequestRankedAuth?.call();
+      return;
+    }
+    rankedAuthRequired = false;
+    await resume();
+  }
+
+  /// Applies post-logout guest credentials without starting a claim.
+  void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
+    this.rankedAuthRequired = rankedAuthRequired;
+    if (rankedAuthRequired) {
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+    }
+    notifyListeners();
+  }
+
+  /// After successful provider link/login: claim at most once, then resume.
+  Future<void> completeRankedAuthAndEnter() async {
+    final shouldEnter = _pendingRankedEntryOnce;
+    _pendingRankedEntryOnce = false;
+    rankedAuthRequired = false;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'tournament_auth_resume',
+    )));
+    if (sessionAuth != null) {
+      try {
+        final access = await sessionAuth!.authenticate();
+        api.bearer = UatApi.normalizeBearer(access.accessToken);
+        if (!access.isVerified) {
+          rankedAuthRequired = true;
+          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+          notifyListeners();
+          return;
+        }
+      } on GuestAuthException catch (error) {
+        _fail(error.code, degradedOnFailure: true);
+        return;
+      }
+    }
+    await refreshTournament(
+      origin: TournamentRefreshOrigin.pullToRefresh,
+      preserveRoute: true,
+    );
+    if (shouldEnter && tournamentReady && !rankedWriterLocked) {
+      await resume();
+    }
   }
 
   Future<void> resume() async {

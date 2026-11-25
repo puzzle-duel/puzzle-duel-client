@@ -7,9 +7,12 @@ import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/app/portrait_lock.dart';
+import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
+import 'package:puzzle_duel_mobile/tournament/platform_provider_sign_in.dart';
+import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
 Future<void> main() async {
@@ -66,16 +69,25 @@ Future<void> main() async {
         credentials: SecureGuestCredentialStore(slot: slot),
       );
       final access = await auth.authenticate();
+      final providers = ProviderAuthClient(origin: staging);
+      final coordinator = AuthCoordinator(
+        session: auth,
+        providers: providers,
+        signIn: PlatformProviderSignIn(),
+      );
       await runTournamentUatApp(UatConfig(
         baseUrl: staging,
         bearer: access.accessToken,
-        playerLabel: 'Guest',
+        playerLabel: access.isVerified ? 'Verified' : 'Guest',
         stagingSessionBinding: access.sessionVaultBinding,
       ), api: UatApi(
         baseUrl: UatApi.apiOrigin(staging),
         bearer: access.accessToken,
         accessTokenProvider: () async => (await auth.authenticate()).accessToken,
-      ), stagingGuestSlot: guestSlot);
+      ), stagingGuestSlot: guestSlot,
+        sessionAuth: auth,
+        authCoordinator: coordinator,
+      );
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
       runApp(StagingStartupErrorScreen(error.code));

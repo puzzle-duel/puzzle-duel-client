@@ -10,6 +10,9 @@ import 'package:puzzle_duel_mobile/presentation/game/offer_tray.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
+import 'package:puzzle_duel_mobile/tournament/auth_sheet.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
 import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
@@ -30,6 +33,8 @@ Future<void> runTournamentUatApp(
   UatConfig config, {
   UatApi? api,
   String stagingGuestSlot = 'legacy',
+  GuestAuthClient? sessionAuth,
+  AuthCoordinator? authCoordinator,
 }) async {
   final directory = await AppStateDirectory.resolveForGuestSlot(stagingGuestSlot);
   runApp(
@@ -37,6 +42,8 @@ Future<void> runTournamentUatApp(
       config: config,
       api: api,
       stateDirectory: directory,
+      sessionAuth: sessionAuth,
+      authCoordinator: authCoordinator,
       sfx: AssetGameSfx(coupledHaptics: false),
       ownsSfx: true,
     ),
@@ -49,6 +56,8 @@ final class TournamentUatApp extends StatefulWidget {
     required this.config,
     this.api,
     this.stateDirectory,
+    this.sessionAuth,
+    this.authCoordinator,
     this.haptics,
     this.sfx,
     this.ownsSfx = false,
@@ -59,6 +68,8 @@ final class TournamentUatApp extends StatefulWidget {
   final UatConfig config;
   final UatApi? api;
   final Directory? stateDirectory;
+  final GuestAuthClient? sessionAuth;
+  final AuthCoordinator? authCoordinator;
   final TournamentHaptics? haptics;
   final GameSfx? sfx;
   final bool ownsSfx;
@@ -100,6 +111,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         api: widget.api,
         stateDirectory: directory,
         identity: identity,
+        sessionAuth: widget.sessionAuth,
         sfx: _sfx,
         settings: settings,
         haptics:
@@ -113,6 +125,12 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
                   .reduceMotion,
             ),
       );
+      controller.onRequestRankedAuth = () {
+        unawaited(_presentRankedAuth(controller));
+      };
+      controller.onRequestSignOut = () {
+        unawaited(_presentSignOut(controller));
+      };
       await controller.beginLocal();
       if (!mounted) {
         controller.session.dispose();
@@ -132,10 +150,58 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     }
   }
 
+  Future<void> _presentRankedAuth(TournamentController controller) async {
+    final coordinator = widget.authCoordinator;
+    if (coordinator == null || !mounted) return;
+    final pendingRecovery =
+        await coordinator.consumePendingLinkRecoveryIfNeeded();
+    if (!mounted) return;
+    if (pendingRecovery != null &&
+        pendingRecovery.outcome == AuthFlowOutcome.loggedIn &&
+        pendingRecovery.access != null) {
+      controller.api.bearer =
+          UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
+      await controller.completeRankedAuthAndEnter();
+      return;
+    }
+    final result = await showRankedAuthSheet(
+      context: context,
+      coordinator: coordinator,
+      recoverySeed:
+          pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
+              ? pendingRecovery
+              : null,
+    );
+    if (!mounted) return;
+    if (result == null) return;
+    if (result.outcome == AuthFlowOutcome.linked ||
+        result.outcome == AuthFlowOutcome.loggedIn) {
+      await controller.completeRankedAuthAndEnter();
+    }
+  }
+
+  Future<void> _presentSignOut(TournamentController controller) async {
+    final coordinator = widget.authCoordinator;
+    if (coordinator == null || !mounted) return;
+    final result = await coordinator.logoutAndStartGuest();
+    if (!mounted) return;
+    if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
+      return;
+    }
+    controller.api.bearer =
+        UatApi.normalizeBearer(result.access!.accessToken);
+    await controller.clearAuthenticatedPracticeScope();
+    controller.applyGuestSessionAfterLogout(
+      rankedAuthRequired: result.access!.isGuest,
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     final controller = _controller;
+    controller?.onRequestRankedAuth = null;
+    controller?.onRequestSignOut = null;
     controller?.session.dispose();
     controller?.dispose();
     if (widget.ownsSfx || widget.sfx == null) _sfx.dispose();
@@ -437,14 +503,17 @@ final class _HomeScreen extends StatelessWidget {
               ? copy.onTime
               : copy.onTimeMissing)
         : null;
+    final needsAuth = controller.rankedAuthRequired;
     final primary = syncing
         ? copy.tournamentSyncing
-        : switch (phase) {
-            DayPhase.completed => copy.viewResults,
-            DayPhase.betweenGames || DayPhase.inProgress =>
-              copy.continueTournament,
-            _ => copy.playToday,
-          };
+        : needsAuth
+            ? copy.signInToPlay
+            : switch (phase) {
+                DayPhase.completed => copy.viewResults,
+                DayPhase.betweenGames || DayPhase.inProgress =>
+                  copy.continueTournament,
+                _ => copy.playToday,
+              };
     final headline = stale
         ? copy.cachedTournamentHeadline
         : switch (phase) {
@@ -458,6 +527,8 @@ final class _HomeScreen extends StatelessWidget {
       onPrimary = null;
     } else if (phase == DayPhase.completed && controller.tournamentReady) {
       onPrimary = controller.openResults;
+    } else if (needsAuth || controller.sessionAuth != null) {
+      onPrimary = () => unawaited(controller.requestRankedEntry());
     } else {
       // A degraded Home snapshot must offer a safe refresh/retry rather than
       // showing a dead "Continue tournament" button.

@@ -166,6 +166,15 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   stats: _stats,
                   copy: copy,
                 ),
+                const SizedBox(height: 12),
+                _AccountStatusCard(
+                  verified: widget.controller.sessionAuth?.cachedAccess
+                          ?.isVerified ==
+                      true,
+                  copy: copy,
+                  onSignIn: widget.controller.onRequestRankedAuth,
+                  onSignOut: widget.controller.onRequestSignOut,
+                ),
                 const SizedBox(height: 20),
                 Text(
                   copy.personalRecordsTitle,
@@ -365,6 +374,94 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+final class _AccountStatusCard extends StatelessWidget {
+  const _AccountStatusCard({
+    required this.verified,
+    required this.copy,
+    this.onSignIn,
+    this.onSignOut,
+  });
+
+  final bool verified;
+  final TournamentCopy copy;
+  final VoidCallback? onSignIn;
+  final VoidCallback? onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: verified ? copy.accountStatusVerified : copy.accountStatusGuest,
+      child: Container(
+        key: const Key('profile-account-status'),
+        padding: const EdgeInsets.all(GameTokens.spaceMd),
+        decoration: BoxDecoration(
+          color: GameTokens.surface,
+          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+          border: Border.all(color: GameTokens.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  verified
+                      ? Icons.verified_user_rounded
+                      : Icons.person_outline,
+                  color: verified
+                      ? GameTokens.success
+                      : GameTokens.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    verified
+                        ? copy.accountStatusVerified
+                        : copy.accountStatusGuest,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: GameTokens.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (!verified && onSignIn != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: const Key('profile-sign-in'),
+                  onPressed: onSignIn,
+                  child: Text(
+                    copy.signInToPlay,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+            if (verified && onSignOut != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: const Key('profile-sign-out'),
+                  onPressed: onSignOut,
+                  child: Text(copy.signOut),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -605,35 +702,39 @@ final class _BadgeGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final columns = width >= 420
-            ? 3
-            : width >= 280
-            ? 2
-            : 1;
-        final gap = 10.0;
-        final tileWidth = columns == 1
-            ? width
-            : (width - gap * (columns - 1)) / columns;
-        return Wrap(
-          key: const Key('badge-grid'),
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (final badge in snapshot.badges)
-              SizedBox(
-                width: tileWidth,
-                child: _BadgeTile(
-                  badge: badge,
-                  copy: copy,
-                  onTap: () => onSelect(badge),
+    // Key lives outside LayoutBuilder so finders/scroll helpers can locate the
+    // section before the wrap is laid out in the ListView cache window.
+    return KeyedSubtree(
+      key: const Key('badge-grid'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final columns = width >= 420
+              ? 3
+              : width >= 280
+              ? 2
+              : 1;
+          final gap = 10.0;
+          final tileWidth = columns == 1
+              ? width
+              : (width - gap * (columns - 1)) / columns;
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              for (final badge in snapshot.badges)
+                SizedBox(
+                  width: tileWidth,
+                  child: _BadgeTile(
+                    badge: badge,
+                    copy: copy,
+                    onTap: () => onSelect(badge),
+                  ),
                 ),
-              ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 }

@@ -118,14 +118,21 @@ void main() {
 
     expect(find.textContaining('42'), findsWidgets);
     expect(find.text('No record yet.'), findsNWidgets(2));
-    expect(find.byKey(const Key('badge-status-banner')), findsOneWidget);
+    expect(
+      find.byKey(const Key('badge-status-banner'), skipOffstage: false),
+      findsOneWidget,
+    );
     await tester.scrollUntilVisible(
-      find.byKey(const Key('badge-tile-on_time')),
+      find.byKey(const Key('badge-grid'), skipOffstage: false),
       200,
       scrollable: find.byType(Scrollable).hitTestable(),
     );
-    expect(find.byKey(const Key('badge-tile-on_time')), findsOneWidget);
-    expect(find.text('Locked'), findsWidgets);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('badge-tile-on_time'), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(find.text('Locked', skipOffstage: false), findsWidgets);
 
     await tester.tap(find.byKey(const Key('badge-tile-on_time')));
     await _pumpProfile(tester);
@@ -135,13 +142,16 @@ void main() {
     await _pumpProfile(tester);
 
     await tester.scrollUntilVisible(
-      find.byKey(const Key('badge-retry')),
+      find.byKey(const Key('badge-retry'), skipOffstage: false),
       200,
       scrollable: find.byType(Scrollable).hitTestable(),
     );
     await tester.tap(find.byKey(const Key('badge-retry')));
     await _pumpProfile(tester);
-    expect(find.byKey(const Key('badge-status-banner')), findsOneWidget);
+    expect(
+      find.byKey(const Key('badge-status-banner'), skipOffstage: false),
+      findsOneWidget,
+    );
   });
 
   testWidgets('earned On-Time badge renders verified count', (tester) async {
@@ -195,8 +205,14 @@ void main() {
     await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
     expect(find.text('Profil'), findsWidgets);
-    expect(find.text('2 kez kazanıldı'), findsOneWidget);
-    expect(find.text('Henüz rekorun yok.'), findsWidgets);
+    expect(
+      find.text('2 kez kazanıldı', skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Henüz rekorun yok.', skipOffstage: false),
+      findsWidgets,
+    );
   });
 
   testWidgets('large text keeps profile cards reachable', (tester) async {
