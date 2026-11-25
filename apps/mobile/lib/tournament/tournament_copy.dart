@@ -232,6 +232,10 @@ final class TournamentCopy {
     'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress was not changed. Sign into the existing account only if you intend to switch — identities are never merged.',
     'Bu Apple veya Google hesabı başka bir Puzzle Duel oyuncusuna bağlı. Misafir ilerlemen değişmedi. Yalnızca hesap değiştirmek istiyorsan mevcut hesaba giriş yap — kimlikler asla birleştirilmez.',
   );
+  String get authRecoveryBody => pick(
+    'Your account may already be verified, but this device could not finish saving the session. Sign in again with the same Apple or Google account to restore progress. A new guest account will not be created.',
+    'Hesabın doğrulanmış olabilir ancak oturum bu cihazda tamamlanamadı. İlerlemeyi geri yüklemek için aynı Apple veya Google hesabıyla yeniden giriş yap. Yeni misafir hesabı oluşturulmaz.',
+  );
   String get continueWithApple => pick('Continue with Apple', 'Apple ile devam et');
   String get continueWithGoogle =>
       pick('Continue with Google', 'Google ile devam et');
@@ -262,6 +266,12 @@ final class TournamentCopy {
   String get signOut => pick('Sign out', 'Oturumu kapat');
   String authError(String code) => switch (code) {
         'ACCOUNT_CONFLICT' => authConflictBody,
+        'SECURE_STORE_UNAVAILABLE' ||
+        'SECURE_STORE_VERIFY_FAILED' ||
+        'PROVIDER_LINK_RECOVERY_apple' ||
+        'PROVIDER_LINK_RECOVERY_google' ||
+        'STALE_CREDENTIAL_RESPONSE' =>
+          authRecoveryBody,
         'PROVIDER_SIGN_IN_CANCELLED' => pick(
           'Sign-in was cancelled.',
           'Oturum açma iptal edildi.',

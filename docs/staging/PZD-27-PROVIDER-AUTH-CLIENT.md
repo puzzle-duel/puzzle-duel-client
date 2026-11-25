@@ -1,6 +1,6 @@
 # PZD-27 — Apple / Google authentication (Flutter client)
 
-Status: Implemented on `feature/PZD-27-apple-google-auth` (mock-tested).  
+Status: Security remediation in progress on `feature/PZD-27-apple-google-auth` (P1-01/02/03 after review #10625).  
 Backend contract: merged PZD-26 @ `be7a510` — see backend `docs/staging/PZD-26-PROVIDER-AUTH-CONTRACT.md`.
 
 ## Product rules (binding)
@@ -11,12 +11,36 @@ Backend contract: merged PZD-26 @ `be7a510` — see backend `docs/staging/PZD-26
 - Firebase Auth prohibited; Crashlytics remains.
 
 ## Architecture
-- `GuestAuthClient` — guest create/refresh + verified credential replacement with generation guard.
+- `GuestAuthClient` — guest create/refresh + verified credential replacement with **serialized** generation-aware vault commits; durable `pending_link` marker for uncertain link completion.
 - `ProviderAuthClient` — `/v1/auth/providers/challenge|login|link` + logout.
-- `AuthCoordinator` — challenge → native assertion → link/login.
-- `PlatformProviderSignIn` — `sign_in_with_apple` / `google_sign_in` (no Firebase Auth).
+- `AuthCoordinator` — challenge → native assertion → identity-preserving bearer refresh → link/login; explicit provider recovery (never silent guest mint).
+- `PlatformProviderSignIn` — `sign_in_with_apple` / `google_sign_in` **7.x** (no Firebase Auth).
 - `TournamentController` — ranked auth gate before claim; resume-once after success.
-- `auth_sheet.dart` — Apple/Google sheet + conflict UX.
+- `auth_sheet.dart` — Apple/Google sheet + conflict + recovery UX.
+
+## Google nonce (P1-01)
+
+| Layer | Capability |
+|---|---|
+| Backend PZD-26 | Requires cryptographically signed `nonce` claim in Google ID token |
+| `google_sign_in` 6.x | **No** portable `nonce` parameter — **implementation blocker** for real Google |
+| `google_sign_in` 7.x | `GoogleSignIn.initialize(nonce:)` / `InitParameters.nonce` — **supported** |
+| Client adapter | Passes backend challenge nonce into initialize/init on every challenge; does **not** fabricate claims |
+| Apple | `SignInWithApple.getAppleIDCredential(nonce:)` — SDK embeds SHA-256 digest (backend verifies) |
+| Config blockers | Missing `PZD_GOOGLE_SERVER_CLIENT_ID` / iOS client ID / Apple capability → `PROVIDER_CONFIG_MISSING` / fail-closed — distinct from SDK capability |
+
+Do **not** weaken backend nonce verification. Do **not** introduce Firebase Auth.
+
+## Credential mutation safety (P1-02)
+- Single `_mutationChain` serializes durable vault writes/clears (re-entrant for nested commit).
+- Generation bump on replace/logout; stale `_pending` auth futures never reused across generations.
+- Pending rotation cleared only by the winning commit; delayed secure-storage tests cover refresh/link, refresh/logout, stale writes, pending rotation, restart recovery.
+
+## Provider linking recovery (P1-03)
+- After native UI, if guest access is near expiry → `refreshGuestPreservingIdentity` (exact `player_id` + `fid`).
+- Before link HTTP: durable `pending_link` provider marker.
+- Backend success + lost response / timeout / vault failure → `recoveryRequired` + explicit `loginExisting` (no guest create, no blind replay of link).
+- Restart: `consumePendingLinkRecoveryIfNeeded` surfaces recovery without minting a new guest.
 
 ## Dart defines (owner-supplied; never commit secrets)
 | Define | Purpose |
@@ -53,15 +77,15 @@ Staging vs production must use separate OAuth clients.
 | Item | Status |
 |---|---|
 | Mock unit/widget coverage | Implemented / run in CI |
-| Real Apple device UAT | **BLOCKED** / **NOT_RUN** — needs Apple capability + audiences |
-| Real Google device UAT | **BLOCKED** / **NOT_RUN** — needs OAuth client IDs; Flutter `google_sign_in` 6.x lacks portable nonce binding (backend requires nonce claim) |
+| Real Apple device UAT (nonce claim) | **BLOCKED** / **NOT_RUN** — needs Apple capability + audiences; SDK path implemented |
+| Real Google device UAT (nonce claim) | **BLOCKED** / **NOT_RUN** — needs OAuth client IDs; SDK 7.x nonce path implemented (config blocker only) |
 | Android Apple Sign-In | **BLOCKED** until Services ID callback proven |
 | Account deletion + Apple token revocation APIs | **Production release blocker** — backend documents requirement; no client fake success |
 | Backend staging deploy / migrations 0005–0007 | **NOT_RUN** without owner approval |
 
 ## Observability
 Breadcrumb operations (reuse existing `LogCode`; never log tokens/nonces/subjects/emails):
-`auth_sheet_opened`, `auth_provider_selected_*`, `provider_challenge_*`, `provider_sign_in_*`, `provider_link_*`, `provider_login_*`, `auth_account_conflict`, `auth_credential_replaced`, `tournament_auth_gate`, `tournament_auth_resume`, `auth_logout`.
+`auth_sheet_opened`, `auth_provider_selected_*`, `provider_challenge_*`, `provider_sign_in_*`, `provider_link_*`, `provider_login_*`, `auth_account_conflict`, `auth_credential_replaced`, `auth_pending_link_*`, `tournament_auth_gate`, `tournament_auth_resume`, `auth_logout`.
 
 Diagnostic allowlist extended in `UatApi.diagnosticErrorCode` for provider error codes.
 
@@ -71,4 +95,4 @@ Diagnostic allowlist extended in `UatApi.diagnosticErrorCode` for provider error
 3. Link with Apple (iOS) or Google → verified; player_id unchanged.
 4. Confirm claim occurs only after success; cancel/offline does not consume attempt.
 5. Force ACCOUNT_CONFLICT with a second provider account; guest progress preserved; explicit login only after confirmation.
-6. Kill app mid-link; confirm recoverable guest or verified state; no orphaned claim.
+6. Kill app mid-link; confirm recovery sheet (no new guest); explicit provider login restores progress.

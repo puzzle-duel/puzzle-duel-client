@@ -13,6 +13,7 @@ Future<AuthFlowResult?> showRankedAuthSheet({
   required BuildContext context,
   required AuthCoordinator coordinator,
   bool allowExplicitLogin = true,
+  AuthFlowResult? recoverySeed,
 }) {
   return showModalBottomSheet<AuthFlowResult>(
     context: context,
@@ -24,6 +25,7 @@ Future<AuthFlowResult?> showRankedAuthSheet({
     builder: (context) => _AuthSheetBody(
       coordinator: coordinator,
       allowExplicitLogin: allowExplicitLogin,
+      recoverySeed: recoverySeed,
     ),
   );
 }
@@ -32,10 +34,12 @@ final class _AuthSheetBody extends StatefulWidget {
   const _AuthSheetBody({
     required this.coordinator,
     required this.allowExplicitLogin,
+    this.recoverySeed,
   });
 
   final AuthCoordinator coordinator;
   final bool allowExplicitLogin;
+  final AuthFlowResult? recoverySeed;
 
   @override
   State<_AuthSheetBody> createState() => _AuthSheetBodyState();
@@ -45,10 +49,18 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
   var _busy = false;
   String? _errorCode;
   var _conflict = false;
+  var _recovery = false;
+  AuthProviderKind? _recoveryProvider;
 
   @override
   void initState() {
     super.initState();
+    final seed = widget.recoverySeed;
+    if (seed != null && seed.outcome == AuthFlowOutcome.recoveryRequired) {
+      _recovery = true;
+      _recoveryProvider = seed.recoveryProvider;
+      _errorCode = seed.errorCode ?? 'SECURE_STORE_UNAVAILABLE';
+    }
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.screenOpened,
@@ -68,7 +80,18 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
       setState(() {
         _busy = false;
         _conflict = true;
+        _recovery = false;
         _errorCode = 'ACCOUNT_CONFLICT';
+      });
+      return;
+    }
+    if (result.outcome == AuthFlowOutcome.recoveryRequired) {
+      setState(() {
+        _busy = false;
+        _conflict = false;
+        _recovery = true;
+        _recoveryProvider = result.recoveryProvider;
+        _errorCode = result.errorCode ?? 'SECURE_STORE_UNAVAILABLE';
       });
       return;
     }
@@ -93,6 +116,14 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
     final bottom = MediaQuery.paddingOf(context).bottom;
+    final showExplicitLogin =
+        (_conflict || _recovery) && widget.allowExplicitLogin;
+    final showLoginApple = showExplicitLogin &&
+        (_recoveryProvider == null ||
+            _recoveryProvider == AuthProviderKind.apple);
+    final showLoginGoogle = showExplicitLogin &&
+        (_recoveryProvider == null ||
+            _recoveryProvider == AuthProviderKind.google);
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottom),
@@ -121,7 +152,11 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
             ),
             const SizedBox(height: 8),
             Text(
-              _conflict ? copy.authConflictBody : copy.authSheetBody,
+              _recovery
+                  ? copy.authRecoveryBody
+                  : _conflict
+                      ? copy.authConflictBody
+                      : copy.authSheetBody,
               style: const TextStyle(color: GameTokens.textSecondary),
             ),
             if (_errorCode != null) ...[
@@ -136,7 +171,7 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
               ),
             ],
             const SizedBox(height: 20),
-            if (!_conflict) ...[
+            if (!showExplicitLogin) ...[
               _ProviderButton(
                 key: const Key('auth-apple'),
                 label: copy.continueWithApple,
@@ -159,42 +194,48 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                   () => widget.coordinator.linkCurrentGuest(AuthProviderKind.google),
                 ),
               ),
-            ] else if (widget.allowExplicitLogin) ...[
-              _ProviderButton(
-                key: const Key('auth-login-apple'),
-                label: copy.signInExistingApple,
-                background: Colors.black,
-                foreground: Colors.white,
-                enabled: !_busy,
-                onPressed: () => _run(
-                  () => widget.coordinator.loginExisting(AuthProviderKind.apple),
+            ] else ...[
+              if (showLoginApple)
+                _ProviderButton(
+                  key: const Key('auth-login-apple'),
+                  label: copy.signInExistingApple,
+                  background: Colors.black,
+                  foreground: Colors.white,
+                  enabled: !_busy,
+                  onPressed: () => _run(
+                    () => widget.coordinator
+                        .loginExisting(AuthProviderKind.apple),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _ProviderButton(
-                key: const Key('auth-login-google'),
-                label: copy.signInExistingGoogle,
-                background: Colors.white,
-                foreground: Colors.black87,
-                border: true,
-                enabled: !_busy,
-                onPressed: () => _run(
-                  () => widget.coordinator.loginExisting(AuthProviderKind.google),
+              if (showLoginApple && showLoginGoogle) const SizedBox(height: 12),
+              if (showLoginGoogle)
+                _ProviderButton(
+                  key: const Key('auth-login-google'),
+                  label: copy.signInExistingGoogle,
+                  background: Colors.white,
+                  foreground: Colors.black87,
+                  border: true,
+                  enabled: !_busy,
+                  onPressed: () => _run(
+                    () => widget.coordinator
+                        .loginExisting(AuthProviderKind.google),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                key: const Key('auth-keep-guest'),
-                onPressed: _busy
-                    ? null
-                    : () => Navigator.of(context).pop(
-                          const AuthFlowResult(
-                            outcome: AuthFlowOutcome.cancelled,
-                            errorCode: 'ACCOUNT_CONFLICT_KEEP_GUEST',
+              if (_conflict) ...[
+                const SizedBox(height: 12),
+                TextButton(
+                  key: const Key('auth-keep-guest'),
+                  onPressed: _busy
+                      ? null
+                      : () => Navigator.of(context).pop(
+                            const AuthFlowResult(
+                              outcome: AuthFlowOutcome.cancelled,
+                              errorCode: 'ACCOUNT_CONFLICT_KEEP_GUEST',
+                            ),
                           ),
-                        ),
-                child: Text(copy.keepGuestProgress),
-              ),
+                  child: Text(copy.keepGuestProgress),
+                ),
+              ],
             ],
             const SizedBox(height: 8),
             if (_busy)

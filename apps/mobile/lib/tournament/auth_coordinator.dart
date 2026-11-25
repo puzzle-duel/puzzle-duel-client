@@ -13,6 +13,8 @@ enum AuthFlowOutcome {
   cancelled,
   conflict,
   failed,
+  /// Backend may have upgraded the guest; explicit provider login is required.
+  recoveryRequired,
 }
 
 final class AuthFlowResult {
@@ -21,14 +23,14 @@ final class AuthFlowResult {
     this.access,
     this.errorCode,
     this.conflictPlayerId,
+    this.recoveryProvider,
   });
 
   final AuthFlowOutcome outcome;
   final GuestAccess? access;
   final String? errorCode;
-  /// Present only as a non-secret signal that an existing account owns the
-  /// provider identity. Never an email or provider subject.
   final String? conflictPlayerId;
+  final AuthProviderKind? recoveryProvider;
 }
 
 /// Orchestrates challenge → native provider → backend link/login with
@@ -68,7 +70,7 @@ final class AuthCoordinator {
     _inFlight = true;
     try {
       _breadcrumb('auth_provider_selected_${provider.name}');
-      final guest = await session.authenticate();
+      var guest = await session.authenticate();
       if (guest.accountType != AccountType.guest) {
         return AuthFlowResult(
           outcome: AuthFlowOutcome.loggedIn,
@@ -76,6 +78,7 @@ final class AuthCoordinator {
         );
       }
       final priorPlayerId = guest.playerId;
+      final priorFamilyId = guest.familyId;
       _breadcrumb('provider_challenge_requested');
       final challenge = await providers.challenge(
         provider: provider,
@@ -93,6 +96,17 @@ final class AuthCoordinator {
         );
       }
       _breadcrumb('provider_sign_in_completed');
+
+      // Native UI may outlive access TTL. Refresh while keeping player/fid.
+      // Challenge nonce is already embedded in the assertion — do not re-challenge.
+      if (guest.isNearExpiry) {
+        guest = await session.refreshGuestPreservingIdentity(
+          playerId: priorPlayerId,
+          familyId: priorFamilyId,
+        );
+      }
+
+      await session.markPendingLinkProvider(provider.name);
       try {
         final bundle = await providers.link(
           provider: provider,
@@ -101,29 +115,60 @@ final class AuthCoordinator {
           guestBearer: guest.accessToken,
         );
         if (bundle.playerId != priorPlayerId) {
-          // Backend contract requires immutable player_id on link. Fail closed.
           return const AuthFlowResult(
             outcome: AuthFlowOutcome.failed,
             errorCode: 'PLAYER_ID_MUTATION',
           );
         }
-        final access = await session.replaceWithVerifiedBundle(
-          accessToken: bundle.accessToken,
-          refreshToken: bundle.refreshToken,
-          expiresAt: bundle.expiresAt,
-        );
-        _breadcrumb('auth_credential_replaced');
-        return AuthFlowResult(
-          outcome: AuthFlowOutcome.linked,
-          access: access,
-        );
+        try {
+          final access = await session.replaceWithVerifiedBundle(
+            accessToken: bundle.accessToken,
+            refreshToken: bundle.refreshToken,
+            expiresAt: bundle.expiresAt,
+          );
+          _breadcrumb('auth_credential_replaced');
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.linked,
+            access: access,
+          );
+        } on GuestAuthException catch (error) {
+          // Backend link likely succeeded; vault write failed. Keep pending
+          // marker and require explicit provider recovery — never guest create.
+          _breadcrumb('auth_link_vault_failed', errorCode: error.code);
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: error.code,
+            recoveryProvider: provider,
+          );
+        }
       } on ProviderAuthException catch (error) {
         if (error.code == 'ACCOUNT_CONFLICT') {
+          await session.clearPendingLinkProvider();
           _breadcrumb('auth_account_conflict', errorCode: 'ACCOUNT_CONFLICT');
           return const AuthFlowResult(
             outcome: AuthFlowOutcome.conflict,
             errorCode: 'ACCOUNT_CONFLICT',
           );
+        }
+        if (error.code == 'GUEST_PROOF_REQUIRED' ||
+            error.code == 'INVALID_PROVIDER_CHALLENGE') {
+          // Stale challenge/bearer after native UI — clear pending, fail closed.
+          await session.clearPendingLinkProvider();
+        }
+        // Network / lost response after possible server success: keep pending.
+        if (error.code == 'AUTH_NETWORK_UNAVAILABLE') {
+          _breadcrumb('auth_link_uncertain', errorCode: error.code);
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: error.code,
+            recoveryProvider: provider,
+          );
+        }
+        if (error.code != 'GUEST_PROOF_REQUIRED' &&
+            error.code != 'INVALID_PROVIDER_CHALLENGE') {
+          // Keep pending for unknown failures that may follow a server commit.
+        } else {
+          // already cleared
         }
         _breadcrumb('provider_link_failed', errorCode: error.code);
         return AuthFlowResult(
@@ -140,6 +185,14 @@ final class AuthCoordinator {
         errorCode: error.code,
       );
     } on GuestAuthException catch (error) {
+      final recovery = _recoveryFromCode(error.code);
+      if (recovery != null) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: error.code,
+          recoveryProvider: recovery,
+        );
+      }
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,
@@ -155,7 +208,7 @@ final class AuthCoordinator {
   }
 
   /// Explicit sign-in to an existing (or newly created) verified account.
-  /// Does not merge with the current guest. Caller must confirm after conflict.
+  /// Also used for post-link recovery when guest refresh is revoked.
   Future<AuthFlowResult> loginExisting(AuthProviderKind provider) async {
     if (_inFlight) {
       return const AuthFlowResult(
@@ -226,6 +279,39 @@ final class AuthCoordinator {
     }
   }
 
+  /// After restart: if pending link exists and guest refresh fails, surface
+  /// recovery without minting a new guest player.
+  Future<AuthFlowResult?> consumePendingLinkRecoveryIfNeeded() async {
+    final pending = await session.readPendingLinkProvider();
+    if (pending != 'apple' && pending != 'google') return null;
+    final provider =
+        pending == 'apple' ? AuthProviderKind.apple : AuthProviderKind.google;
+    try {
+      final access = await session.authenticate();
+      if (access.isVerified) {
+        await session.clearPendingLinkProvider();
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.loggedIn,
+          access: access,
+        );
+      }
+      return null;
+    } on GuestAuthException catch (error) {
+      final recovery = _recoveryFromCode(error.code) ?? provider;
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: error.code,
+        recoveryProvider: recovery,
+      );
+    }
+  }
+
+  AuthProviderKind? _recoveryFromCode(String code) {
+    if (code == 'PROVIDER_LINK_RECOVERY_apple') return AuthProviderKind.apple;
+    if (code == 'PROVIDER_LINK_RECOVERY_google') return AuthProviderKind.google;
+    return null;
+  }
+
   Future<ProviderAssertion?> _nativeSignIn(
     AuthProviderKind provider,
     String nonce,
@@ -240,8 +326,6 @@ final class AuthCoordinator {
     }
   }
 
-  /// Revokes the current refresh family on the backend, clears the vault, then
-  /// issues a fresh guest session so Practice remains available without login.
   Future<AuthFlowResult> logoutAndStartGuest() async {
     if (_inFlight) {
       return const AuthFlowResult(
@@ -261,7 +345,6 @@ final class AuthCoordinator {
             accessBearer: cached?.accessToken,
           );
         } on ProviderAuthException catch (error) {
-          // Unknown/already-revoked refresh still clears local state.
           if (error.code != 'INVALID_REFRESH') {
             return AuthFlowResult(
               outcome: AuthFlowOutcome.failed,
@@ -270,6 +353,7 @@ final class AuthCoordinator {
           }
         }
       }
+      await session.clearPendingLinkProvider();
       await session.clearSessionLocally();
       final guest = await session.authenticate();
       _breadcrumb('auth_logout_guest_ready');

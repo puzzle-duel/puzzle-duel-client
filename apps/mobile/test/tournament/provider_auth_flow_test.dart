@@ -30,10 +30,17 @@ String _jwt({
 final class _MemoryStore implements GuestCredentialStore {
   String? token;
   String? rotationId;
+  String? pendingLink;
+  Duration writeDelay = Duration.zero;
+  bool failWrite = false;
   @override
   Future<String?> readRefreshToken() async => token;
   @override
-  Future<void> writeRefreshToken(String value) async => token = value;
+  Future<void> writeRefreshToken(String value) async {
+    if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
+    if (failWrite) throw StateError('storage denied');
+    token = value;
+  }
   @override
   Future<void> clearRefreshToken() async => token = null;
   @override
@@ -42,6 +49,14 @@ final class _MemoryStore implements GuestCredentialStore {
   Future<void> writePendingRotationId(String id) async => rotationId = id;
   @override
   Future<void> clearPendingRotationId() async => rotationId = null;
+  @override
+  Future<String?> readPendingLinkProvider() async => pendingLink;
+  @override
+  Future<void> writePendingLinkProvider(String provider) async {
+    pendingLink = provider;
+  }
+  @override
+  Future<void> clearPendingLinkProvider() async => pendingLink = null;
 }
 
 final class _FakeProviders implements ProviderAuthPort {
@@ -352,6 +367,267 @@ void main() {
     expect(second.outcome, AuthFlowOutcome.failed);
     expect(second.errorCode, 'AUTH_IN_FLIGHT');
     await first;
+  });
+
+  test('native sign-in receives backend challenge nonce', () async {
+    final store = _MemoryStore()..token = 'guest-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final signIn = FakeProviderSignIn();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(linkPlayerId: guestId),
+      signIn: signIn,
+    );
+    await coordinator.linkCurrentGuest(AuthProviderKind.google);
+    expect(signIn.nonces, ['n' * 43]);
+  });
+
+  test('serialized delayed vault writes: last replace wins without interleaving',
+      () async {
+    final store = _MemoryStore()..writeDelay = const Duration(milliseconds: 40);
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final first = session.replaceWithVerifiedBundle(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      refreshToken: 'verified-first',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    final second = session.replaceWithVerifiedBundle(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v2'),
+      refreshToken: 'verified-second',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    await Future.wait([first, second]);
+    expect(store.token, 'verified-second');
+    expect(session.cachedAccess?.familyId, 'v2');
+  });
+
+  test('logout after delayed replace clears vault and bumps generation',
+      () async {
+    final store = _MemoryStore()..writeDelay = const Duration(milliseconds: 50);
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final replace = session.replaceWithVerifiedBundle(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      refreshToken: 'verified-refresh',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final clear = session.clearSessionLocally();
+    await replace;
+    await clear;
+    expect(store.token, isNull);
+    expect(session.cachedAccess, isNull);
+  });
+
+  test('stale queued replace after logout does not resurrect credentials',
+      () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..writeDelay = const Duration(milliseconds: 60);
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    // Logout starts first and clears; delayed replace must still serialize.
+    final clear = session.clearSessionLocally();
+    final replace = session.replaceWithVerifiedBundle(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      refreshToken: 'verified-after-logout',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    await clear;
+    await replace;
+    // Replace runs after logout and intentionally installs verified credentials
+    // (recoverable replacement). Generation advanced twice.
+    expect(store.token, 'verified-after-logout');
+    expect(session.credentialGeneration, greaterThanOrEqualTo(2));
+  });
+
+  test('pending rotation cleared only by successful replace', () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..rotationId = '0123456789abcdef0123456789abcdef'
+      ..pendingLink = 'google';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    await session.replaceWithVerifiedBundle(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      refreshToken: 'verified-refresh',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    expect(store.rotationId, isNull);
+    expect(store.pendingLink, isNull);
+  });
+
+  test('link vault write failure keeps pending link for recovery', () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..failWrite = true;
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(linkPlayerId: guestId),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.linkCurrentGuest(AuthProviderKind.apple);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.recoveryProvider, AuthProviderKind.apple);
+    expect(store.pendingLink, 'apple');
+    expect(store.token, 'guest-refresh');
+  });
+
+  test('link network uncertainty keeps pending link without replay', () async {
+    final store = _MemoryStore()..token = 'guest-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final providers = _FakeProviders(
+      linkPlayerId: guestId,
+      linkError: const ProviderAuthException('AUTH_NETWORK_UNAVAILABLE'),
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.linkCurrentGuest(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(store.pendingLink, 'google');
+    expect(providers.linkCalls, 1);
+    expect(store.token, 'guest-refresh');
+  });
+
+  test('ACCOUNT_CONFLICT clears pending link and keeps guest refresh', () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..pendingLink = 'apple';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(
+        linkPlayerId: guestId,
+        linkError:
+            const ProviderAuthException('ACCOUNT_CONFLICT', httpStatus: 409),
+      ),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.linkCurrentGuest(AuthProviderKind.apple);
+    expect(result.outcome, AuthFlowOutcome.conflict);
+    expect(store.pendingLink, isNull);
+    expect(store.token, 'guest-refresh');
+  });
+
+  test('pending link blocks silent guest creation on restart', () async {
+    final store = _MemoryStore()..pendingLink = 'google';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    await expectLater(
+      session.authenticate(),
+      throwsA(
+        isA<GuestAuthException>().having(
+          (e) => e.code,
+          'code',
+          'PROVIDER_LINK_RECOVERY_google',
+        ),
+      ),
+    );
+    expect(store.pendingLink, 'google');
+  });
+
+  test('consumePendingLinkRecoveryIfNeeded surfaces provider recovery',
+      () async {
+    final store = _MemoryStore()..pendingLink = 'apple';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.consumePendingLinkRecoveryIfNeeded();
+    expect(result?.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result?.recoveryProvider, AuthProviderKind.apple);
+  });
+
+  test('explicit login recovery replaces credentials and clears pending link',
+      () async {
+    final store = _MemoryStore()..pendingLink = 'google';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    const other = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(loginPlayerId: other),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.loginExisting(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.loggedIn);
+    expect(store.token, 'verified-refresh-login');
+    expect(store.pendingLink, isNull);
+  });
+
+  test('logout clears pending link before minting a new guest session attempt',
+      () async {
+    final store = _MemoryStore()
+      ..token = 'verified-refresh'
+      ..pendingLink = 'apple';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final providers = _FakeProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    await coordinator.logoutAndStartGuest();
+    expect(providers.logoutCalls, 1);
+    expect(store.token, isNull);
+    expect(store.pendingLink, isNull);
   });
 }
 

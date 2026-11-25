@@ -4,12 +4,15 @@ import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 final class FakeGuestStore implements GuestCredentialStore {
   String? token;
   String? rotationId;
+  String? pendingLink;
   bool failReadback = false;
   bool failWrite = false;
+  Duration writeDelay = Duration.zero;
   @override
   Future<String?> readRefreshToken() async => failReadback ? 'old-token' : token;
   @override
   Future<void> writeRefreshToken(String value) async {
+    if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
     if (failWrite) throw StateError('storage denied');
     token = value;
   }
@@ -21,6 +24,14 @@ final class FakeGuestStore implements GuestCredentialStore {
   Future<void> writePendingRotationId(String id) async { rotationId = id; }
   @override
   Future<void> clearPendingRotationId() async { rotationId = null; }
+  @override
+  Future<String?> readPendingLinkProvider() async => pendingLink;
+  @override
+  Future<void> writePendingLinkProvider(String provider) async {
+    pendingLink = provider;
+  }
+  @override
+  Future<void> clearPendingLinkProvider() async { pendingLink = null; }
 }
 
 void main() {
@@ -71,5 +82,20 @@ void main() {
         throwsStateError);
     expect(store.token, 'prior-secret');
     expect(store.rotationId, '0123456789abcdef0123456789abcdef');
+  });
+
+  test('delayed vault write still verifies exact readback', () async {
+    final store = FakeGuestStore()..writeDelay = const Duration(milliseconds: 30);
+    await persistVerifiedGuestCredential(store, 'delayed-secret');
+    expect(store.token, 'delayed-secret');
+  });
+
+  test('pending link marker survives process restart semantics', () async {
+    final store = FakeGuestStore();
+    await store.writePendingLinkProvider('google');
+    expect(await store.readPendingLinkProvider(), 'google');
+    // New client process would rehydrate from the same Keychain key.
+    final restarted = FakeGuestStore()..pendingLink = store.pendingLink;
+    expect(await restarted.readPendingLinkProvider(), 'google');
   });
 }

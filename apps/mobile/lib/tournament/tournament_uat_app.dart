@@ -153,9 +153,24 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
   Future<void> _presentRankedAuth(TournamentController controller) async {
     final coordinator = widget.authCoordinator;
     if (coordinator == null || !mounted) return;
+    final pendingRecovery =
+        await coordinator.consumePendingLinkRecoveryIfNeeded();
+    if (!mounted) return;
+    if (pendingRecovery != null &&
+        pendingRecovery.outcome == AuthFlowOutcome.loggedIn &&
+        pendingRecovery.access != null) {
+      controller.api.bearer =
+          UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
+      await controller.completeRankedAuthAndEnter();
+      return;
+    }
     final result = await showRankedAuthSheet(
       context: context,
       coordinator: coordinator,
+      recoverySeed:
+          pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
+              ? pendingRecovery
+              : null,
     );
     if (!mounted) return;
     if (result == null) return;

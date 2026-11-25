@@ -26,6 +26,7 @@ String _jwt({required String sub, required String accountType}) {
 final class _MemStore implements GuestCredentialStore {
   String? token;
   String? rotationId;
+  String? pendingLink;
   @override
   Future<String?> readRefreshToken() async => token;
   @override
@@ -38,6 +39,14 @@ final class _MemStore implements GuestCredentialStore {
   Future<void> writePendingRotationId(String id) async => rotationId = id;
   @override
   Future<void> clearPendingRotationId() async => rotationId = null;
+  @override
+  Future<String?> readPendingLinkProvider() async => pendingLink;
+  @override
+  Future<void> writePendingLinkProvider(String provider) async {
+    pendingLink = provider;
+  }
+  @override
+  Future<void> clearPendingLinkProvider() async => pendingLink = null;
 }
 
 final class _RecordingApi extends UatApi {

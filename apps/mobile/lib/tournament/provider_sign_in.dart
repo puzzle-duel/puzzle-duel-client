@@ -45,6 +45,7 @@ final class FakeProviderSignIn implements ProviderSignInPort {
   final ProviderSignInException? failWith;
   final Set<AuthProviderKind> cancelProviders;
   final List<AuthProviderKind> calls = [];
+  final List<String> nonces = [];
 
   @override
   Future<ProviderAssertion> signIn({
@@ -52,6 +53,7 @@ final class FakeProviderSignIn implements ProviderSignInPort {
     required String nonce,
   }) async {
     calls.add(provider);
+    nonces.add(nonce);
     if (nonce.isEmpty) {
       throw const ProviderSignInException('INVALID_PROVIDER_CHALLENGE');
     }
