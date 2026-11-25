@@ -24,10 +24,11 @@ Backend contract: merged PZD-26 @ `be7a510` — see backend `docs/staging/PZD-26
 |---|---|
 | Backend PZD-26 | Requires cryptographically signed `nonce` claim in Google ID token |
 | `google_sign_in` 6.x | **No** portable `nonce` parameter — **implementation blocker** for real Google |
-| `google_sign_in` 7.x | `GoogleSignIn.initialize(nonce:)` / `InitParameters.nonce` — **supported** |
-| Client adapter | Passes backend challenge nonce into initialize/init on every challenge; does **not** fabricate claims |
+| `google_sign_in` 7.x + `google_sign_in_ios` 6.4.0 + GoogleSignIn 10.1.0 | **Source-verified** end-to-end into AppAuth `nonce` query param (see `PZD-27-GOOGLE-NONCE-SOURCE-TRACE.md`) |
+| Client adapter | First challenge: `initialize(nonce:)`; later challenges: `GoogleSignInPlatform.init` overwrites plugin `_nonce` before `authenticate` |
 | Apple | `SignInWithApple.getAppleIDCredential(nonce:)` — SDK embeds SHA-256 digest (backend verifies) |
 | Config blockers | Missing `PZD_GOOGLE_SERVER_CLIENT_ID` / iOS client ID / Apple capability → `PROVIDER_CONFIG_MISSING` / fail-closed — distinct from SDK capability |
+| Physical-device signed claim | **NOT_RUN** until staging schema/audiences + owner UAT |
 
 Do **not** weaken backend nonce verification. Do **not** introduce Firebase Auth.
 
@@ -67,7 +68,7 @@ Staging vs production must use separate OAuth clients.
 ### iOS (`app.puzzleduel.puzzleDuelMobile`) — do not change bundle ID
 - [ ] Sign in with Apple capability + entitlements *(Google-only staging UAT may proceed without Apple entitlement; Apple remains fail-closed)*
 - [ ] Apple Services / App ID configured for backend audiences *(deferred until Apple enrollment)*
-- [x] Google URL scheme / reversed client ID in `Info.plist` — staging: `com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse`
+- [x] Google URL scheme injected **only for staging builds** via `ios/scripts/pzd_inject_staging_google_url_scheme.sh` when `PZD_STAGING_FIREBASE=1` / `PZD_STAGING_GOOGLE_OAUTH=1` — scheme: `com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse` (not present in production Info.plist source)
 - [ ] Deployment target compatible with `sign_in_with_apple` 6.x
 - [ ] Provisioning profile includes Sign in with Apple *(not required for Google-only staging UAT)*
 

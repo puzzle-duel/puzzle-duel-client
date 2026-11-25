@@ -128,8 +128,12 @@ final class PlatformProviderSignIn implements ProviderSignInPort {
   }
 
   /// Each challenge has a unique nonce. High-level [GoogleSignIn.initialize]
-  /// may only wire streams once; subsequent challenges update the platform
-  /// nonce via [GoogleSignInPlatform.init] without fabricating token claims.
+  /// may only run once; subsequent challenges overwrite the iOS plugin's
+  /// stored `_nonce` via [GoogleSignInPlatform.init] so authenticate uses the
+  /// latest server challenge. Source-verified path into GoogleSignIn 10.x /
+  /// AppAuth request `nonce` is documented in
+  /// `docs/staging/PZD-27-GOOGLE-NONCE-SOURCE-TRACE.md`. Does not fabricate
+  /// token claims; physical-device signed claim remains NOT_RUN until UAT.
   Future<void> _prepareGoogleWithNonce(String nonce) async {
     final clientId = _googleIosClientId.isEmpty ? null : _googleIosClientId;
     if (!_googleBaseInitialized) {

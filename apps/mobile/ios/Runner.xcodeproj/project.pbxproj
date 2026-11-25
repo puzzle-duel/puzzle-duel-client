@@ -200,6 +200,7 @@
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				97C146EC1CF9000F007C117D /* Resources */,
 				A12B45C678D90123456789AB /* [PZD] Stage Firebase plist */,
+				B27C91D0E4F8123456789ABC /* [PZD] Stage Google URL scheme */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				26F1A65795C512B1E10FBDD6 /* [CP] Embed Pods Frameworks */,
@@ -398,6 +399,22 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -eu\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nrm -f \"$DEST\"\nif [ \"${PZD_STAGING_FIREBASE:-0}\" = \"1\" ]; then\n  SOURCE=\"${PROJECT_DIR}/../firebase/staging/GoogleService-Info.plist\"\n  test -f \"$SOURCE\" || { echo \"error: Missing staging Firebase plist\" >&2; exit 1; }\n  cp \"$SOURCE\" \"$DEST\"\nfi\n";
+		};
+		B27C91D0E4F8123456789ABC /* [PZD] Stage Google URL scheme */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}",
+			);
+			name = "[PZD] Stage Google URL scheme";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"${PROJECT_DIR}/scripts/pzd_inject_staging_google_url_scheme.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

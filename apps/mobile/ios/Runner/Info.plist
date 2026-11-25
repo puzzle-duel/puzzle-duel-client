@@ -73,22 +73,9 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<!-- Staging Google Sign-In OAuth callback (Puzzle Duel Staging iOS client).
-	     Client IDs themselves are supplied at build time via
-	     PZD_GOOGLE_IOS_CLIENT_ID / PZD_GOOGLE_SERVER_CLIENT_ID dart-defines.
-	     Production must replace this reversed client ID before production Google enablement. -->
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>app.puzzleduel.puzzleDuelMobile.google-staging</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>com.googleusercontent.apps.450107669068-b0l835r1cv1mfga7h3ovdd1hjte0tfse</string>
-			</array>
-		</dict>
-	</array>
+	<!-- Staging Google OAuth URL scheme is injected at build time by
+	     ios/scripts/pzd_inject_staging_google_url_scheme.sh when
+	     PZD_STAGING_FIREBASE=1 or PZD_STAGING_GOOGLE_OAUTH=1. Production builds
+	     must not inherit staging OAuth configuration. -->
 </dict>
 </plist>

@@ -22,8 +22,9 @@ echo "==> healthz $STAGING_ORIGIN"
 curl -fsS --connect-timeout 5 --max-time 15 "${STAGING_ORIGIN%/}/healthz" >/dev/null
 
 echo "==> provider challenge probe (expect 201 after migrations + audiences)"
+# Status-only: discard body so nonce/binding never hit disk or stdout.
 CHALLENGE_CODE="$(
-  curl -sS -o /tmp/pzd-google-challenge.json -w '%{http_code}' --connect-timeout 5 --max-time 15 \
+  curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
     -X POST "${STAGING_ORIGIN%/}/v1/auth/providers/challenge" \
     -H 'Content-Type: application/json' \
     -d '{"provider":"google","purpose":"login"}' || true
@@ -32,8 +33,6 @@ echo "challenge HTTP $CHALLENGE_CODE"
 if [[ "$CHALLENGE_CODE" != "201" ]]; then
   echo "BLOCKED: Google provider routes not ready on staging (got HTTP $CHALLENGE_CODE)." >&2
   echo "Apply migrations 0005/0006/0007, set PZD_STAGING_GOOGLE_AUDIENCES, restart pzd-staging.service." >&2
-  head -c 400 /tmp/pzd-google-challenge.json 2>/dev/null || true
-  echo >&2
   exit 2
 fi
 
@@ -42,6 +41,7 @@ flutter pub get --enforce-lockfile
 
 echo "==> release build + install on $DEVICE_ID"
 # Prefer release-mode physical-device UAT. Firebase Crashlytics staging remains opt-in.
+# PZD_STAGING_FIREBASE=1 also injects the staging Google URL scheme into Info.plist.
 PZD_STAGING_FIREBASE=1 flutter build ios --release \
   --dart-define=PZD_STAGING_BASE_URL="$STAGING_ORIGIN" \
   --dart-define=PZD_FIREBASE_CONFIGURED=true \
