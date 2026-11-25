@@ -3,10 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 
-/// Staging guest-auth transport. No Firebase Authentication dependency.
+/// Staging session auth transport. No Firebase Authentication dependency.
 ///
 /// The server owns player identity. Never use the playerId as an auth proof.
 abstract interface class GuestCredentialStore {
@@ -18,29 +19,81 @@ abstract interface class GuestCredentialStore {
   Future<void> clearPendingRotationId();
 }
 
+enum AccountType { guest, verified }
+
 final class GuestAccess {
-  const GuestAccess({required this.accessToken, required this.expiresAt});
+  const GuestAccess({
+    required this.accessToken,
+    required this.expiresAt,
+    required this.accountType,
+    required this.playerId,
+    this.familyId,
+  });
   final String accessToken;
   final DateTime expiresAt;
+  final AccountType accountType;
+  final String playerId;
+  /// Exact refresh family id from staging JWT `fid` when present.
+  final String? familyId;
+
+  bool get isVerified => accountType == AccountType.verified;
+  bool get isGuest => accountType == AccountType.guest;
 
   /// Local vault namespace only. Server-side JWT verification remains mandatory.
-  String get sessionVaultBinding {
+  /// Prefix stays `staging-guest:` so practice isolation keys remain stable
+  /// across guest→verified linking of the same player_id.
+  String get sessionVaultBinding => 'staging-guest:$playerId';
+
+  /// Parses a staging access JWT. Accepts guest or verified account_type.
+  static GuestAccess parse({
+    required String accessToken,
+    required DateTime expiresAt,
+  }) {
     try {
       final parts = accessToken.split('.');
       if (parts.length != 3) throw const FormatException('jwt');
-      final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+      final claims = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
       if (claims is! Map ||
           claims['iss'] != 'https://staging.puzzle-duel.app' ||
-          claims['aud'] != 'puzzle-duel-api' ||
-          claims['account_type'] != 'guest') {
+          claims['aud'] != 'puzzle-duel-api') {
         throw const FormatException('claims');
       }
+      final typeRaw = claims['account_type'];
+      final AccountType accountType;
+      if (typeRaw == 'guest') {
+        accountType = AccountType.guest;
+      } else if (typeRaw == 'verified') {
+        accountType = AccountType.verified;
+      } else {
+        throw const FormatException('account_type');
+      }
       final subject = claims['sub'];
-      if (subject is! String || subject.length != 36 ||
+      if (subject is! String ||
+          subject.length != 36 ||
           !RegExp(r'^[0-9a-fA-F-]+$').hasMatch(subject)) {
         throw const FormatException('subject');
       }
-      return 'staging-guest:$subject';
+      final fid = claims['fid'];
+      final String? familyId;
+      if (fid == null) {
+        familyId = null;
+      } else if (fid is String &&
+          fid.isNotEmpty &&
+          fid.length <= 128 &&
+          RegExp(r'^[0-9a-zA-Z_-]+$').hasMatch(fid)) {
+        familyId = fid;
+      } else {
+        throw const FormatException('fid');
+      }
+      return GuestAccess(
+        accessToken: accessToken,
+        expiresAt: expiresAt,
+        accountType: accountType,
+        playerId: subject,
+        familyId: familyId,
+      );
     } catch (_) {
       throw const GuestAuthException('INVALID_AUTH_RESPONSE');
     }
@@ -122,6 +175,18 @@ final class GuestAuthClient {
 
   Future<GuestAccess>? _pending;
   GuestAccess? _current;
+  /// Bumped before verified credential replacement so a concurrent stale
+  /// refresh cannot overwrite newly issued credentials.
+  int _credentialGeneration = 0;
+
+  GuestAccess? get cachedAccess => _current;
+  int get credentialGeneration => _credentialGeneration;
+
+  /// Test-only seed. Never call from production UI paths.
+  @visibleForTesting
+  void debugSeedAccess(GuestAccess access) {
+    _current = access;
+  }
 
   /// Coalesces concurrent app startup/foreground authentication attempts.
   Future<GuestAccess> authenticate({bool forceRefresh = false}) {
@@ -137,7 +202,50 @@ final class GuestAuthClient {
     return next.whenComplete(() => _pending = null);
   }
 
+  /// Atomically replaces guest credentials with a verified provider bundle.
+  /// Invalidates in-flight refresh writes via generation bump.
+  Future<GuestAccess> replaceWithVerifiedBundle({
+    required String accessToken,
+    required String refreshToken,
+    required DateTime expiresAt,
+  }) async {
+    final generation = ++_credentialGeneration;
+    _breadcrumb(LogCode.authRefreshSucceeded, 'auth_credential_replace_started');
+    final access = GuestAccess.parse(
+      accessToken: accessToken,
+      expiresAt: expiresAt,
+    );
+    if (!access.isVerified) {
+      throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+    }
+    try {
+      await persistVerifiedGuestCredential(credentials, refreshToken);
+    } catch (_) {
+      _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_failed',
+          errorCode: 'SECURE_STORE_UNAVAILABLE');
+      throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+    }
+    if (generation != _credentialGeneration) {
+      _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_stale',
+          errorCode: 'STALE_CREDENTIAL_RESPONSE');
+      throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+    }
+    await credentials.clearPendingRotationId();
+    _breadcrumb(LogCode.authRefreshSucceeded, 'auth_credential_replaced');
+    return _current = access;
+  }
+
+  /// Clears durable refresh material and in-memory cache after logout.
+  Future<void> clearSessionLocally() async {
+    _credentialGeneration++;
+    _current = null;
+    await credentials.clearRefreshToken();
+    await credentials.clearPendingRotationId();
+    _breadcrumb(LogCode.authExpired, 'auth_logout_local_cleared');
+  }
+
   Future<GuestAccess> _authenticate() async {
+    final generation = _credentialGeneration;
     final previous = await credentials.readRefreshToken();
     _breadcrumb(LogCode.authExpired, previous == null || previous.isEmpty
         ? 'guest_refresh_absent' : 'guest_refresh_present');
@@ -155,7 +263,7 @@ final class GuestAuthClient {
       });
       if (result.status == 200) {
         _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_http_succeeded');
-        final access = await _save(result.body);
+        final access = await _save(result.body, generation: generation);
         if (_rotationRetryEnabled) {
           await credentials.clearPendingRotationId();
           _breadcrumb(LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
@@ -177,14 +285,17 @@ final class GuestAuthClient {
     if (result.status != 201 && result.status != 200) {
       throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
     }
-    return _save(result.body);
+    return _save(result.body, generation: generation);
   }
 
-  Future<GuestAccess> _save(Map<String, dynamic> data) async {
-    final access = data['accessToken'];
+  Future<GuestAccess> _save(
+    Map<String, dynamic> data, {
+    required int generation,
+  }) async {
+    final accessToken = data['accessToken'];
     final refresh = data['refreshToken'];
     final expiry = data['expiresAt'];
-    if (access is! String || access.isEmpty || refresh is! String ||
+    if (accessToken is! String || accessToken.isEmpty || refresh is! String ||
         refresh.isEmpty || expiry is! String) {
       throw const GuestAuthException('INVALID_AUTH_RESPONSE');
     }
@@ -192,6 +303,15 @@ final class GuestAuthClient {
     if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
       throw const GuestAuthException('INVALID_AUTH_RESPONSE');
     }
+    if (generation != _credentialGeneration) {
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_stale_discarded',
+          errorCode: 'STALE_CREDENTIAL_RESPONSE');
+      throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+    }
+    final access = GuestAccess.parse(
+      accessToken: accessToken,
+      expiresAt: expiresAt,
+    );
     _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
     try {
       await persistVerifiedGuestCredential(credentials, refresh);
@@ -200,8 +320,13 @@ final class GuestAuthClient {
           errorCode: 'SECURE_STORE_UNAVAILABLE');
       throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
     }
+    if (generation != _credentialGeneration) {
+      _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_stale_after_write',
+          errorCode: 'STALE_CREDENTIAL_RESPONSE');
+      throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+    }
     _breadcrumb(LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_completed');
-    return _current = GuestAccess(accessToken: access, expiresAt: expiresAt);
+    return _current = access;
   }
 
   Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {

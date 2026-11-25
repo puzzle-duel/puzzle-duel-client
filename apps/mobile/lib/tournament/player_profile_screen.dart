@@ -166,6 +166,14 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   stats: _stats,
                   copy: copy,
                 ),
+                const SizedBox(height: 12),
+                _AccountStatusCard(
+                  verified: widget.controller.sessionAuth?.cachedAccess
+                          ?.isVerified ==
+                      true,
+                  copy: copy,
+                  onSignIn: widget.controller.onRequestRankedAuth,
+                ),
                 const SizedBox(height: 20),
                 Text(
                   copy.personalRecordsTitle,
@@ -365,6 +373,61 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+final class _AccountStatusCard extends StatelessWidget {
+  const _AccountStatusCard({
+    required this.verified,
+    required this.copy,
+    this.onSignIn,
+  });
+
+  final bool verified;
+  final TournamentCopy copy;
+  final VoidCallback? onSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: verified ? copy.accountStatusVerified : copy.accountStatusGuest,
+      child: Container(
+        key: const Key('profile-account-status'),
+        padding: const EdgeInsets.all(GameTokens.spaceMd),
+        decoration: BoxDecoration(
+          color: GameTokens.surface,
+          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
+          border: Border.all(color: GameTokens.border),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              verified ? Icons.verified_user_rounded : Icons.person_outline,
+              color: verified ? GameTokens.success : GameTokens.textSecondary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                verified
+                    ? copy.accountStatusVerified
+                    : copy.accountStatusGuest,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: GameTokens.textPrimary,
+                ),
+              ),
+            ),
+            if (!verified && onSignIn != null)
+              TextButton(
+                key: const Key('profile-sign-in'),
+                onPressed: onSignIn,
+                child: Text(copy.signInToPlay),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

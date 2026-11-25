@@ -220,6 +220,63 @@ final class TournamentCopy {
     'Unlimited puzzles. Not ranked and not part of today’s tournament.',
     'Sınırsız bulmaca. Sıralamaya girmez ve bugünün turnuvasına yazılmaz.',
   );
+  String get authSheetTitle => pick(
+    'Verify to play ranked',
+    'Sıralamalı oyun için doğrula',
+  );
+  String get authSheetBody => pick(
+    'Sign in with Apple or Google to enter today’s official tournament. Practice stays available as a guest. Your current progress stays on this account.',
+    'Bugünün resmi turnuvasına girmek için Apple veya Google ile oturum aç. Pratik misafir olarak kullanılmaya devam eder. Mevcut ilerlemen bu hesapta kalır.',
+  );
+  String get authConflictBody => pick(
+    'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress was not changed. Sign into the existing account only if you intend to switch — identities are never merged.',
+    'Bu Apple veya Google hesabı başka bir Puzzle Duel oyuncusuna bağlı. Misafir ilerlemen değişmedi. Yalnızca hesap değiştirmek istiyorsan mevcut hesaba giriş yap — kimlikler asla birleştirilmez.',
+  );
+  String get continueWithApple => pick('Continue with Apple', 'Apple ile devam et');
+  String get continueWithGoogle =>
+      pick('Continue with Google', 'Google ile devam et');
+  String get signInExistingApple => pick(
+    'Sign in to existing Apple account',
+    'Mevcut Apple hesabına giriş yap',
+  );
+  String get signInExistingGoogle => pick(
+    'Sign in to existing Google account',
+    'Mevcut Google hesabına giriş yap',
+  );
+  String get keepGuestProgress => pick(
+    'Keep guest progress',
+    'Misafir ilerlemesini koru',
+  );
+  String get cancel => pick('Cancel', 'İptal');
+  String get signInToPlay => pick(
+    'Sign in to play tournament',
+    'Turnuva için oturum aç',
+  );
+  String get rankedAuthRequired => pick(
+    'Apple or Google verification is required before official tournament play. Practice remains free.',
+    'Resmi turnuva öncesi Apple veya Google doğrulaması gerekir. Pratik ücretsiz kalır.',
+  );
+  String get accountStatusGuest => pick('Guest account', 'Misafir hesap');
+  String get accountStatusVerified =>
+      pick('Verified account', 'Doğrulanmış hesap');
+  String get signOut => pick('Sign out', 'Oturumu kapat');
+  String authError(String code) => switch (code) {
+        'ACCOUNT_CONFLICT' => authConflictBody,
+        'PROVIDER_SIGN_IN_CANCELLED' => pick(
+          'Sign-in was cancelled.',
+          'Oturum açma iptal edildi.',
+        ),
+        'AUTH_NETWORK_UNAVAILABLE' || 'OFFLINE' => offline,
+        'AUTH_UNAVAILABLE' || 'PROVIDER_CONFIG_MISSING' => pick(
+          'Sign-in is temporarily unavailable. Try again later.',
+          'Oturum açma geçici olarak kullanılamıyor. Daha sonra yeniden dene.',
+        ),
+        'INVALID_PROVIDER_CHALLENGE' || 'INVALID_PROVIDER_ASSERTION' => pick(
+          'Sign-in could not be verified. Try again.',
+          'Oturum doğrulanamadı. Yeniden dene.',
+        ),
+        _ => genericFailure,
+      };
   String get chooseDifficulty => pick('Choose a difficulty', 'Zorluk seç');
   String get newPuzzle => pick('New Puzzle', 'Yeni bulmaca');
   String get samePuzzle =>
@@ -375,6 +432,7 @@ final class TournamentCopy {
       'TIMEOUT' => timedOut,
       'OFFLINE' => offline,
       'UNAUTHENTICATED' => unauthorized,
+      'RANKED_AUTH_REQUIRED' => rankedAuthRequired,
       'WRITER_NOT_AUTHORIZED' => writerBlocked,
       'RATE_LIMITED' => pick(
         'Too many tournament requests. Please try again shortly.',
@@ -398,6 +456,7 @@ final class TournamentCopy {
       'TIMEOUT' => timedOut,
       'OFFLINE' => offline,
       'UNAUTHENTICATED' => unauthorized,
+      'RANKED_AUTH_REQUIRED' => rankedAuthRequired,
       'WRITER_NOT_AUTHORIZED' => writerBlocked,
       'STATE_CONFLICT' => staleBoard,
       'MALFORMED_REQUEST' => couldNotRead,

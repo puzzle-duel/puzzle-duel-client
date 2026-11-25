@@ -16,10 +16,12 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: ^10.0.0
+  google_sign_in: ^6.2.2
   material_ui: ^1.11.0
   path_provider: 2.1.5
   puzzle_duel_rules:
     path: ../../packages/puzzle_duel_rules
+  sign_in_with_apple: ^6.1.4
 
 dev_dependencies:
   flutter_test:
