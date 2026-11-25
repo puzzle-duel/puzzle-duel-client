@@ -19,7 +19,7 @@ String _jwt({
     'aud': 'puzzle-duel-api',
     'sub': sub,
     'account_type': accountType,
-    if (fid != null) 'fid': fid,
+    'fid': ?fid,
   };
   final payload = base64Url
       .encode(utf8.encode(jsonEncode(claims)))
