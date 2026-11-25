@@ -91,11 +91,21 @@ void main() {
   });
 
   test('pending link marker survives process restart semantics', () async {
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final encoded = PendingLinkRecovery(
+      provider: 'google',
+      playerId: guestId,
+    ).encode();
     final store = FakeGuestStore();
-    await store.writePendingLinkProvider('google');
-    expect(await store.readPendingLinkProvider(), 'google');
+    await store.writePendingLinkProvider(encoded);
+    expect(await store.readPendingLinkProvider(), encoded);
     // New client process would rehydrate from the same Keychain key.
     final restarted = FakeGuestStore()..pendingLink = store.pendingLink;
-    expect(await restarted.readPendingLinkProvider(), 'google');
+    expect(
+      PendingLinkRecovery.tryParse(await restarted.readPendingLinkProvider()),
+      isA<PendingLinkRecovery>()
+          .having((m) => m.provider, 'provider', 'google')
+          .having((m) => m.playerId, 'playerId', guestId),
+    );
   });
 }

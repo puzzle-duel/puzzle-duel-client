@@ -31,16 +31,25 @@ Backend contract: merged PZD-26 @ `be7a510` — see backend `docs/staging/PZD-26
 
 Do **not** weaken backend nonce verification. Do **not** introduce Firebase Auth.
 
-## Credential mutation safety (P1-02)
-- Single `_mutationChain` serializes durable vault writes/clears (re-entrant for nested commit).
+## Credential mutation + refresh ownership
+- Single `_mutationChain` serializes durable vault writes/clears.
 - Generation bump on replace/logout; stale `_pending` auth futures never reused across generations.
-- Pending rotation cleared only by the winning commit; delayed secure-storage tests cover refresh/link, refresh/logout, stale writes, pending rotation, restart recovery.
+- **All network refresh** (including post-native near-expiry refresh) goes through `authenticate` single-flight — never a parallel `_authenticate` under the mutation lock.
+- `refreshGuestPreservingIdentity` joins that flight then asserts exact `player_id` + `fid`.
+- Pending rotation cleared only by the winning commit; concurrency tests cover rotation retry on/off.
 
-## Provider linking recovery (P1-03)
-- After native UI, if guest access is near expiry → `refreshGuestPreservingIdentity` (exact `player_id` + `fid`).
-- Before link HTTP: durable `pending_link` provider marker.
-- Backend success + lost response / timeout / vault failure → `recoveryRequired` + explicit `loginExisting` (no guest create, no blind replay of link).
+## Provider linking recovery (identity-preserving)
+- Before link HTTP: durable marker `provider|<playerId>` (never tokens/nonces).
+- Backend success + lost response / timeout / vault failure → `recoveryRequired`.
+- Recovery UI calls **`recoverPendingLink`** (not generic `loginExisting`).
+- Recovery commits credentials only when login `playerId` matches the marker; mismatch keeps the marker and refuses vault write (no silent switch/create adoption).
+- Generic `loginExisting` remains for intentional ACCOUNT_CONFLICT account switch only.
+- **Backend note:** PZD-26 login still creates a new `player_id` for unknown provider subjects. Client refuses to adopt mismatches; a dedicated recovery endpoint that rejects create/switch would reduce orphan verified accounts — document only, no invented client endpoint.
 - Restart: `consumePendingLinkRecoveryIfNeeded` surfaces recovery without minting a new guest.
+
+## Native Google/Apple nonce honesty
+- Source passes challenge nonce into `google_sign_in` 7.x / Apple SDK.
+- Repeated platform init + **actual signed nonce claim on device** = **NOT_RUN** until owner UAT evidence. Do not claim real-provider success.
 
 ## Dart defines (owner-supplied; never commit secrets)
 | Define | Purpose |

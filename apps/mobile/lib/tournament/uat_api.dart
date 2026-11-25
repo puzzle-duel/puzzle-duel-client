@@ -342,6 +342,9 @@ class UatApi {
       'PROVIDER_LINK_RECOVERY_apple',
       'PROVIDER_LINK_RECOVERY_google',
       'AUTH_NETWORK_UNAVAILABLE',
+      'RECOVERY_IDENTITY_MISMATCH',
+      'RECOVERY_PROVIDER_MISMATCH',
+      'RECOVERY_MARKER_MISSING',
     }.contains(code) ? code : null;
   }
 

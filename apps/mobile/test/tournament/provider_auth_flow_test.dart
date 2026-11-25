@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -459,7 +460,7 @@ void main() {
     final store = _MemoryStore()
       ..token = 'guest-refresh'
       ..rotationId = '0123456789abcdef0123456789abcdef'
-      ..pendingLink = 'google';
+      ..pendingLink = 'google|$guestId';
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -493,7 +494,8 @@ void main() {
     final result = await coordinator.linkCurrentGuest(AuthProviderKind.apple);
     expect(result.outcome, AuthFlowOutcome.recoveryRequired);
     expect(result.recoveryProvider, AuthProviderKind.apple);
-    expect(store.pendingLink, 'apple');
+    expect(result.expectedPlayerId, guestId);
+    expect(store.pendingLink, 'apple|$guestId');
     expect(store.token, 'guest-refresh');
   });
 
@@ -518,7 +520,8 @@ void main() {
     );
     final result = await coordinator.linkCurrentGuest(AuthProviderKind.google);
     expect(result.outcome, AuthFlowOutcome.recoveryRequired);
-    expect(store.pendingLink, 'google');
+    expect(store.pendingLink, 'google|$guestId');
+    expect(result.expectedPlayerId, guestId);
     expect(providers.linkCalls, 1);
     expect(store.token, 'guest-refresh');
   });
@@ -526,7 +529,7 @@ void main() {
   test('ACCOUNT_CONFLICT clears pending link and keeps guest refresh', () async {
     final store = _MemoryStore()
       ..token = 'guest-refresh'
-      ..pendingLink = 'apple';
+      ..pendingLink = 'apple|$guestId';
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -551,7 +554,7 @@ void main() {
   });
 
   test('pending link blocks silent guest creation on restart', () async {
-    final store = _MemoryStore()..pendingLink = 'google';
+    final store = _MemoryStore()..pendingLink = 'google|$guestId';
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -566,12 +569,12 @@ void main() {
         ),
       ),
     );
-    expect(store.pendingLink, 'google');
+    expect(store.pendingLink, 'google|$guestId');
   });
 
   test('consumePendingLinkRecoveryIfNeeded surfaces provider recovery',
       () async {
-    final store = _MemoryStore()..pendingLink = 'apple';
+    final store = _MemoryStore()..pendingLink = 'apple|$guestId';
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -584,11 +587,71 @@ void main() {
     final result = await coordinator.consumePendingLinkRecoveryIfNeeded();
     expect(result?.outcome, AuthFlowOutcome.recoveryRequired);
     expect(result?.recoveryProvider, AuthProviderKind.apple);
+    expect(result?.expectedPlayerId, guestId);
   });
 
-  test('explicit login recovery replaces credentials and clears pending link',
+  test('recoverPendingLink succeeds when login resolves expected player',
       () async {
-    final store = _MemoryStore()..pendingLink = 'google';
+    final store = _MemoryStore()..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(loginPlayerId: guestId),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.loggedIn);
+    expect(result.access?.playerId, guestId);
+    expect(store.token, 'verified-refresh-login');
+    expect(store.pendingLink, isNull);
+  });
+
+  test('recoverPendingLink rejects wrong account without clearing marker',
+      () async {
+    final store = _MemoryStore()
+      ..token = 'guest-refresh'
+      ..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    const other = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(loginPlayerId: other),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.errorCode, 'RECOVERY_IDENTITY_MISMATCH');
+    expect(result.expectedPlayerId, guestId);
+    expect(store.pendingLink, 'google|$guestId');
+    expect(store.token, 'guest-refresh');
+  });
+
+  test('recoverPendingLink rejects wrong provider without clearing marker',
+      () async {
+    final store = _MemoryStore()..pendingLink = 'google|$guestId';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: _FakeProviders(loginPlayerId: guestId),
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.recoverPendingLink(AuthProviderKind.apple);
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    expect(result.errorCode, 'RECOVERY_PROVIDER_MISMATCH');
+    expect(store.pendingLink, 'google|$guestId');
+  });
+
+  test('generic loginExisting remains available outside recovery', () async {
+    final store = _MemoryStore();
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -601,15 +664,14 @@ void main() {
     );
     final result = await coordinator.loginExisting(AuthProviderKind.google);
     expect(result.outcome, AuthFlowOutcome.loggedIn);
-    expect(store.token, 'verified-refresh-login');
-    expect(store.pendingLink, isNull);
+    expect(result.access?.playerId, other);
   });
 
   test('logout clears pending link before minting a new guest session attempt',
       () async {
     final store = _MemoryStore()
       ..token = 'verified-refresh'
-      ..pendingLink = 'apple';
+      ..pendingLink = 'apple|$guestId';
     final session = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
@@ -628,6 +690,128 @@ void main() {
     expect(providers.logoutCalls, 1);
     expect(store.token, isNull);
     expect(store.pendingLink, isNull);
+  });
+
+  test('overlapping authenticate and identity refresh share one network flight',
+      () async {
+    final store = _MemoryStore()..token = 'guest-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    final gate = Completer<void>();
+    var refreshPosts = 0;
+    final seenRotationIds = <String?>[];
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      refreshPosts++;
+      seenRotationIds.add(body['rotationId'] as String?);
+      await gate.future;
+      return (
+        status: 200,
+        body: {
+          'accessToken': _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+          'refreshToken': 'rotated-refresh',
+          'expiresAt':
+              DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String(),
+        },
+      );
+    };
+    final a = session.authenticate(forceRefresh: true);
+    final b = session.refreshGuestPreservingIdentity(
+      playerId: guestId,
+      familyId: 'g1',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(refreshPosts, 1);
+    gate.complete();
+    final results = await Future.wait([a, b]);
+    expect(results[0].playerId, guestId);
+    expect(results[1].playerId, guestId);
+    expect(results[1].familyId, 'g1');
+    expect(refreshPosts, 1);
+    expect(seenRotationIds, [null]);
+    expect(store.token, 'rotated-refresh');
+  });
+
+  test('overlapping refresh with rotation retry enabled uses one rotation id',
+      () async {
+    final store = _MemoryStore()..token = 'guest-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: true,
+    );
+    final gate = Completer<void>();
+    var refreshPosts = 0;
+    final seenRotationIds = <String>[];
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      refreshPosts++;
+      final rotationId = body['rotationId'];
+      expect(rotationId, isA<String>());
+      seenRotationIds.add(rotationId! as String);
+      await gate.future;
+      return (
+        status: 200,
+        body: {
+          'accessToken': _jwt(sub: guestId, accountType: 'guest', fid: 'g1'),
+          'refreshToken': 'rotated-refresh-retry',
+          'expiresAt':
+              DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String(),
+        },
+      );
+    };
+    final a = session.refreshGuestPreservingIdentity(
+      playerId: guestId,
+      familyId: 'g1',
+    );
+    final b = session.authenticate(forceRefresh: true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(refreshPosts, 1);
+    gate.complete();
+    await Future.wait([a, b]);
+    expect(refreshPosts, 1);
+    expect(seenRotationIds.toSet(), hasLength(1));
+    expect(store.rotationId, isNull);
+    expect(store.token, 'rotated-refresh-retry');
+  });
+
+  test('identity-preserving refresh rejects player or fid mutation', () async {
+    final store = _MemoryStore()..token = 'guest-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugTransport = (path, body) async => (
+          status: 200,
+          body: {
+            'accessToken': _jwt(
+              sub: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+              accountType: 'guest',
+              fid: 'other-fid',
+            ),
+            'refreshToken': 'bad-refresh',
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+    await expectLater(
+      session.refreshGuestPreservingIdentity(
+        playerId: guestId,
+        familyId: 'g1',
+      ),
+      throwsA(
+        isA<GuestAuthException>().having(
+          (e) => e.code,
+          'code',
+          'GUEST_IDENTITY_CHANGED',
+        ),
+      ),
+    );
   });
 }
 

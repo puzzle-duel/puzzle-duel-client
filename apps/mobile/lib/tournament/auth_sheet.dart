@@ -203,8 +203,11 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                   foreground: Colors.white,
                   enabled: !_busy,
                   onPressed: () => _run(
-                    () => widget.coordinator
-                        .loginExisting(AuthProviderKind.apple),
+                    () => _recovery
+                        ? widget.coordinator
+                            .recoverPendingLink(AuthProviderKind.apple)
+                        : widget.coordinator
+                            .loginExisting(AuthProviderKind.apple),
                   ),
                 ),
               if (showLoginApple && showLoginGoogle) const SizedBox(height: 12),
@@ -217,8 +220,11 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                   border: true,
                   enabled: !_busy,
                   onPressed: () => _run(
-                    () => widget.coordinator
-                        .loginExisting(AuthProviderKind.google),
+                    () => _recovery
+                        ? widget.coordinator
+                            .recoverPendingLink(AuthProviderKind.google)
+                        : widget.coordinator
+                            .loginExisting(AuthProviderKind.google),
                   ),
                 ),
               if (_conflict) ...[

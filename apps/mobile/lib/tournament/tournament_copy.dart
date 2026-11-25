@@ -270,7 +270,10 @@ final class TournamentCopy {
         'SECURE_STORE_VERIFY_FAILED' ||
         'PROVIDER_LINK_RECOVERY_apple' ||
         'PROVIDER_LINK_RECOVERY_google' ||
-        'STALE_CREDENTIAL_RESPONSE' =>
+        'STALE_CREDENTIAL_RESPONSE' ||
+        'RECOVERY_IDENTITY_MISMATCH' ||
+        'RECOVERY_PROVIDER_MISMATCH' ||
+        'RECOVERY_MARKER_MISSING' =>
           authRecoveryBody,
         'PROVIDER_SIGN_IN_CANCELLED' => pick(
           'Sign-in was cancelled.',

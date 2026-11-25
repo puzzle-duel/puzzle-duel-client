@@ -13,7 +13,7 @@ enum AuthFlowOutcome {
   cancelled,
   conflict,
   failed,
-  /// Backend may have upgraded the guest; explicit provider login is required.
+  /// Backend may have upgraded the guest; identity-preserving recovery required.
   recoveryRequired,
 }
 
@@ -24,6 +24,7 @@ final class AuthFlowResult {
     this.errorCode,
     this.conflictPlayerId,
     this.recoveryProvider,
+    this.expectedPlayerId,
   });
 
   final AuthFlowOutcome outcome;
@@ -31,6 +32,8 @@ final class AuthFlowResult {
   final String? errorCode;
   final String? conflictPlayerId;
   final AuthProviderKind? recoveryProvider;
+  /// Original guest/verified player id that recovery must resolve.
+  final String? expectedPlayerId;
 }
 
 /// Orchestrates challenge → native provider → backend link/login with
@@ -106,7 +109,10 @@ final class AuthCoordinator {
         );
       }
 
-      await session.markPendingLinkProvider(provider.name);
+      await session.markPendingLink(
+        provider: provider.name,
+        playerId: priorPlayerId,
+      );
       try {
         final bundle = await providers.link(
           provider: provider,
@@ -115,9 +121,10 @@ final class AuthCoordinator {
           guestBearer: guest.accessToken,
         );
         if (bundle.playerId != priorPlayerId) {
-          return const AuthFlowResult(
+          return AuthFlowResult(
             outcome: AuthFlowOutcome.failed,
             errorCode: 'PLAYER_ID_MUTATION',
+            expectedPlayerId: priorPlayerId,
           );
         }
         try {
@@ -133,12 +140,13 @@ final class AuthCoordinator {
           );
         } on GuestAuthException catch (error) {
           // Backend link likely succeeded; vault write failed. Keep pending
-          // marker and require explicit provider recovery — never guest create.
+          // marker and require identity-preserving recovery — never guest create.
           _breadcrumb('auth_link_vault_failed', errorCode: error.code);
           return AuthFlowResult(
             outcome: AuthFlowOutcome.recoveryRequired,
             errorCode: error.code,
             recoveryProvider: provider,
+            expectedPlayerId: priorPlayerId,
           );
         }
       } on ProviderAuthException catch (error) {
@@ -162,18 +170,14 @@ final class AuthCoordinator {
             outcome: AuthFlowOutcome.recoveryRequired,
             errorCode: error.code,
             recoveryProvider: provider,
+            expectedPlayerId: priorPlayerId,
           );
-        }
-        if (error.code != 'GUEST_PROOF_REQUIRED' &&
-            error.code != 'INVALID_PROVIDER_CHALLENGE') {
-          // Keep pending for unknown failures that may follow a server commit.
-        } else {
-          // already cleared
         }
         _breadcrumb('provider_link_failed', errorCode: error.code);
         return AuthFlowResult(
           outcome: AuthFlowOutcome.failed,
           errorCode: error.code,
+          expectedPlayerId: priorPlayerId,
         );
       }
     } on ProviderSignInException catch (error) {
@@ -185,14 +189,8 @@ final class AuthCoordinator {
         errorCode: error.code,
       );
     } on GuestAuthException catch (error) {
-      final recovery = _recoveryFromCode(error.code);
-      if (recovery != null) {
-        return AuthFlowResult(
-          outcome: AuthFlowOutcome.recoveryRequired,
-          errorCode: error.code,
-          recoveryProvider: recovery,
-        );
-      }
+      final recovery = await _recoveryResultFromCode(error.code);
+      if (recovery != null) return recovery;
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,
@@ -208,7 +206,7 @@ final class AuthCoordinator {
   }
 
   /// Explicit sign-in to an existing (or newly created) verified account.
-  /// Also used for post-link recovery when guest refresh is revoked.
+  /// Not used for pending-link recovery — see [recoverPendingLink].
   Future<AuthFlowResult> loginExisting(AuthProviderKind provider) async {
     if (_inFlight) {
       return const AuthFlowResult(
@@ -279,16 +277,148 @@ final class AuthCoordinator {
     }
   }
 
+  /// Identity-preserving recovery for uncertain link completion.
+  /// Refuses vault commit when login resolves a different player; keeps marker.
+  /// Does not invent a backend recovery endpoint — uses login then validates
+  /// `playerId` against the durable expected identity.
+  Future<AuthFlowResult> recoverPendingLink(AuthProviderKind provider) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    _inFlight = true;
+    try {
+      final pending = await session.readPendingLinkRecovery();
+      if (pending == null) {
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: 'RECOVERY_MARKER_MISSING',
+        );
+      }
+      if (pending.provider != provider.name) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: 'RECOVERY_PROVIDER_MISMATCH',
+          recoveryProvider: pending.provider == 'apple'
+              ? AuthProviderKind.apple
+              : AuthProviderKind.google,
+          expectedPlayerId: pending.playerId,
+        );
+      }
+      _breadcrumb('auth_recovery_started_${provider.name}');
+      final challenge = await providers.challenge(
+        provider: provider,
+        purpose: ProviderAuthPurpose.login,
+      );
+      final binding = challenge.binding;
+      if (binding == null || binding.isEmpty) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: 'INVALID_PROVIDER_CHALLENGE',
+          recoveryProvider: provider,
+          expectedPlayerId: pending.playerId,
+        );
+      }
+      final assertion = await _nativeSignIn(provider, challenge.nonce);
+      if (assertion == null) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.cancelled,
+          errorCode: 'PROVIDER_SIGN_IN_CANCELLED',
+          recoveryProvider: provider,
+          expectedPlayerId: pending.playerId,
+        );
+      }
+      final bundle = await providers.login(
+        provider: provider,
+        idToken: assertion.idToken,
+        nonce: challenge.nonce,
+        binding: binding,
+      );
+      if (bundle.playerId != pending.playerId) {
+        // Keep marker; do not adopt wrong/new account credentials.
+        _breadcrumb('auth_recovery_identity_mismatch',
+            errorCode: 'RECOVERY_IDENTITY_MISMATCH');
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: 'RECOVERY_IDENTITY_MISMATCH',
+          recoveryProvider: provider,
+          expectedPlayerId: pending.playerId,
+        );
+      }
+      final access = await session.replaceWithVerifiedBundle(
+        accessToken: bundle.accessToken,
+        refreshToken: bundle.refreshToken,
+        expiresAt: bundle.expiresAt,
+      );
+      _breadcrumb('auth_recovery_succeeded');
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.loggedIn,
+        access: access,
+      );
+    } on ProviderSignInException catch (error) {
+      final pending = await session.readPendingLinkRecovery();
+      final cancelled =
+          error.cancelReason == ProviderSignInCancelReason.userCancelled;
+      return AuthFlowResult(
+        outcome:
+            cancelled ? AuthFlowOutcome.cancelled : AuthFlowOutcome.failed,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: pending?.playerId,
+      );
+    } on GuestAuthException catch (error) {
+      final pending = await session.readPendingLinkRecovery();
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: pending?.playerId,
+      );
+    } on ProviderAuthException catch (error) {
+      final pending = await session.readPendingLinkRecovery();
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: pending?.playerId,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
   /// After restart: if pending link exists and guest refresh fails, surface
   /// recovery without minting a new guest player.
   Future<AuthFlowResult?> consumePendingLinkRecoveryIfNeeded() async {
-    final pending = await session.readPendingLinkProvider();
-    if (pending != 'apple' && pending != 'google') return null;
-    final provider =
-        pending == 'apple' ? AuthProviderKind.apple : AuthProviderKind.google;
+    final pending = await session.readPendingLinkRecovery();
+    AuthProviderKind? provider;
+    String? expectedPlayerId;
+    if (pending != null) {
+      provider = pending.provider == 'apple'
+          ? AuthProviderKind.apple
+          : AuthProviderKind.google;
+      expectedPlayerId = pending.playerId;
+    } else {
+      // Legacy provider-only marker: still block guest create via authenticate.
+      final encoded = await session.credentials.readPendingLinkProvider();
+      final legacy = PendingLinkRecovery.legacyProviderOnly(encoded);
+      if (legacy == null) return null;
+      provider =
+          legacy == 'apple' ? AuthProviderKind.apple : AuthProviderKind.google;
+    }
     try {
       final access = await session.authenticate();
       if (access.isVerified) {
+        if (expectedPlayerId != null && access.playerId != expectedPlayerId) {
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: 'RECOVERY_IDENTITY_MISMATCH',
+            recoveryProvider: provider,
+            expectedPlayerId: expectedPlayerId,
+          );
+        }
         await session.clearPendingLinkProvider();
         return AuthFlowResult(
           outcome: AuthFlowOutcome.loggedIn,
@@ -297,13 +427,27 @@ final class AuthCoordinator {
       }
       return null;
     } on GuestAuthException catch (error) {
-      final recovery = _recoveryFromCode(error.code) ?? provider;
+      final recovery = await _recoveryResultFromCode(error.code);
+      if (recovery != null) return recovery;
       return AuthFlowResult(
         outcome: AuthFlowOutcome.recoveryRequired,
         errorCode: error.code,
-        recoveryProvider: recovery,
+        recoveryProvider: provider,
+        expectedPlayerId: expectedPlayerId,
       );
     }
+  }
+
+  Future<AuthFlowResult?> _recoveryResultFromCode(String code) async {
+    final kind = _recoveryFromCode(code);
+    if (kind == null) return null;
+    final pending = await session.readPendingLinkRecovery();
+    return AuthFlowResult(
+      outcome: AuthFlowOutcome.recoveryRequired,
+      errorCode: code,
+      recoveryProvider: kind,
+      expectedPlayerId: pending?.playerId,
+    );
   }
 
   AuthProviderKind? _recoveryFromCode(String code) {
