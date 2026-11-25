@@ -57,6 +57,7 @@ final class _FakeProviders implements ProviderAuthPort {
   var linkCalls = 0;
   var loginCalls = 0;
   var challengeCalls = 0;
+  var logoutCalls = 0;
 
   @override
   Future<ProviderChallenge> challenge({
@@ -126,7 +127,9 @@ final class _FakeProviders implements ProviderAuthPort {
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,
-  }) async {}
+  }) async {
+    logoutCalls++;
+  }
 }
 
 void main() {
@@ -301,6 +304,31 @@ void main() {
     expect(result.outcome, AuthFlowOutcome.loggedIn);
     expect(result.access?.playerId, other);
     expect(store.token, 'verified-refresh-login');
+  });
+
+  test('logout revokes family and clears vault before guest recreate', () async {
+    final store = _MemoryStore()..token = 'verified-refresh';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final providers = _FakeProviders(linkPlayerId: guestId);
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    // Guest recreate requires live HTTPS; assert revoke + local clear first.
+    final result = await coordinator.logoutAndStartGuest();
+    expect(providers.logoutCalls, 1);
+    expect(store.token, isNull);
+    expect(session.cachedAccess, isNull);
+    expect(result.outcome, AuthFlowOutcome.failed);
+    expect(result.errorCode, isNotNull);
   });
 
   test('duplicate in-flight link is rejected', () async {

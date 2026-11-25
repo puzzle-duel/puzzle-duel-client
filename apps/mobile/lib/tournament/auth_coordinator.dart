@@ -239,4 +239,51 @@ final class AuthCoordinator {
       rethrow;
     }
   }
+
+  /// Revokes the current refresh family on the backend, clears the vault, then
+  /// issues a fresh guest session so Practice remains available without login.
+  Future<AuthFlowResult> logoutAndStartGuest() async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_logout');
+      final refresh = await session.credentials.readRefreshToken();
+      final cached = session.cachedAccess;
+      if (refresh != null && refresh.isNotEmpty) {
+        try {
+          await providers.logout(
+            refreshToken: refresh,
+            accessBearer: cached?.accessToken,
+          );
+        } on ProviderAuthException catch (error) {
+          // Unknown/already-revoked refresh still clears local state.
+          if (error.code != 'INVALID_REFRESH') {
+            return AuthFlowResult(
+              outcome: AuthFlowOutcome.failed,
+              errorCode: error.code,
+            );
+          }
+        }
+      }
+      await session.clearSessionLocally();
+      final guest = await session.authenticate();
+      _breadcrumb('auth_logout_guest_ready');
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.loggedIn,
+        access: guest,
+      );
+    } on GuestAuthException catch (error) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
 }

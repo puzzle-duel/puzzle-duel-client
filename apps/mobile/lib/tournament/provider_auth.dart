@@ -293,7 +293,10 @@ final class ProviderAuthClient implements ProviderAuthPort {
       'GUEST_PROOF_REQUIRED',
       'RANKED_AUTH_REQUIRED',
       'AUTH_UNAVAILABLE',
+      // Backend emits PROVIDER_CONFIG_MISSING only as a diagnostic reason;
+      // the JSON body remains AUTH_UNAVAILABLE (503).
       'PROVIDER_CONFIG_MISSING',
+      'INVALID_REFRESH',
       'INVALID_REQUEST',
       'RATE_LIMITED',
       'HTTPS_REQUIRED',

@@ -173,6 +173,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                       true,
                   copy: copy,
                   onSignIn: widget.controller.onRequestRankedAuth,
+                  onSignOut: widget.controller.onRequestSignOut,
                 ),
                 const SizedBox(height: 20),
                 Text(
@@ -382,11 +383,13 @@ final class _AccountStatusCard extends StatelessWidget {
     required this.verified,
     required this.copy,
     this.onSignIn,
+    this.onSignOut,
   });
 
   final bool verified;
   final TournamentCopy copy;
   final VoidCallback? onSignIn;
+  final VoidCallback? onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -442,6 +445,17 @@ final class _AccountStatusCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+                ),
+              ),
+            ],
+            if (verified && onSignOut != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: const Key('profile-sign-out'),
+                  onPressed: onSignOut,
+                  child: Text(copy.signOut),
                 ),
               ),
             ],

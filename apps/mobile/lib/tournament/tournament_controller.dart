@@ -259,6 +259,9 @@ final class TournamentController extends ChangeNotifier {
   /// UI hook: present the authentication sheet without starting a claim.
   VoidCallback? onRequestRankedAuth;
 
+  /// UI hook: sign out verified session and restore a guest Practice session.
+  VoidCallback? onRequestSignOut;
+
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
   /// Origin of the current or just-finished Tournament refresh (banner policy).
@@ -540,6 +543,16 @@ final class TournamentController extends ChangeNotifier {
     }
     rankedAuthRequired = false;
     await resume();
+  }
+
+  /// Applies post-logout guest credentials without starting a claim.
+  void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
+    this.rankedAuthRequired = rankedAuthRequired;
+    if (rankedAuthRequired) {
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+    }
+    notifyListeners();
   }
 
   /// After successful provider link/login: claim at most once, then resume.

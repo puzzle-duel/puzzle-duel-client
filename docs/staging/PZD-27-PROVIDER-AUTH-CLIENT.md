@@ -40,6 +40,15 @@ Staging vs production must use separate OAuth clients.
 - [ ] Server/Web client ID matches `PZD_GOOGLE_SERVER_CLIENT_ID`
 - [ ] Apple on Android: **not** equivalent to iOS; Services ID + browser callback required — currently fail-closed until owner configures and accepts UAT
 
+## Contract notes (from merged PZD-26 source)
+- Link challenge response has **no** `binding` field (server binds `link:{playerId}:{fid}`).
+- Login challenge returns `{ provider, purpose, nonce, binding }`.
+- Success bundle camelCase: `playerId`, `accountType`, `accessToken`, `refreshToken`, `expiresAt`, `linkedProviders`.
+- JWT claim is `account_type` (snake_case); body field is `accountType`.
+- **`PROVIDER_CONFIG_MISSING` is not a JSON `error` body** — HTTP **503** `{ "error": "AUTH_UNAVAILABLE" }` with diagnostic reason only. Client UI maps both codes to the same copy.
+- Logout: `POST /v1/auth/logout` → **200** `{ "status": "revoked" }` (family revoke, not account deletion).
+- Account deletion / Apple token revocation endpoints **do not exist** — production release blocker; do not invent client success.
+
 ## Known blockers / honesty gates
 | Item | Status |
 |---|---|

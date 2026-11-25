@@ -128,6 +128,9 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       controller.onRequestRankedAuth = () {
         unawaited(_presentRankedAuth(controller));
       };
+      controller.onRequestSignOut = () {
+        unawaited(_presentSignOut(controller));
+      };
       await controller.beginLocal();
       if (!mounted) {
         controller.session.dispose();
@@ -162,11 +165,28 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     }
   }
 
+  Future<void> _presentSignOut(TournamentController controller) async {
+    final coordinator = widget.authCoordinator;
+    if (coordinator == null || !mounted) return;
+    final result = await coordinator.logoutAndStartGuest();
+    if (!mounted) return;
+    if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
+      return;
+    }
+    controller.api.bearer =
+        UatApi.normalizeBearer(result.access!.accessToken);
+    await controller.clearAuthenticatedPracticeScope();
+    controller.applyGuestSessionAfterLogout(
+      rankedAuthRequired: result.access!.isGuest,
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     final controller = _controller;
     controller?.onRequestRankedAuth = null;
+    controller?.onRequestSignOut = null;
     controller?.session.dispose();
     controller?.dispose();
     if (widget.ownsSfx || widget.sfx == null) _sfx.dispose();
