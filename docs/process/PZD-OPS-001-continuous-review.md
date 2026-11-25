@@ -76,6 +76,9 @@ A Cursor fix request MUST include:
 - Exclusions, ADR/blueprint constraints, no merge/deploy, and response schema.
 - No broad speculative refactors or unrelated new work.
 
+## Mandatory post-development summary (GOLDEN RULE)
+After every meaningful development milestone, implementation, bug fix, refactoring, or review remediation, Cursor (and any coding agent) must deliver a clear development summary to the owner **in Turkish**, keeping technical identifiers and file names in English, and must record the same summary on the corresponding Jira issue. Required sections: what was implemented; why; how it works; files changed; impact; technical decisions; testing with actual executed results; GitHub branch/SHA/PR/CI; Jira status and comment references; remaining work/risks/blockers; next step; owner action required (yes/no and what). A milestone is not complete until this summary is delivered. Providing a summary does not require stopping for approval unless a real approval gate was reached. Persist and follow this rule at the start of every task.
+
 ## Automation availability / fail-safe
 A true unattended review loop needs **two independently functioning integrations**: (1) source event scheduling or GitHub webhook/periodic polling, and (2) an agent runtime that can inspect code, post Jira/PR updates and submit fix prompts to Cursor. This document does not provision either.
 
