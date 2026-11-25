@@ -273,8 +273,13 @@ final class TournamentCopy {
         'STALE_CREDENTIAL_RESPONSE' ||
         'RECOVERY_IDENTITY_MISMATCH' ||
         'RECOVERY_PROVIDER_MISMATCH' ||
-        'RECOVERY_MARKER_MISSING' =>
+        'RECOVERY_MARKER_MISSING' ||
+        'RECOVERY_NOT_LINKED' =>
           authRecoveryBody,
+        'RECOVERY_RETRY_LINK' => pick(
+          'Your guest session is still active. Continue with Apple or Google to finish linking this account.',
+          'Misafir oturumun hâlâ aktif. Bu hesabı bağlamak için Apple veya Google ile devam et.',
+        ),
         'PROVIDER_SIGN_IN_CANCELLED' => pick(
           'Sign-in was cancelled.',
           'Oturum açma iptal edildi.',

@@ -73,6 +73,15 @@ abstract interface class ProviderAuthPort {
     required String guestBearer,
   });
 
+  /// Server-side identity-preserving recovery. Never uses generic login create.
+  Future<ProviderCredentialBundle> recover({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    required String expectedPlayerId,
+  });
+
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,
@@ -229,6 +238,39 @@ final class ProviderAuthClient implements ProviderAuthPort {
   }
 
   @override
+  Future<ProviderCredentialBundle> recover({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    required String expectedPlayerId,
+  }) async {
+    if (expectedPlayerId.length != 36) {
+      throw const ProviderAuthException('INVALID_REQUEST');
+    }
+    final result = await _post(
+      '/v1/auth/providers/recover',
+      {
+        'provider': provider.name,
+        'idToken': idToken,
+        'nonce': nonce,
+        'binding': binding,
+        'expectedPlayerId': expectedPlayerId,
+      },
+      operation: 'provider_recover_requested',
+    );
+    if (result.status != 201) {
+      throw ProviderAuthException(
+        _safeError(result.body) ?? 'AUTH_UNAVAILABLE',
+        httpStatus: result.status,
+      );
+    }
+    _breadcrumb(LogCode.httpCompleted, 'provider_recover_completed',
+        requestId: result.requestId, httpStatus: result.status);
+    return _parseBundle(result.body);
+  }
+
+  @override
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,
@@ -300,6 +342,8 @@ final class ProviderAuthClient implements ProviderAuthPort {
       'INVALID_REQUEST',
       'RATE_LIMITED',
       'HTTPS_REQUIRED',
+      'RECOVERY_NOT_LINKED',
+      'AUTH_NETWORK_UNAVAILABLE',
     };
     if (code != null && allowed.contains(code)) return code;
     return null;

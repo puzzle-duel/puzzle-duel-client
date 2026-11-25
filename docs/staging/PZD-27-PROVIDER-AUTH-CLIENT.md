@@ -41,10 +41,12 @@ Do **not** weaken backend nonce verification. Do **not** introduce Firebase Auth
 ## Provider linking recovery (identity-preserving)
 - Before link HTTP: durable marker `provider|<playerId>` (never tokens/nonces).
 - Backend success + lost response / timeout / vault failure → `recoveryRequired`.
-- Recovery UI calls **`recoverPendingLink`** (not generic `loginExisting`).
-- Recovery commits credentials only when login `playerId` matches the marker; mismatch keeps the marker and refuses vault write (no silent switch/create adoption).
+- Recovery UI calls **`recoverPendingLink`** → backend **`POST /v1/auth/providers/recover`** (create-forbidden). Never generic `login`.
+- If guest session still valid (link never committed) → `RECOVERY_RETRY_LINK` and UI returns to link buttons.
+- Server rejects unknown subject (`RECOVERY_NOT_LINKED`) / wrong linked player (`ACCOUNT_CONFLICT`) before creating player/link/family.
+- Client also refuses vault commit if returned `playerId` ≠ marker (belt-and-suspenders).
 - Generic `loginExisting` remains for intentional ACCOUNT_CONFLICT account switch only.
-- **Backend note:** PZD-26 login still creates a new `player_id` for unknown provider subjects. Client refuses to adopt mismatches; a dedicated recovery endpoint that rejects create/switch would reduce orphan verified accounts — document only, no invented client endpoint.
+- Companion backend branch: `feature/PZD-26-provider-recovery` (PZD-26 contract extension).
 - Restart: `consumePendingLinkRecoveryIfNeeded` surfaces recovery without minting a new guest.
 
 ## Native Google/Apple nonce honesty

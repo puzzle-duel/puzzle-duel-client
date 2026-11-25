@@ -278,9 +278,9 @@ final class AuthCoordinator {
   }
 
   /// Identity-preserving recovery for uncertain link completion.
-  /// Refuses vault commit when login resolves a different player; keeps marker.
-  /// Does not invent a backend recovery endpoint — uses login then validates
-  /// `playerId` against the durable expected identity.
+  /// Uses backend `POST /v1/auth/providers/recover` (create-forbidden).
+  /// If the original guest session is still valid (link never committed),
+  /// returns [RECOVERY_RETRY_LINK] so the UI can re-run guest link instead.
   Future<AuthFlowResult> recoverPendingLink(AuthProviderKind provider) async {
     if (_inFlight) {
       return const AuthFlowResult(
@@ -307,6 +307,30 @@ final class AuthCoordinator {
           expectedPlayerId: pending.playerId,
         );
       }
+
+      // Uncommitted link: guest session still valid for the expected player.
+      try {
+        final existing = await session.authenticate();
+        if (existing.isGuest && existing.playerId == pending.playerId) {
+          _breadcrumb('auth_recovery_retry_link');
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.failed,
+            errorCode: 'RECOVERY_RETRY_LINK',
+            recoveryProvider: provider,
+            expectedPlayerId: pending.playerId,
+          );
+        }
+        if (existing.isVerified && existing.playerId == pending.playerId) {
+          await session.clearPendingLinkProvider();
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.loggedIn,
+            access: existing,
+          );
+        }
+      } on GuestAuthException {
+        // Proceed to server-side recover.
+      }
+
       _breadcrumb('auth_recovery_started_${provider.name}');
       final challenge = await providers.challenge(
         provider: provider,
@@ -330,14 +354,15 @@ final class AuthCoordinator {
           expectedPlayerId: pending.playerId,
         );
       }
-      final bundle = await providers.login(
+      final bundle = await providers.recover(
         provider: provider,
         idToken: assertion.idToken,
         nonce: challenge.nonce,
         binding: binding,
+        expectedPlayerId: pending.playerId,
       );
       if (bundle.playerId != pending.playerId) {
-        // Keep marker; do not adopt wrong/new account credentials.
+        // Backend should already reject; keep marker as a hard fail-closed belt.
         _breadcrumb('auth_recovery_identity_mismatch',
             errorCode: 'RECOVERY_IDENTITY_MISMATCH');
         return AuthFlowResult(

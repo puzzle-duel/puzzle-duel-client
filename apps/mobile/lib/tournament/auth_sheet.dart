@@ -95,6 +95,18 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
       });
       return;
     }
+    if (result.outcome == AuthFlowOutcome.failed &&
+        result.errorCode == 'RECOVERY_RETRY_LINK') {
+      // Link never committed; guest still valid — return to link buttons.
+      setState(() {
+        _busy = false;
+        _conflict = false;
+        _recovery = false;
+        _recoveryProvider = null;
+        _errorCode = 'RECOVERY_RETRY_LINK';
+      });
+      return;
+    }
     if (result.outcome == AuthFlowOutcome.cancelled) {
       setState(() {
         _busy = false;

@@ -345,6 +345,8 @@ class UatApi {
       'RECOVERY_IDENTITY_MISMATCH',
       'RECOVERY_PROVIDER_MISMATCH',
       'RECOVERY_MARKER_MISSING',
+      'RECOVERY_NOT_LINKED',
+      'RECOVERY_RETRY_LINK',
     }.contains(code) ? code : null;
   }
 
