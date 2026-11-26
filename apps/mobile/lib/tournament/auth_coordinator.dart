@@ -1,10 +1,22 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
+
+String _newAuthOperationId() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  String hex(int value) => value.toRadixString(16).padLeft(2, '0');
+  final b = bytes.map(hex).join();
+  return '${b.substring(0, 8)}-${b.substring(8, 12)}-${b.substring(12, 16)}-'
+      '${b.substring(16, 20)}-${b.substring(20, 32)}';
+}
 
 /// Result of a provider authentication attempt. Never silently switches accounts.
 enum AuthFlowOutcome {
@@ -15,6 +27,8 @@ enum AuthFlowOutcome {
   failed,
   /// Backend may have upgraded the guest; identity-preserving recovery required.
   recoveryRequired,
+  /// Unified continue: switching to an existing linked account needs confirm.
+  switchConfirmationRequired,
 }
 
 final class AuthFlowResult {
@@ -25,6 +39,8 @@ final class AuthFlowResult {
     this.conflictPlayerId,
     this.recoveryProvider,
     this.expectedPlayerId,
+    this.continuationToken,
+    this.expiresAt,
   });
 
   final AuthFlowOutcome outcome;
@@ -34,6 +50,8 @@ final class AuthFlowResult {
   final AuthProviderKind? recoveryProvider;
   /// Original guest/verified player id that recovery must resolve.
   final String? expectedPlayerId;
+  final String? continuationToken;
+  final DateTime? expiresAt;
 }
 
 /// Orchestrates challenge → native provider → backend link/login with
@@ -205,6 +223,292 @@ final class AuthCoordinator {
     }
   }
 
+  /// Unified provider continue (Apple/Google). Backend resolves link vs login.
+  Future<AuthFlowResult> continueWithProvider(
+    AuthProviderKind provider, {
+    bool localProgressProtected = false,
+  }) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_unified_started');
+      _breadcrumb('auth_provider_selected_${provider.name}');
+      var access = await session.authenticate();
+      if (access.isVerified) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.loggedIn,
+          access: access,
+        );
+      }
+      final guestBearer = access.isGuest ? access.accessToken : null;
+      _breadcrumb('provider_challenge_requested');
+      final challenge = await providers.challenge(
+        provider: provider,
+        purpose: ProviderAuthPurpose.continueWith,
+        guestBearer: guestBearer,
+      );
+      final binding = challenge.binding;
+      if (binding == null || binding.isEmpty) {
+        _breadcrumb('auth_unified_failed', errorCode: 'INVALID_PROVIDER_CHALLENGE');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: 'INVALID_PROVIDER_CHALLENGE',
+        );
+      }
+      _breadcrumb('provider_sign_in_started');
+      final assertion = await _nativeSignIn(provider, challenge.nonce);
+      if (assertion == null) {
+        _breadcrumb('provider_sign_in_cancelled',
+            errorCode: 'PROVIDER_SIGN_IN_CANCELLED');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.cancelled,
+          errorCode: 'PROVIDER_SIGN_IN_CANCELLED',
+        );
+      }
+      _breadcrumb('provider_sign_in_completed');
+      // Durable operation binding before mutating continue — lost response recovery
+      // must prove this exact operation, not a historical provider receipt.
+      final operationId = _newAuthOperationId();
+      await session.markPendingUnifiedContinue(
+        provider: provider.name,
+        operationId: operationId,
+        sourcePlayerId: access.isGuest ? access.playerId : null,
+      );
+      try {
+        final bundle = await providers.continueWithProvider(
+          provider: provider,
+          idToken: assertion.idToken,
+          nonce: challenge.nonce,
+          binding: binding,
+          operationId: operationId,
+          localProgressProtected: localProgressProtected,
+          guestBearer: guestBearer,
+        );
+        try {
+          final verified = await session.replaceWithVerifiedBundle(
+            accessToken: bundle.accessToken,
+            refreshToken: bundle.refreshToken,
+            expiresAt: bundle.expiresAt,
+          );
+          await session.clearPendingLinkProvider();
+          _breadcrumb('auth_unified_completed');
+          final resolution = bundle.resolution;
+          if (resolution != null && resolution.isNotEmpty) {
+            _breadcrumb('auth_unified_resolution_$resolution');
+          }
+          final outcome = resolution == 'link_guest'
+              ? AuthFlowOutcome.linked
+              : AuthFlowOutcome.loggedIn;
+          return AuthFlowResult(
+            outcome: outcome,
+            access: verified,
+          );
+        } on GuestAuthException catch (error) {
+          _breadcrumb('auth_credential_commit_failed', errorCode: error.code);
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: error.code,
+            recoveryProvider: provider,
+            expectedPlayerId: access.isGuest ? access.playerId : null,
+          );
+        }
+      } on ProviderAuthException catch (error) {
+        if (error.code == 'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED') {
+          final token = error.continuationToken;
+          final target = error.targetPlayerId;
+          if (token == null ||
+              token.isEmpty ||
+              target == null ||
+              target.isEmpty) {
+            return const AuthFlowResult(
+              outcome: AuthFlowOutcome.failed,
+              errorCode: 'INVALID_CONTINUATION',
+            );
+          }
+          // Awaiting consent only — never persist approved confirm intent here.
+          await session.markPendingUnifiedAwaitingSwitch(
+            provider: provider.name,
+            targetPlayerId: target,
+            operationId: operationId,
+          );
+          _breadcrumb('auth_switch_confirmation_required');
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.switchConfirmationRequired,
+            continuationToken: token,
+            expiresAt: error.expiresAt,
+            expectedPlayerId: target,
+            recoveryProvider: provider,
+          );
+        }
+        if (error.code == 'AUTH_NETWORK_UNAVAILABLE') {
+          _breadcrumb('auth_unified_uncertain', errorCode: error.code);
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.recoveryRequired,
+            errorCode: error.code,
+            recoveryProvider: provider,
+            expectedPlayerId: access.isGuest ? access.playerId : null,
+          );
+        }
+        if (error.code == 'GUEST_PROOF_REQUIRED' ||
+            error.code == 'INVALID_PROVIDER_CHALLENGE') {
+          await session.clearPendingLinkProvider();
+        }
+        _breadcrumb('auth_unified_failed', errorCode: error.code);
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: error.code,
+        );
+      }
+    } on ProviderSignInException catch (error) {
+      final cancelled =
+          error.cancelReason == ProviderSignInCancelReason.userCancelled;
+      return AuthFlowResult(
+        outcome:
+            cancelled ? AuthFlowOutcome.cancelled : AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on GuestAuthException catch (error) {
+      _breadcrumb('auth_unified_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on ProviderAuthException catch (error) {
+      _breadcrumb('auth_unified_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  /// Clears awaiting/confirm switch markers after the user keeps the guest.
+  Future<AuthFlowResult> cancelAccountSwitch() async {
+    final pending = await session.readPendingLinkRecovery();
+    if (pending != null &&
+        (pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch ||
+            pending.kind == PendingAuthRecoveryKind.unifiedConfirm ||
+            pending.kind == PendingAuthRecoveryKind.unifiedContinue)) {
+      await session.clearPendingLinkProvider();
+      _breadcrumb('auth_switch_cancelled');
+    }
+    return const AuthFlowResult(
+      outcome: AuthFlowOutcome.cancelled,
+      errorCode: 'ACCOUNT_SWITCH_CANCELLED',
+    );
+  }
+
+  /// Commits a server-issued account switch after explicit user confirmation.
+  Future<AuthFlowResult> confirmAccountSwitch(
+    String continuationToken, {
+    required String targetPlayerId,
+    required AuthProviderKind provider,
+  }) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    if (continuationToken.isEmpty || targetPlayerId.isEmpty) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'INVALID_REQUEST',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_switch_confirm_started');
+      final pending = await session.readPendingLinkRecovery();
+      final awaitingMatches = pending != null &&
+          pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch &&
+          pending.provider == provider.name &&
+          pending.playerId == targetPlayerId &&
+          pending.hasOperationBinding;
+      final confirmMatches = pending != null &&
+          pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+          pending.provider == provider.name &&
+          pending.playerId == targetPlayerId &&
+          pending.hasOperationBinding;
+      if (!awaitingMatches && !confirmMatches) {
+        _breadcrumb('auth_switch_confirm_missing_pending',
+            errorCode: 'CONFIRM_INTENT_MISSING');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: 'CONFIRM_INTENT_MISSING',
+        );
+      }
+      final operationId = pending.operationId;
+      // Persist approved confirm intent only after explicit user approval.
+      if (awaitingMatches) {
+        await session.markPendingUnifiedConfirm(
+          provider: provider.name,
+          targetPlayerId: targetPlayerId,
+          operationId: operationId,
+        );
+      }
+      final bundle = await providers.confirmContinue(
+        continuationToken: continuationToken,
+        operationId: operationId,
+      );
+      try {
+        final access = await session.replaceWithVerifiedBundle(
+          accessToken: bundle.accessToken,
+          refreshToken: bundle.refreshToken,
+          expiresAt: bundle.expiresAt,
+        );
+        await session.clearPendingLinkProvider();
+        _breadcrumb('auth_unified_completed');
+        final resolution = bundle.resolution;
+        if (resolution != null && resolution.isNotEmpty) {
+          _breadcrumb('auth_unified_resolution_$resolution');
+        }
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.loggedIn,
+          access: access,
+        );
+      } on GuestAuthException catch (error) {
+        _breadcrumb('auth_credential_commit_failed', errorCode: error.code);
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: error.code,
+          recoveryProvider: provider,
+          expectedPlayerId: targetPlayerId,
+        );
+      }
+    } on GuestAuthException catch (error) {
+      _breadcrumb('auth_switch_confirm_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on ProviderAuthException catch (error) {
+      if (error.code == 'AUTH_NETWORK_UNAVAILABLE') {
+        _breadcrumb('auth_switch_confirm_uncertain', errorCode: error.code);
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: error.code,
+          recoveryProvider: provider,
+          expectedPlayerId: targetPlayerId,
+        );
+      }
+      _breadcrumb('auth_switch_confirm_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
   /// Explicit sign-in to an existing (or newly created) verified account.
   /// Not used for pending-link recovery — see [recoverPendingLink].
   Future<AuthFlowResult> loginExisting(AuthProviderKind provider) async {
@@ -312,8 +616,14 @@ final class AuthCoordinator {
           recoveryProvider: pending.provider == 'apple'
               ? AuthProviderKind.apple
               : AuthProviderKind.google,
-          expectedPlayerId: pending.playerId,
+          expectedPlayerId: pending.playerId.isEmpty ? null : pending.playerId,
         );
+      }
+
+      if (pending.kind == PendingAuthRecoveryKind.unifiedContinue ||
+          pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch ||
+          pending.kind == PendingAuthRecoveryKind.unifiedConfirm) {
+        return await _recoverUnifiedPending(provider, pending);
       }
 
       // Probe only with a server-backed refresh. A cached unexpired guest JWT
@@ -437,6 +747,133 @@ final class AuthCoordinator {
     } finally {
       _inFlight = false;
     }
+  }
+
+  /// Unified continue/confirm lost-response recovery.
+  /// Requires a server auth receipt for provider_linked recovery — an existing
+  /// identity link alone must not complete an unconfirmed account switch.
+  Future<AuthFlowResult> _recoverUnifiedPending(
+    AuthProviderKind provider,
+    PendingLinkRecovery pending,
+  ) async {
+    _breadcrumb('auth_unified_recovery_started_${provider.name}');
+
+    // Consent not granted: clear awaiting marker and keep the guest session.
+    if (pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch) {
+      await session.clearPendingLinkProvider();
+      _breadcrumb('auth_unified_recovery_awaiting_cleared',
+          errorCode: 'ACCOUNT_SWITCH_CANCELLED');
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.cancelled,
+        errorCode: 'ACCOUNT_SWITCH_CANCELLED',
+      );
+    }
+
+    try {
+      final existing = await session.authenticate(
+        forceRefresh: true,
+        allowGuestCreate: false,
+      );
+      if (existing.isVerified) {
+        if (pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+            pending.playerId.isNotEmpty &&
+            existing.playerId != pending.playerId) {
+          _breadcrumb('auth_unified_recovery_identity_mismatch',
+              errorCode: 'RECOVERY_IDENTITY_MISMATCH');
+        } else {
+          await session.clearPendingLinkProvider();
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.loggedIn,
+            access: existing,
+          );
+        }
+      }
+    } on GuestAuthException catch (error) {
+      if (error.code == 'REFRESH_UNAVAILABLE' ||
+          error.code == 'AUTH_NETWORK_UNAVAILABLE') {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: error.code,
+          recoveryProvider: provider,
+          expectedPlayerId:
+              pending.playerId.isEmpty ? null : pending.playerId,
+        );
+      }
+    }
+
+    final challenge = await providers.challenge(
+      provider: provider,
+      purpose: ProviderAuthPurpose.login,
+    );
+    final binding = challenge.binding;
+    if (binding == null || binding.isEmpty) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: 'INVALID_PROVIDER_CHALLENGE',
+        recoveryProvider: provider,
+        expectedPlayerId: pending.playerId.isEmpty ? null : pending.playerId,
+      );
+    }
+    final assertion = await _nativeSignIn(provider, challenge.nonce);
+    if (assertion == null) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.cancelled,
+        errorCode: 'PROVIDER_SIGN_IN_CANCELLED',
+        recoveryProvider: provider,
+        expectedPlayerId: pending.playerId.isEmpty ? null : pending.playerId,
+      );
+    }
+
+    if (!pending.hasOperationBinding) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: 'RECOVERY_OPERATION_INCOMPLETE',
+        recoveryProvider: provider,
+        expectedPlayerId: pending.playerId.isEmpty ? null : pending.playerId,
+      );
+    }
+    // Exact operation receipt + verified provider — never operation id alone.
+    final bundle = await providers.recoverLinked(
+      provider: provider,
+      idToken: assertion.idToken,
+      nonce: challenge.nonce,
+      binding: binding,
+      operationId: pending.operationId,
+      sourceGuestPlayerId:
+          pending.kind == PendingAuthRecoveryKind.unifiedContinue &&
+                  pending.playerId.isNotEmpty
+              ? pending.playerId
+              : null,
+      expectedTargetPlayerId:
+          pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+                  pending.playerId.isNotEmpty
+              ? pending.playerId
+              : null,
+    );
+    if (pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+        pending.playerId.isNotEmpty &&
+        bundle.playerId != pending.playerId) {
+      _breadcrumb('auth_unified_recovery_identity_mismatch',
+          errorCode: 'RECOVERY_IDENTITY_MISMATCH');
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: 'RECOVERY_IDENTITY_MISMATCH',
+        recoveryProvider: provider,
+        expectedPlayerId: pending.playerId,
+      );
+    }
+
+    final access = await session.replaceWithVerifiedBundle(
+      accessToken: bundle.accessToken,
+      refreshToken: bundle.refreshToken,
+      expiresAt: bundle.expiresAt,
+    );
+    await session.clearPendingLinkProvider();
+    _breadcrumb('auth_unified_recovery_succeeded');
+    return AuthFlowResult(
+      outcome: AuthFlowOutcome.loggedIn,
+      access: access,
+    );
   }
 
   /// Create-forbidden provider recovery for a known player_id binding.

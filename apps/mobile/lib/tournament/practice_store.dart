@@ -237,6 +237,14 @@ final class PracticeStore {
     return null;
   }
 
+  /// True when local practice has completions or any stored personal best.
+  static Future<bool> hasMeaningfulLocalProgress(PracticeStore store) async {
+    final stats = await store.stats();
+    if (stats.completedCount > 0) return true;
+    final bests = await store.loadBests();
+    return bests.isNotEmpty;
+  }
+
   Future<PracticeStats> stats() async {
     final records = await load();
     final counts = <String, int>{};

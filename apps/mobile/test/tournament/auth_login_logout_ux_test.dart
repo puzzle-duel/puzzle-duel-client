@@ -81,20 +81,25 @@ final class _MemStore implements GuestCredentialStore {
 
 final class _ScriptedProviders implements ProviderAuthPort {
   _ScriptedProviders({
-    this.linkError,
+    this.continueError,
     this.logoutError,
     this.logoutDelay,
     this.loginPlayerId = '11111111-1111-1111-1111-111111111111',
+    this.continuePlayerId = '11111111-1111-1111-1111-111111111111',
   });
 
   ProviderAuthException? linkError;
+  ProviderAuthException? continueError;
   ProviderAuthException? logoutError;
   Completer<void>? logoutDelay;
   String loginPlayerId;
+  String continuePlayerId;
   static const linkPlayerId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   var logoutCalls = 0;
   var linkCalls = 0;
   var loginCalls = 0;
+  var continueCalls = 0;
+  var confirmContinueCalls = 0;
 
   @override
   Future<ProviderChallenge> challenge({
@@ -102,11 +107,13 @@ final class _ScriptedProviders implements ProviderAuthPort {
     required ProviderAuthPurpose purpose,
     String? guestBearer,
   }) async {
+    final needsBinding = purpose == ProviderAuthPurpose.login ||
+        purpose == ProviderAuthPurpose.continueWith;
     return ProviderChallenge(
       provider: provider,
       purpose: purpose,
       nonce: 'n' * 43,
-      binding: purpose == ProviderAuthPurpose.login ? 'binding' : null,
+      binding: needsBinding ? 'binding' : null,
     );
   }
 
@@ -164,6 +171,87 @@ final class _ScriptedProviders implements ProviderAuthPort {
     required String expectedPlayerId,
   }) async {
     throw const ProviderAuthException('NOT_USED');
+  }
+
+  String? lastRecoverOperationId;
+  String? lastContinueOperationId;
+  String? lastConfirmOperationId;
+  var recoverLinkedCalls = 0;
+
+  @override
+  Future<ProviderCredentialBundle> recoverLinked({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
+  }) async {
+    recoverLinkedCalls++;
+    lastRecoverOperationId = operationId;
+    return ProviderCredentialBundle(
+      playerId: continuePlayerId,
+      accountType: 'verified',
+      accessToken: _jwt(
+        sub: continuePlayerId,
+        accountType: 'verified',
+        fid: 'recover-fid',
+      ),
+      refreshToken: 'r' * 64,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      linkedProviders: [provider.name],
+    );
+  }
+
+  @override
+  Future<ProviderCredentialBundle> continueWithProvider({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    required String operationId,
+    bool localProgressProtected = false,
+    String? guestBearer,
+  }) async {
+    continueCalls++;
+    lastContinueOperationId = operationId;
+    if (continueError != null) throw continueError!;
+    return ProviderCredentialBundle(
+      playerId: continuePlayerId,
+      accountType: 'verified',
+      accessToken: _jwt(
+        sub: continuePlayerId,
+        accountType: 'verified',
+        fid: 'continue-fid',
+      ),
+      refreshToken: 'c' * 64,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      linkedProviders: [provider.name],
+      resolution: 'existing_account',
+    );
+  }
+
+  @override
+  Future<ProviderCredentialBundle> confirmContinue({
+    required String continuationToken,
+    required String operationId,
+  }) async {
+    confirmContinueCalls++;
+    lastConfirmOperationId = operationId;
+    return ProviderCredentialBundle(
+      playerId: continuePlayerId,
+      accountType: 'verified',
+      accessToken: _jwt(
+        sub: continuePlayerId,
+        accountType: 'verified',
+        fid: 'continue-fid',
+      ),
+      refreshToken: 'c' * 64,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      linkedProviders: ['google'],
+      resolution: 'existing_account',
+    );
   }
 
   @override
@@ -257,25 +345,24 @@ void main() {
     expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
   });
 
-  testWidgets('auth sheet separates link and existing-account login',
-      (tester) async {
+  testWidgets('auth sheet shows only unified provider buttons', (tester) async {
     await _pumpApp(tester, verified: false);
     await tester.tap(find.byKey(const Key('profile')));
     await _settle(tester);
     await tester.tap(find.byKey(const Key('profile-sign-in')));
     await _settle(tester);
-    expect(find.byKey(const Key('auth-link-section')), findsOneWidget);
-    expect(find.byKey(const Key('auth-login-section')), findsOneWidget);
+    expect(find.byKey(const Key('auth-link-section')), findsNothing);
+    expect(find.byKey(const Key('auth-login-section')), findsNothing);
     expect(find.byKey(const Key('auth-google')), findsOneWidget);
-    expect(find.byKey(const Key('auth-login-google')), findsOneWidget);
+    expect(find.byKey(const Key('auth-apple')), findsOneWidget);
+    expect(find.byKey(const Key('auth-login-google')), findsNothing);
   });
 
   testWidgets(
-      'existing Google login after logout skips forced ACCOUNT_CONFLICT',
+      'existing Google continue after logout succeeds for empty guest',
       (tester) async {
     final providers = _ScriptedProviders(
-      linkError: const ProviderAuthException('ACCOUNT_CONFLICT', httpStatus: 409),
-      loginPlayerId: '11111111-1111-1111-1111-111111111111',
+      continuePlayerId: '11111111-1111-1111-1111-111111111111',
     );
     await _pumpApp(tester, verified: true, providers: providers);
 
@@ -289,22 +376,28 @@ void main() {
 
     await tester.tap(find.byKey(const Key('profile-sign-in')));
     await _settle(tester);
-    await tester.tap(find.byKey(const Key('auth-login-google')));
+    await tester.tap(find.byKey(const Key('auth-google')));
     await _settle(tester);
 
     expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
     expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
-    expect(providers.loginCalls, 1);
+    expect(providers.continueCalls, 1);
     expect(providers.linkCalls, 0);
-    // Profile-only login must not auto-start ranked play.
+    expect(providers.loginCalls, 0);
     expect(find.byKey(const Key('offer-tray')), findsNothing);
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
   });
 
-  testWidgets('guest link conflict keeps security gate without duplicate text',
+  testWidgets(
+      'account switch confirmation when continue requires confirm',
       (tester) async {
     final providers = _ScriptedProviders(
-      linkError: const ProviderAuthException('ACCOUNT_CONFLICT', httpStatus: 409),
+      continueError: const ProviderAuthException(
+        'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+        httpStatus: 409,
+        continuationToken: 'switch-token-opaque',
+        targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      ),
     );
     await _pumpApp(tester, verified: false, providers: providers);
     await tester.tap(find.byKey(const Key('profile')));
@@ -314,14 +407,17 @@ void main() {
     await tester.tap(find.byKey(const Key('auth-google')));
     await _settle(tester);
 
-    expect(find.byKey(const Key('auth-keep-guest')), findsOneWidget);
-    expect(find.byKey(const Key('auth-login-google')), findsOneWidget);
-    // Body carries conflict copy once; error row suppressed for ACCOUNT_CONFLICT.
-    expect(find.byKey(const Key('auth-sheet-error')), findsNothing);
-    expect(providers.linkCalls, 1);
+    expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('account-switch-confirm')));
+    await _settle(tester);
+
+    expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
+    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+    expect(providers.continueCalls, 1);
+    expect(providers.confirmContinueCalls, 1);
   });
 
-  testWidgets('profile-only login does not auto-start ranked play',
+  testWidgets('profile-only continue does not auto-start ranked play',
       (tester) async {
     final providers = _ScriptedProviders();
     await _pumpApp(tester, verified: false, providers: providers);
@@ -329,12 +425,12 @@ void main() {
     await _settle(tester);
     await tester.tap(find.byKey(const Key('profile-sign-in')));
     await _settle(tester);
-    await tester.tap(find.byKey(const Key('auth-login-google')));
+    await tester.tap(find.byKey(const Key('auth-google')));
     await _settle(tester);
     expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
-    // _pendingRankedEntryOnce stays false for Profile — no resume into board.
     expect(find.byKey(const Key('offer-tray')), findsNothing);
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
+    expect(providers.continueCalls, 1);
   });
 
   testWidgets(
@@ -396,6 +492,204 @@ void main() {
       find.text('9 kez kazanıldı', skipOffstage: false),
       findsNothing,
     );
+  });
+
+  testWidgets('cancel switch clears awaiting marker and keeps guest',
+      (tester) async {
+    final providers = _ScriptedProviders(
+      continueError: const ProviderAuthException(
+        'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+        httpStatus: 409,
+        continuationToken: 'switch-token-opaque',
+        targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      ),
+    );
+    final harness = await _pumpApp(
+      tester,
+      verified: false,
+      providers: providers,
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('profile-sign-in')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('auth-google')));
+    await _settle(tester);
+    expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
+    expect(harness.store.pendingLink, startsWith('awaiting|'));
+    final awaiting = PendingLinkRecovery.tryParse(harness.store.pendingLink);
+    expect(awaiting?.hasOperationBinding, isTrue);
+    expect(providers.lastContinueOperationId, awaiting?.operationId);
+
+    await tester.tap(find.byKey(const Key('account-switch-keep-guest')));
+    await _settle(tester);
+    expect(harness.store.pendingLink, isNull);
+    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+    expect(providers.confirmContinueCalls, 0);
+  });
+
+  test('confirm without durable awaiting/confirm intent is rejected', () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final providers = _ScriptedProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final rejected = await coordinator.confirmAccountSwitch(
+      'switch-token-opaque',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      provider: AuthProviderKind.google,
+    );
+    expect(rejected.outcome, AuthFlowOutcome.failed);
+    expect(rejected.errorCode, 'CONFIRM_INTENT_MISSING');
+    expect(providers.confirmContinueCalls, 0);
+
+    const operationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    await session.markPendingUnifiedAwaitingSwitch(
+      provider: 'google',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      operationId: operationId,
+    );
+    final cancelled = await coordinator.cancelAccountSwitch();
+    expect(cancelled.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
+    expect(store.pendingLink, isNull);
+
+    // Kill-before-confirm simulation: awaiting survives restart, recovery clears.
+    await session.markPendingUnifiedAwaitingSwitch(
+      provider: 'google',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      operationId: operationId,
+    );
+    final restarted = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    restarted.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final recoverCoordinator = AuthCoordinator(
+      session: restarted,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final recovered =
+        await recoverCoordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.cancelled);
+    expect(recovered.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
+    expect(store.pendingLink, isNull);
+    expect(providers.continueCalls, 0);
+  });
+
+  test('confirm recovery carries exact operation binding; wrong binding rejected',
+      () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const targetId = '11111111-1111-1111-1111-111111111111';
+    const operationB = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      return (status: 401, body: {'error': 'INVALID_REFRESH'});
+    };
+    final providers = _ScriptedProviders(continuePlayerId: targetId);
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+
+    await session.markPendingUnifiedConfirm(
+      provider: 'google',
+      targetPlayerId: targetId,
+      operationId: operationB,
+    );
+    final recovered =
+        await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+    expect(providers.recoverLinkedCalls, 1);
+    expect(providers.lastRecoverOperationId, operationB);
+    expect(store.pendingLink, isNull);
+
+    // Marker without operation binding must not authorize recovery.
+    store.pendingLink = 'confirm|google|$targetId';
+    expect(PendingLinkRecovery.tryParse(store.pendingLink), isNull);
+    final session2 = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session2.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final rejected = await AuthCoordinator(
+      session: session2,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    ).recoverPendingLink(AuthProviderKind.google);
+    expect(rejected.outcome, AuthFlowOutcome.failed);
+    expect(rejected.errorCode, 'RECOVERY_MARKER_MISSING');
+    expect(providers.recoverLinkedCalls, 1);
+  });
+
+  test('continue marker binds operation id used by mutate and recovery',
+      () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      return (status: 401, body: {'error': 'INVALID_REFRESH'});
+    };
+    final providers = _ScriptedProviders(
+      continueError: const ProviderAuthException(
+        'AUTH_NETWORK_UNAVAILABLE',
+        httpStatus: 0,
+      ),
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.continueWithProvider(
+      AuthProviderKind.google,
+      localProgressProtected: false,
+    );
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    final pending = PendingLinkRecovery.tryParse(store.pendingLink);
+    expect(pending?.kind, PendingAuthRecoveryKind.unifiedContinue);
+    expect(pending?.hasOperationBinding, isTrue);
+    expect(providers.lastContinueOperationId, pending?.operationId);
+
+    final recovered =
+        await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+    expect(providers.lastRecoverOperationId, pending?.operationId);
   });
 
   test('session survives restart after existing-account login', () async {
