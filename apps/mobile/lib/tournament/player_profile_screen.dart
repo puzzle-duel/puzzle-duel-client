@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
@@ -172,7 +176,16 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                           ?.isVerified ==
                       true,
                   copy: copy,
-                  onSignIn: widget.controller.onRequestRankedAuth,
+                  onSignIn: widget.controller.onRequestRankedAuth == null
+                      ? null
+                      : () {
+                          unawaited(DiagnosticRuntime.logger.log(LogEvent(
+                            level: LogLevel.info,
+                            code: LogCode.screenOpened,
+                            operation: 'profile_signin_tapped',
+                          )));
+                          widget.controller.onRequestRankedAuth!();
+                        },
                   onSignOut: widget.controller.onRequestSignOut,
                 ),
                 const SizedBox(height: 20),
