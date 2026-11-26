@@ -6,7 +6,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
-import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
