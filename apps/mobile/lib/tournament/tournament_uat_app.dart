@@ -180,31 +180,66 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
 
   Future<void> _presentRankedAuth(TournamentController controller) async {
     final coordinator = widget.authCoordinator;
-    if (coordinator == null || !mounted) return;
-    final pendingRecovery =
-        await coordinator.consumePendingLinkRecoveryIfNeeded();
-    if (!mounted) return;
-    if (pendingRecovery != null &&
-        pendingRecovery.outcome == AuthFlowOutcome.loggedIn &&
-        pendingRecovery.access != null) {
-      controller.api.bearer =
-          UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
-      await controller.completeRankedAuthAndEnter();
+    // Must use Navigator descendant context (same as recovery sheet) — the
+    // State.context sits above MaterialApp and cannot present a modal route.
+    final navContext = _navKey.currentContext;
+    if (coordinator == null || !mounted || navContext == null) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.authRefreshFailed,
+        operation: 'ranked_auth_sheet_present_failed',
+        errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+      )));
       return;
     }
-    final result = await showRankedAuthSheet(
-      context: context,
-      coordinator: coordinator,
-      recoverySeed:
-          pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
-              ? pendingRecovery
-              : null,
-    );
-    if (!mounted) return;
-    if (result == null) return;
-    if (result.outcome == AuthFlowOutcome.linked ||
-        result.outcome == AuthFlowOutcome.loggedIn) {
-      await controller.completeRankedAuthAndEnter();
+    try {
+      final pendingRecovery =
+          await coordinator.consumePendingLinkRecoveryIfNeeded();
+      if (!mounted) return;
+      if (pendingRecovery != null &&
+          pendingRecovery.outcome == AuthFlowOutcome.loggedIn &&
+          pendingRecovery.access != null) {
+        controller.api.bearer =
+            UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
+        await controller.completeRankedAuthAndEnter();
+        return;
+      }
+      final presentContext = _navKey.currentContext;
+      if (!mounted || presentContext == null || !presentContext.mounted) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.authRefreshFailed,
+          operation: 'ranked_auth_sheet_present_failed',
+          errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+        )));
+        return;
+      }
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.screenOpened,
+        operation: 'ranked_auth_sheet_present',
+      )));
+      final result = await showRankedAuthSheet(
+        context: presentContext,
+        coordinator: coordinator,
+        recoverySeed:
+            pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
+                ? pendingRecovery
+                : null,
+      );
+      if (!mounted) return;
+      if (result == null) return;
+      if (result.outcome == AuthFlowOutcome.linked ||
+          result.outcome == AuthFlowOutcome.loggedIn) {
+        await controller.completeRankedAuthAndEnter();
+      }
+    } catch (_) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.authRefreshFailed,
+        operation: 'ranked_auth_sheet_present_failed',
+        errorCode: 'AUTH_SHEET_PRESENT_FAILED',
+      )));
     }
   }
 
