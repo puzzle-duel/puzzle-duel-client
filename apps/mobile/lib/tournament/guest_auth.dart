@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 
 /// Staging session auth transport. No Firebase Authentication dependency.
 ///
@@ -22,6 +23,10 @@ abstract interface class GuestCredentialStore {
   Future<String?> readPendingLinkProvider();
   Future<void> writePendingLinkProvider(String encoded);
   Future<void> clearPendingLinkProvider();
+  /// Non-secret last-known player/family binding for recovery UX only.
+  Future<String?> readIdentityBinding();
+  Future<void> writeIdentityBinding(String encoded);
+  Future<void> clearIdentityBinding();
 }
 
 /// Identity-preserving recovery intent after uncertain guest→verified link.
@@ -241,6 +246,7 @@ final class GuestAuthClient {
   int _pendingGeneration = 0;
   GuestAccess? _current;
   int _credentialGeneration = 0;
+  String? _lastAuthRequestId;
 
   /// Serializes durable vault mutations so stale refresh cannot interleave with
   /// link/logout commits. Nested vault work inside a held mutation must call
@@ -250,6 +256,8 @@ final class GuestAuthClient {
 
   GuestAccess? get cachedAccess => _current;
   int get credentialGeneration => _credentialGeneration;
+  /// Last guest-auth HTTP `x-request-id` (32 hex). Never a token or player proof.
+  String? get lastAuthRequestId => _lastAuthRequestId;
 
   @visibleForTesting
   void debugSeedAccess(GuestAccess access) {
@@ -525,6 +533,11 @@ final class GuestAuthClient {
           LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
       try {
         await persistVerifiedGuestCredential(credentials, refresh);
+        await credentials.writeIdentityBinding(GuestIdentityBinding(
+          playerId: access.playerId,
+          familyId: access.familyId,
+          accountType: access.accountType,
+        ).encode());
       } catch (_) {
         _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
             errorCode: 'SECURE_STORE_UNAVAILABLE');
@@ -548,14 +561,37 @@ final class GuestAuthClient {
     });
   }
 
+  /// Snapshot for startup recovery UI. Does not clear vault credentials.
+  Future<GuestSessionRecovery> captureSessionRecovery(String code) async {
+    final binding = GuestIdentityBinding.tryParse(
+      await credentials.readIdentityBinding(),
+    );
+    final pendingRaw = await credentials.readPendingLinkProvider();
+    final pending = PendingLinkRecovery.tryParse(pendingRaw);
+    return GuestSessionRecovery(
+      code: code,
+      lastRequestId: _lastAuthRequestId,
+      binding: binding,
+      pendingLink: pending,
+    );
+  }
+
   Future<_GuestResponse> _post(String path, Map<String, Object?> body) async {
+    final requestId = _newRequestId();
+    _lastAuthRequestId = requestId;
     final override = debugTransport;
     if (override != null) {
+      final operation =
+          path == '/v1/auth/refresh' ? 'guest_auth_refresh' : 'guest_auth_create';
+      _breadcrumb(LogCode.httpStarted, operation, requestId: requestId);
       final result = await override(path, body);
+      _breadcrumb(LogCode.httpCompleted, operation,
+          requestId: requestId,
+          httpStatus: result.status,
+          errorCode: result.status >= 400 ? 'AUTH_HTTP_REJECTED' : null);
       return _GuestResponse(result.status, result.body);
     }
     final client = _factory();
-    final requestId = _newRequestId();
     final operation =
         path == '/v1/auth/refresh' ? 'guest_auth_refresh' : 'guest_auth_create';
     _breadcrumb(LogCode.httpStarted, operation, requestId: requestId);

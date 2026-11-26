@@ -11,6 +11,7 @@ import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_secure_store.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/platform_provider_sign_in.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
@@ -68,26 +69,63 @@ Future<void> main() async {
         origin: staging,
         credentials: SecureGuestCredentialStore(slot: slot),
       );
-      final access = await auth.authenticate();
       final providers = ProviderAuthClient(origin: staging);
       final coordinator = AuthCoordinator(
         session: auth,
         providers: providers,
         signIn: PlatformProviderSignIn(),
       );
-      await runTournamentUatApp(UatConfig(
-        baseUrl: staging,
-        bearer: access.accessToken,
-        playerLabel: access.isVerified ? 'Verified' : 'Guest',
-        stagingSessionBinding: access.sessionVaultBinding,
-      ), api: UatApi(
-        baseUrl: UatApi.apiOrigin(staging),
-        bearer: access.accessToken,
-        accessTokenProvider: () async => (await auth.authenticate()).accessToken,
-      ), stagingGuestSlot: guestSlot,
-        sessionAuth: auth,
-        authCoordinator: coordinator,
-      );
+      try {
+        final access = await auth.authenticate();
+        await runTournamentUatApp(UatConfig(
+          baseUrl: staging,
+          bearer: access.accessToken,
+          playerLabel: access.isVerified ? 'Verified' : 'Guest',
+          stagingSessionBinding: access.sessionVaultBinding,
+        ), api: UatApi(
+          baseUrl: UatApi.apiOrigin(staging),
+          bearer: access.accessToken,
+          accessTokenProvider: () async =>
+              (await auth.authenticate()).accessToken,
+        ), stagingGuestSlot: guestSlot,
+          sessionAuth: auth,
+          authCoordinator: coordinator,
+        );
+      } on GuestAuthException catch (error) {
+        if (!GuestSessionRecovery.isRecoverableStartup(error.code)) {
+          runApp(StagingStartupErrorScreen(error.code));
+          return;
+        }
+        // Keep vault credentials. Practice stays available; ranked stays gated.
+        final recovery = await auth.captureSessionRecovery(error.code);
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.sessionRestoreFailed,
+          operation: 'guest_session_recovery_boot',
+          requestId: recovery.lastRequestId,
+          errorCode: recovery.code,
+        )));
+        final bindingHint = recovery.expectedPlayerId == null
+            ? null
+            : 'staging-guest:${recovery.expectedPlayerId}';
+        await runTournamentUatApp(UatConfig(
+          baseUrl: staging,
+          bearer: '',
+          playerLabel: 'Session recovery',
+          stagingSessionBinding: bindingHint,
+        ), api: UatApi(
+          baseUrl: UatApi.apiOrigin(staging),
+          bearer: '',
+          accessTokenProvider: () async {
+            throw GuestAuthException(recovery.code);
+          },
+        ), stagingGuestSlot: guestSlot,
+          sessionAuth: auth,
+          authCoordinator: coordinator,
+          sessionRecovery: recovery,
+          crashReporter: crashReporter,
+        );
+      }
     } on GuestAuthException catch (error) {
       // A guest identity must never be replaced by an offline session.
       runApp(StagingStartupErrorScreen(error.code));
@@ -126,7 +164,7 @@ final class StagingStartupLoadingScreen extends StatelessWidget {
   }
 }
 
-/// This is shown ONLY for staging configuration/auth failures.
+/// This is shown ONLY for true staging configuration failures (not session recovery).
 @visibleForTesting
 final class StagingStartupErrorScreen extends StatelessWidget {
   const StagingStartupErrorScreen(this.errorCode, {super.key});
@@ -146,7 +184,7 @@ final class StagingStartupErrorScreen extends StatelessWidget {
               const SizedBox(height: 12),
               Text(errorCode, key: const Key('staging-startup-error')),
               const SizedBox(height: 12),
-              const Text('Check staging HTTPS configuration and restart the app.'),
+              const Text('Restart the app after checking the staging build flags.'),
             ],
           ),
         ),
@@ -154,4 +192,3 @@ final class StagingStartupErrorScreen extends StatelessWidget {
     );
   }
 }
-

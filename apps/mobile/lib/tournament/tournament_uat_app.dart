@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
+import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/diagnostics/screen_breadcrumb_observer.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
@@ -13,11 +16,13 @@ import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/auth_sheet.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
 import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_page_route.dart';
@@ -35,6 +40,8 @@ Future<void> runTournamentUatApp(
   String stagingGuestSlot = 'legacy',
   GuestAuthClient? sessionAuth,
   AuthCoordinator? authCoordinator,
+  GuestSessionRecovery? sessionRecovery,
+  CrashReporter? crashReporter,
 }) async {
   final directory = await AppStateDirectory.resolveForGuestSlot(stagingGuestSlot);
   runApp(
@@ -44,6 +51,8 @@ Future<void> runTournamentUatApp(
       stateDirectory: directory,
       sessionAuth: sessionAuth,
       authCoordinator: authCoordinator,
+      sessionRecovery: sessionRecovery,
+      crashReporter: crashReporter,
       sfx: AssetGameSfx(coupledHaptics: false),
       ownsSfx: true,
     ),
@@ -58,6 +67,8 @@ final class TournamentUatApp extends StatefulWidget {
     this.stateDirectory,
     this.sessionAuth,
     this.authCoordinator,
+    this.sessionRecovery,
+    this.crashReporter,
     this.haptics,
     this.sfx,
     this.ownsSfx = false,
@@ -70,6 +81,8 @@ final class TournamentUatApp extends StatefulWidget {
   final Directory? stateDirectory;
   final GuestAuthClient? sessionAuth;
   final AuthCoordinator? authCoordinator;
+  final GuestSessionRecovery? sessionRecovery;
+  final CrashReporter? crashReporter;
   final TournamentHaptics? haptics;
   final GameSfx? sfx;
   final bool ownsSfx;
@@ -83,6 +96,7 @@ final class TournamentUatApp extends StatefulWidget {
 final class _TournamentUatAppState extends State<TournamentUatApp>
     with WidgetsBindingObserver {
   late final GameSfx _sfx = widget.sfx ?? SilentGameSfx();
+  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   TournamentController? _controller;
   String? _bootError;
 
@@ -112,6 +126,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         stateDirectory: directory,
         identity: identity,
         sessionAuth: widget.sessionAuth,
+        sessionRecovery: widget.sessionRecovery,
         sfx: _sfx,
         settings: settings,
         haptics:
@@ -126,7 +141,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
             ),
       );
       controller.onRequestRankedAuth = () {
-        unawaited(_presentRankedAuth(controller));
+        unawaited(widget.sessionRecovery != null ||
+                controller.sessionRecoveryRequired
+            ? _presentSessionRecovery(controller)
+            : _presentRankedAuth(controller));
       };
       controller.onRequestSignOut = () {
         unawaited(_presentSignOut(controller));
@@ -140,9 +158,19 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       setState(() => _controller = controller);
       // Ranked refresh never gates Practice / Profile entry.
       // Startup: silent info banners; failures still surface as red/offline.
+      // Recovery boot skips claim/writer HTTP entirely inside loadDay.
       unawaited(
         controller.refreshTournament(origin: TournamentRefreshOrigin.startup),
       );
+      if (widget.sessionRecovery != null) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.sessionRestoreFailed,
+          operation: 'guest_recovery_shell_ready',
+          requestId: widget.sessionRecovery!.lastRequestId,
+          errorCode: widget.sessionRecovery!.code,
+        )));
+      }
       // Audio warm-up must not delay first tap.
       unawaited(_sfx.prepare());
     } catch (error) {
@@ -178,6 +206,39 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         result.outcome == AuthFlowOutcome.loggedIn) {
       await controller.completeRankedAuthAndEnter();
     }
+  }
+
+  Future<void> _presentSessionRecovery(TournamentController controller) async {
+    final navContext = _navKey.currentContext;
+    if (!mounted || navContext == null) return;
+    final recovery = widget.sessionRecovery ??
+        GuestSessionRecovery(code: controller.tournamentNoticeCode ??
+            'GUEST_RECOVERY_REQUIRED');
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'guest_session_recovery_sheet',
+      requestId: recovery.lastRequestId,
+      errorCode: recovery.code,
+    )));
+    await showModalBottomSheet<void>(
+      context: navContext,
+      isScrollControlled: true,
+      backgroundColor: GameTokens.surfaceHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => _GuestSessionRecoverySheet(
+        recovery: recovery,
+        coordinator: widget.authCoordinator,
+        crashReporter: widget.crashReporter,
+        api: controller.api,
+        onRecovered: (access) async {
+          controller.clearSessionRecoveryGate(bearer: access.accessToken);
+          await controller.completeRankedAuthAndEnter();
+        },
+      ),
+    );
   }
 
   Future<void> _presentSignOut(TournamentController controller) async {
@@ -216,6 +277,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       child: MaterialApp(
         title: 'Puzzle Duel',
         debugShowCheckedModeBanner: false,
+        navigatorKey: _navKey,
         navigatorObservers: [ScreenBreadcrumbObserver()],
         theme: PuzzleDuelTheme.dark().copyWith(
           scaffoldBackgroundColor: GameTokens.bgDeep,
@@ -504,30 +566,35 @@ final class _HomeScreen extends StatelessWidget {
               : copy.onTimeMissing)
         : null;
     final needsAuth = controller.rankedAuthRequired;
+    final needsRecovery = controller.sessionRecoveryRequired;
     final primary = syncing
         ? copy.tournamentSyncing
-        : needsAuth
-            ? copy.signInToPlay
-            : switch (phase) {
-                DayPhase.completed => copy.viewResults,
-                DayPhase.betweenGames || DayPhase.inProgress =>
-                  copy.continueTournament,
-                _ => copy.playToday,
-              };
+        : needsRecovery
+            ? copy.restoreSession
+            : needsAuth
+                ? copy.signInToPlay
+                : switch (phase) {
+                    DayPhase.completed => copy.viewResults,
+                    DayPhase.betweenGames || DayPhase.inProgress =>
+                      copy.continueTournament,
+                    _ => copy.playToday,
+                  };
     final headline = stale
         ? copy.cachedTournamentHeadline
-        : switch (phase) {
-            DayPhase.completed => copy.completedHeadline,
-            DayPhase.inProgress || DayPhase.betweenGames =>
-              copy.progressHeadline,
-            _ => copy.readyHeadline,
-          };
+        : needsRecovery
+            ? copy.sessionRecoveryRequired
+            : switch (phase) {
+                DayPhase.completed => copy.completedHeadline,
+                DayPhase.inProgress || DayPhase.betweenGames =>
+                  copy.progressHeadline,
+                _ => copy.readyHeadline,
+              };
     VoidCallback? onPrimary;
     if (syncing) {
       onPrimary = null;
     } else if (phase == DayPhase.completed && controller.tournamentReady) {
       onPrimary = controller.openResults;
-    } else if (needsAuth || controller.sessionAuth != null) {
+    } else if (needsRecovery || needsAuth || controller.sessionAuth != null) {
       onPrimary = () => unawaited(controller.requestRankedEntry());
     } else {
       // A degraded Home snapshot must offer a safe refresh/retry rather than
@@ -1972,4 +2039,195 @@ Color _tone(String? label) {
   if (label.startsWith('M')) return GameTokens.mediumAccent;
   if (label.startsWith('H')) return GameTokens.hardAccent;
   return GameTokens.accent;
+}
+
+final class _GuestSessionRecoverySheet extends StatefulWidget {
+  const _GuestSessionRecoverySheet({
+    required this.recovery,
+    required this.onRecovered,
+    this.coordinator,
+    this.crashReporter,
+    this.api,
+  });
+
+  final GuestSessionRecovery recovery;
+  final Future<void> Function(GuestAccess access) onRecovered;
+  final AuthCoordinator? coordinator;
+  final CrashReporter? crashReporter;
+  final UatApi? api;
+
+  @override
+  State<_GuestSessionRecoverySheet> createState() =>
+      _GuestSessionRecoverySheetState();
+}
+
+final class _GuestSessionRecoverySheetState
+    extends State<_GuestSessionRecoverySheet> {
+  var _busy = false;
+  String? _status;
+  String? _error;
+
+  Future<void> _recover(AuthProviderKind provider) async {
+    final coordinator = widget.coordinator;
+    final expected = widget.recovery.expectedPlayerId;
+    if (coordinator == null || expected == null || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _status = null;
+    });
+    final AuthFlowResult result;
+    if (widget.recovery.pendingLink != null) {
+      result = await coordinator.recoverPendingLink(provider);
+    } else {
+      result = await coordinator.recoverKnownPlayer(
+        provider: provider,
+        expectedPlayerId: expected,
+      );
+    }
+    if (!mounted) return;
+    if (result.outcome == AuthFlowOutcome.loggedIn && result.access != null) {
+      await widget.onRecovered(result.access!);
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _error = result.errorCode ?? 'RECOVERY_FAILED';
+    });
+  }
+
+  Future<void> _sendDiagnostics() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = null;
+      _error = null;
+    });
+    final requestId = widget.recovery.lastRequestId;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.warning,
+      code: LogCode.diagnosticFailure,
+      operation: 'guest_recovery_manual_report',
+      requestId: requestId,
+      errorCode: widget.recovery.code,
+    )));
+    // Authenticated diagnostic endpoint needs a live tournament session.
+    // Do not bypass auth: flush safe Crashlytics breadcrumbs via nonfatal.
+    try {
+      final reporter = widget.crashReporter;
+      if (reporter != null) {
+        await reporter.recordNonFatal(
+          StateError('GUEST_SESSION_RECOVERY_DIAGNOSTIC'),
+          StackTrace.current,
+        );
+      }
+      final api = widget.api;
+      if (api != null && api.bearer.trim().isNotEmpty) {
+        final result = await api.sendDiagnosticReport();
+        if (!mounted) return;
+        final reportId = result.map['reportId'];
+        setState(() {
+          _busy = false;
+          _status = result.status == 201 && reportId is String
+              ? 'report:$reportId'
+              : 'crashlytics:${requestId ?? 'none'}';
+        });
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _status = 'crashlytics:${requestId ?? 'none'}';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'DIAGNOSTIC_SEND_FAILED';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = TournamentCopy.of(context);
+    final canProvider = widget.recovery.canAttemptProviderRecover &&
+        widget.coordinator != null;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              copy.restoreSession,
+              key: const Key('guest-recovery-title'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              canProvider
+                  ? copy.sessionRecoveryRequired
+                  : copy.sessionRecoveryPureGuest,
+              key: const Key('guest-recovery-body'),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.recovery.code,
+              key: const Key('guest-recovery-code'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (widget.recovery.lastRequestId != null) ...[
+              const SizedBox(height: 4),
+              SelectableText(
+                'requestId=${widget.recovery.lastRequestId}',
+                key: const Key('guest-recovery-request-id'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (canProvider) ...[
+              FilledButton(
+                key: const Key('guest-recovery-google'),
+                onPressed: _busy
+                    ? null
+                    : () => unawaited(_recover(AuthProviderKind.google)),
+                child: Text(copy.continueWithGoogle),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                key: const Key('guest-recovery-apple'),
+                onPressed: _busy
+                    ? null
+                    : () => unawaited(_recover(AuthProviderKind.apple)),
+                child: Text(copy.continueWithApple),
+              ),
+              const SizedBox(height: 8),
+            ],
+            OutlinedButton(
+              key: const Key('guest-recovery-send-diagnostics'),
+              onPressed: _busy ? null : () => unawaited(_sendDiagnostics()),
+              child: Text(copy.sendDiagnosticsRecovery),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              key: const Key('guest-recovery-practice'),
+              onPressed: _busy ? null : () => Navigator.pop(context),
+              child: Text(copy.practice),
+            ),
+            if (_status != null) ...[
+              const SizedBox(height: 8),
+              Text(_status!, key: const Key('guest-recovery-diag-status')),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, key: const Key('guest-recovery-error')),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

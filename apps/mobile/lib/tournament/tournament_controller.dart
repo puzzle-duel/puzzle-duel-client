@@ -19,6 +19,7 @@ import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -139,6 +140,7 @@ final class TournamentController extends ChangeNotifier {
     GameSfx? sfx,
     LocalSettings? settings,
     this.sessionAuth,
+    this.sessionRecovery,
     this._reduceMotion,
   }) : api =
            api ??
@@ -153,6 +155,12 @@ final class TournamentController extends ChangeNotifier {
        _kv = DirectoryKvStore(stateDirectory),
        _stateFile = File('${stateDirectory.path}/pzd-uat-session.json') {
     session.addListener(_onSessionResolution);
+    if (sessionRecovery != null) {
+      sessionRecoveryRequired = true;
+      rankedWriterLocked = true;
+      tournamentNoticeCode = sessionRecovery!.code;
+      tournamentSync = TournamentSyncState.degraded;
+    }
   }
 
   final UatConfig config;
@@ -160,6 +168,8 @@ final class TournamentController extends ChangeNotifier {
   final PracticeIdentityStore identity;
   /// When set, guest accounts are gated before ranked claim (PZD-27).
   final GuestAuthClient? sessionAuth;
+  /// Startup recovery gate: Practice open, ranked/writer mutations closed.
+  final GuestSessionRecovery? sessionRecovery;
   final UatApi api;
   final TournamentHaptics haptics;
   final GameSfx sfx;
@@ -252,6 +262,9 @@ final class TournamentController extends ChangeNotifier {
   /// Guest must complete Apple/Google verification before claim (PZD-27).
   bool rankedAuthRequired = false;
 
+  /// Refresh family revoked/expired: preserve vault, block ranked mutations.
+  bool sessionRecoveryRequired = false;
+
   /// Set when the user explicitly requests ranked entry; consumed once after
   /// successful verification so claim is not auto-replayed.
   bool _pendingRankedEntryOnce = false;
@@ -336,6 +349,17 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _refreshTournamentBody({bool preserveRoute = false}) async {
     final epoch = ++_tournamentEpoch;
     InteractionPerf.mark('tournament.refresh.start');
+    if (sessionRecoveryRequired) {
+      rankedWriterLocked = true;
+      busy = false;
+      booting = false;
+      errorCode = null;
+      tournamentNoticeCode = sessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+      if (!preserveRoute) route = const TournamentRoute();
+      notifyListeners();
+      return;
+    }
     tournamentSync = TournamentSyncState.syncing;
     tournamentNoticeCode = null;
     errorCode = null;
@@ -364,6 +388,17 @@ final class TournamentController extends ChangeNotifier {
     final activeEpoch = epoch ?? _tournamentEpoch;
     busy = true;
     notifyListeners();
+    if (sessionRecoveryRequired) {
+      rankedWriterLocked = true;
+      busy = false;
+      booting = false;
+      errorCode = null;
+      tournamentNoticeCode = sessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+      if (presentHome) route = const TournamentRoute();
+      notifyListeners();
+      return;
+    }
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
@@ -521,6 +556,12 @@ final class TournamentController extends ChangeNotifier {
 
   /// Home primary action when ranked auth may be required (PZD-27).
   Future<void> requestRankedEntry() async {
+    if (sessionRecoveryRequired) {
+      tournamentNoticeCode = sessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+      notifyListeners();
+      onRequestRankedAuth?.call();
+      return;
+    }
     if (sessionAuth == null) {
       await resume();
       return;
@@ -530,6 +571,15 @@ final class TournamentController extends ChangeNotifier {
       access = await sessionAuth!.authenticate();
       api.bearer = UatApi.normalizeBearer(access.accessToken);
     } on GuestAuthException catch (error) {
+      if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+        sessionRecoveryRequired = true;
+        rankedWriterLocked = true;
+        tournamentNoticeCode = error.code;
+        tournamentSync = TournamentSyncState.degraded;
+        notifyListeners();
+        onRequestRankedAuth?.call();
+        return;
+      }
       _fail(error.code, degradedOnFailure: true);
       return;
     }
@@ -548,10 +598,26 @@ final class TournamentController extends ChangeNotifier {
   /// Applies post-logout guest credentials without starting a claim.
   void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
     this.rankedAuthRequired = rankedAuthRequired;
+    sessionRecoveryRequired = false;
     if (rankedAuthRequired) {
       tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
+    notifyListeners();
+  }
+
+  /// Clears startup recovery gate after identity-preserving provider recover.
+  void clearSessionRecoveryGate({required String bearer}) {
+    api.bearer = UatApi.normalizeBearer(bearer);
+    sessionRecoveryRequired = false;
+    rankedWriterLocked = false;
+    rankedAuthRequired = false;
+    tournamentNoticeCode = null;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'guest_session_recovery_cleared',
+    )));
     notifyListeners();
   }
 
@@ -560,6 +626,7 @@ final class TournamentController extends ChangeNotifier {
     final shouldEnter = _pendingRankedEntryOnce;
     _pendingRankedEntryOnce = false;
     rankedAuthRequired = false;
+    sessionRecoveryRequired = false;
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.sessionRestored,

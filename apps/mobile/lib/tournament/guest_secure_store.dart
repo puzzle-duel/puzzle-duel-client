@@ -17,10 +17,16 @@ enum StagingGuestSlot {
 
 /// Pure policy; all keys are stable across app process termination and rebuilds.
 final class StagingGuestCredentialKeys {
-  const StagingGuestCredentialKeys._(this.refresh, this.rotation, this.pendingLink);
+  const StagingGuestCredentialKeys._(
+    this.refresh,
+    this.rotation,
+    this.pendingLink,
+    this.identityBinding,
+  );
   final String refresh;
   final String rotation;
   final String pendingLink;
+  final String identityBinding;
 
   static StagingGuestCredentialKeys forSlot(StagingGuestSlot slot) =>
       switch (slot) {
@@ -28,16 +34,19 @@ final class StagingGuestCredentialKeys {
             'pzd.staging.guest.refresh.v1',
             'pzd.staging.guest.rotation.v1',
             'pzd.staging.guest.pending_link.v1',
+            'pzd.staging.guest.identity.v1',
           ),
         StagingGuestSlot.playerA => const StagingGuestCredentialKeys._(
             'pzd.staging.guest.player-a.refresh.v1',
             'pzd.staging.guest.player-a.rotation.v1',
             'pzd.staging.guest.player-a.pending_link.v1',
+            'pzd.staging.guest.player-a.identity.v1',
           ),
         StagingGuestSlot.playerB => const StagingGuestCredentialKeys._(
             'pzd.staging.guest.player-b.refresh.v1',
             'pzd.staging.guest.player-b.rotation.v1',
             'pzd.staging.guest.player-b.pending_link.v1',
+            'pzd.staging.guest.player-b.identity.v1',
           ),
       };
 }
@@ -56,6 +65,8 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
   String get _rotationKey => StagingGuestCredentialKeys.forSlot(slot).rotation;
   String get _pendingLinkKey =>
       StagingGuestCredentialKeys.forSlot(slot).pendingLink;
+  String get _identityBindingKey =>
+      StagingGuestCredentialKeys.forSlot(slot).identityBinding;
 
   @override
   Future<String?> readRefreshToken() => _storage.read(key: _refreshKey);
@@ -88,4 +99,16 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
   @override
   Future<void> clearPendingLinkProvider() =>
       _storage.delete(key: _pendingLinkKey);
+
+  @override
+  Future<String?> readIdentityBinding() =>
+      _storage.read(key: _identityBindingKey);
+
+  @override
+  Future<void> writeIdentityBinding(String encoded) =>
+      _storage.write(key: _identityBindingKey, value: encoded);
+
+  @override
+  Future<void> clearIdentityBinding() =>
+      _storage.delete(key: _identityBindingKey);
 }

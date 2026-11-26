@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
+import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
@@ -67,11 +68,38 @@ final class TournamentSettingsScreen extends StatelessWidget {
                       onTap: () async {
                         final messenger = ScaffoldMessenger.of(context);
                         try {
-                          final result = await controller.api.sendDiagnosticReport();
+                          // Session recovery has no verified tournament session:
+                          // authenticated report endpoint cannot be used without
+                          // inventing an auth bypass. Prefer server report when
+                          // bearer exists; otherwise flush Crashlytics breadcrumbs.
+                          if (controller.sessionRecoveryRequired ||
+                              controller.api.bearer.trim().isEmpty) {
+                            await DiagnosticRuntime.logger.log(LogEvent(
+                              level: LogLevel.warning,
+                              code: LogCode.diagnosticFailure,
+                              operation: 'guest_recovery_settings_report',
+                              requestId:
+                                  controller.sessionRecovery?.lastRequestId,
+                              errorCode: controller.tournamentNoticeCode ??
+                                  'GUEST_RECOVERY_REQUIRED',
+                            ));
+                            if (!context.mounted) return;
+                            final rid =
+                                controller.sessionRecovery?.lastRequestId;
+                            messenger.showSnackBar(SnackBar(
+                              content: Text(rid == null
+                                  ? 'Crashlytics breadcrumb gönderildi (oturum yok).'
+                                  : 'Crashlytics breadcrumb gönderildi. requestId=$rid'),
+                            ));
+                            return;
+                          }
+                          final result =
+                              await controller.api.sendDiagnosticReport();
                           if (!context.mounted) return;
                           final reportId = result.map['reportId'];
                           messenger.showSnackBar(SnackBar(
-                            content: Text(result.status == 201 && reportId is String
+                            content: Text(result.status == 201 &&
+                                    reportId is String
                                 ? 'Log gönderildi. Rapor: $reportId'
                                 : 'Log gönderilemedi (${result.status}).'),
                           ));
