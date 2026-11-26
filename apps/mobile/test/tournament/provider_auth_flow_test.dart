@@ -68,6 +68,17 @@ final class _MemoryStore implements GuestCredentialStore {
   }
   @override
   Future<void> clearIdentityBinding() async => identityBinding = null;
+  String? vaultJournal;
+  @override
+  Future<String?> readVaultJournal() async => vaultJournal;
+  @override
+  Future<void> writeVaultJournal(String encoded) async {
+    vaultJournal = encoded;
+  }
+  @override
+  Future<void> clearVaultJournal() async {
+    vaultJournal = null;
+  }
 }
 
 final class _FakeProviders implements ProviderAuthPort {

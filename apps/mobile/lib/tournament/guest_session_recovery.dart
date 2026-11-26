@@ -91,7 +91,8 @@ final class GuestSessionRecovery {
   static bool isRecoverableStartup(String code) =>
       isHardRecoveryCode(code) ||
       isTransientNetworkCode(code) ||
-      code.startsWith('PROVIDER_LINK_RECOVERY_');
+      code.startsWith('PROVIDER_LINK_RECOVERY_') ||
+      code == 'SECURE_STORE_RECOVERY_FAILED';
 
   static bool isTransientNetworkCode(String code) =>
       code == 'REFRESH_UNAVAILABLE' || code == 'AUTH_NETWORK_UNAVAILABLE';

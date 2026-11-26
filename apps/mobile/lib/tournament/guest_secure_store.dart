@@ -22,11 +22,13 @@ final class StagingGuestCredentialKeys {
     this.rotation,
     this.pendingLink,
     this.identityBinding,
+    this.vaultJournal,
   );
   final String refresh;
   final String rotation;
   final String pendingLink;
   final String identityBinding;
+  final String vaultJournal;
 
   static StagingGuestCredentialKeys forSlot(StagingGuestSlot slot) =>
       switch (slot) {
@@ -35,18 +37,21 @@ final class StagingGuestCredentialKeys {
             'pzd.staging.guest.rotation.v1',
             'pzd.staging.guest.pending_link.v1',
             'pzd.staging.guest.identity.v1',
+            'pzd.staging.guest.vault_journal.v1',
           ),
         StagingGuestSlot.playerA => const StagingGuestCredentialKeys._(
             'pzd.staging.guest.player-a.refresh.v1',
             'pzd.staging.guest.player-a.rotation.v1',
             'pzd.staging.guest.player-a.pending_link.v1',
             'pzd.staging.guest.player-a.identity.v1',
+            'pzd.staging.guest.player-a.vault_journal.v1',
           ),
         StagingGuestSlot.playerB => const StagingGuestCredentialKeys._(
             'pzd.staging.guest.player-b.refresh.v1',
             'pzd.staging.guest.player-b.rotation.v1',
             'pzd.staging.guest.player-b.pending_link.v1',
             'pzd.staging.guest.player-b.identity.v1',
+            'pzd.staging.guest.player-b.vault_journal.v1',
           ),
       };
 }
@@ -67,6 +72,8 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
       StagingGuestCredentialKeys.forSlot(slot).pendingLink;
   String get _identityBindingKey =>
       StagingGuestCredentialKeys.forSlot(slot).identityBinding;
+  String get _vaultJournalKey =>
+      StagingGuestCredentialKeys.forSlot(slot).vaultJournal;
 
   @override
   Future<String?> readRefreshToken() => _storage.read(key: _refreshKey);
@@ -111,4 +118,14 @@ final class SecureGuestCredentialStore implements GuestCredentialStore {
   @override
   Future<void> clearIdentityBinding() =>
       _storage.delete(key: _identityBindingKey);
+
+  @override
+  Future<String?> readVaultJournal() => _storage.read(key: _vaultJournalKey);
+
+  @override
+  Future<void> writeVaultJournal(String encoded) =>
+      _storage.write(key: _vaultJournalKey, value: encoded);
+
+  @override
+  Future<void> clearVaultJournal() => _storage.delete(key: _vaultJournalKey);
 }
