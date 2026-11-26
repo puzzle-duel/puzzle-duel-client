@@ -173,14 +173,35 @@ final class _ScriptedProviders implements ProviderAuthPort {
     throw const ProviderAuthException('NOT_USED');
   }
 
+  String? lastRecoverOperationId;
+  String? lastContinueOperationId;
+  String? lastConfirmOperationId;
+  var recoverLinkedCalls = 0;
+
   @override
   Future<ProviderCredentialBundle> recoverLinked({
     required AuthProviderKind provider,
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
   }) async {
-    throw const ProviderAuthException('NOT_USED');
+    recoverLinkedCalls++;
+    lastRecoverOperationId = operationId;
+    return ProviderCredentialBundle(
+      playerId: continuePlayerId,
+      accountType: 'verified',
+      accessToken: _jwt(
+        sub: continuePlayerId,
+        accountType: 'verified',
+        fid: 'recover-fid',
+      ),
+      refreshToken: 'r' * 64,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      linkedProviders: [provider.name],
+    );
   }
 
   @override
@@ -189,10 +210,12 @@ final class _ScriptedProviders implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
     bool localProgressProtected = false,
     String? guestBearer,
   }) async {
     continueCalls++;
+    lastContinueOperationId = operationId;
     if (continueError != null) throw continueError!;
     return ProviderCredentialBundle(
       playerId: continuePlayerId,
@@ -212,8 +235,10 @@ final class _ScriptedProviders implements ProviderAuthPort {
   @override
   Future<ProviderCredentialBundle> confirmContinue({
     required String continuationToken,
+    required String operationId,
   }) async {
     confirmContinueCalls++;
+    lastConfirmOperationId = operationId;
     return ProviderCredentialBundle(
       playerId: continuePlayerId,
       accountType: 'verified',
@@ -492,6 +517,9 @@ void main() {
     await _settle(tester);
     expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
     expect(harness.store.pendingLink, startsWith('awaiting|'));
+    final awaiting = PendingLinkRecovery.tryParse(harness.store.pendingLink);
+    expect(awaiting?.hasOperationBinding, isTrue);
+    expect(providers.lastContinueOperationId, awaiting?.operationId);
 
     await tester.tap(find.byKey(const Key('account-switch-keep-guest')));
     await _settle(tester);
@@ -526,9 +554,11 @@ void main() {
     expect(rejected.errorCode, 'CONFIRM_INTENT_MISSING');
     expect(providers.confirmContinueCalls, 0);
 
+    const operationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     await session.markPendingUnifiedAwaitingSwitch(
       provider: 'google',
       targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      operationId: operationId,
     );
     final cancelled = await coordinator.cancelAccountSwitch();
     expect(cancelled.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
@@ -538,6 +568,7 @@ void main() {
     await session.markPendingUnifiedAwaitingSwitch(
       provider: 'google',
       targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      operationId: operationId,
     );
     final restarted = GuestAuthClient(
       origin: 'https://staging.puzzle-duel.app',
@@ -558,6 +589,107 @@ void main() {
     expect(recovered.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
     expect(store.pendingLink, isNull);
     expect(providers.continueCalls, 0);
+  });
+
+  test('confirm recovery carries exact operation binding; wrong binding rejected',
+      () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const targetId = '11111111-1111-1111-1111-111111111111';
+    const operationB = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      return (status: 401, body: {'error': 'INVALID_REFRESH'});
+    };
+    final providers = _ScriptedProviders(continuePlayerId: targetId);
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+
+    await session.markPendingUnifiedConfirm(
+      provider: 'google',
+      targetPlayerId: targetId,
+      operationId: operationB,
+    );
+    final recovered =
+        await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+    expect(providers.recoverLinkedCalls, 1);
+    expect(providers.lastRecoverOperationId, operationB);
+    expect(store.pendingLink, isNull);
+
+    // Marker without operation binding must not authorize recovery.
+    store.pendingLink = 'confirm|google|$targetId';
+    expect(PendingLinkRecovery.tryParse(store.pendingLink), isNull);
+    final session2 = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session2.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final rejected = await AuthCoordinator(
+      session: session2,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    ).recoverPendingLink(AuthProviderKind.google);
+    expect(rejected.outcome, AuthFlowOutcome.failed);
+    expect(rejected.errorCode, 'RECOVERY_MARKER_MISSING');
+    expect(providers.recoverLinkedCalls, 1);
+  });
+
+  test('continue marker binds operation id used by mutate and recovery',
+      () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    session.debugTransport = (path, body) async {
+      expect(path, '/v1/auth/refresh');
+      return (status: 401, body: {'error': 'INVALID_REFRESH'});
+    };
+    final providers = _ScriptedProviders(
+      continueError: const ProviderAuthException(
+        'AUTH_NETWORK_UNAVAILABLE',
+        httpStatus: 0,
+      ),
+    );
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final result = await coordinator.continueWithProvider(
+      AuthProviderKind.google,
+      localProgressProtected: false,
+    );
+    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+    final pending = PendingLinkRecovery.tryParse(store.pendingLink);
+    expect(pending?.kind, PendingAuthRecoveryKind.unifiedContinue);
+    expect(pending?.hasOperationBinding, isTrue);
+    expect(providers.lastContinueOperationId, pending?.operationId);
+
+    final recovered =
+        await coordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+    expect(providers.lastRecoverOperationId, pending?.operationId);
   });
 
   test('session survives restart after existing-account login', () async {

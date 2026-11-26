@@ -145,15 +145,15 @@ enum PendingAuthRecoveryKind {
 ///
 /// Wire formats (secure storage only; never log):
 /// - `apple|<uuid>` / `google|<uuid>` — legacy/exact link expected player
-/// - `continue|apple` / `continue|google` — unified continue (provider_linked)
-/// - `continue|apple|<sourceGuestUuid>` — unified continue with source context
-/// - `awaiting|apple|<targetPlayerUuid>` — confirmation required, not yet approved
-/// - `confirm|apple|<targetPlayerUuid>` — user-approved confirm mutate intent
+/// - `continue|apple|<sourceGuestOrEmpty>|<operationId>` — unified continue
+/// - `awaiting|apple|<targetPlayerUuid>|<operationId>` — consent not yet approved
+/// - `confirm|apple|<targetPlayerUuid>|<operationId>` — approved confirm intent
 final class PendingLinkRecovery {
   const PendingLinkRecovery({
     required this.provider,
     required this.playerId,
     this.kind = PendingAuthRecoveryKind.link,
+    this.operationId = '',
   });
 
   final String provider;
@@ -161,6 +161,9 @@ final class PendingLinkRecovery {
   /// Awaiting/confirm: server-advertised target player id.
   final String playerId;
   final PendingAuthRecoveryKind kind;
+  /// Client-generated operation id bound through continue/confirm/recovery.
+  /// Empty only for legacy exact-link markers.
+  final String operationId;
 
   bool get resolvesViaProviderLinked =>
       kind == PendingAuthRecoveryKind.unifiedContinue;
@@ -168,14 +171,16 @@ final class PendingLinkRecovery {
   bool get isAwaitingSwitchConsent =>
       kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch;
 
+  bool get hasOperationBinding => _uuid.hasMatch(operationId);
+
   String encode() => switch (kind) {
         PendingAuthRecoveryKind.link => '$provider|$playerId',
-        PendingAuthRecoveryKind.unifiedContinue => playerId.isEmpty
-            ? 'continue|$provider'
-            : 'continue|$provider|$playerId',
+        PendingAuthRecoveryKind.unifiedContinue =>
+          'continue|$provider|$playerId|$operationId',
         PendingAuthRecoveryKind.unifiedAwaitingSwitch =>
-          'awaiting|$provider|$playerId',
-        PendingAuthRecoveryKind.unifiedConfirm => 'confirm|$provider|$playerId',
+          'awaiting|$provider|$playerId|$operationId',
+        PendingAuthRecoveryKind.unifiedConfirm =>
+          'confirm|$provider|$playerId|$operationId',
       };
 
   static final _uuid = RegExp(
@@ -195,45 +200,48 @@ final class PendingLinkRecovery {
       if (!_uuid.hasMatch(playerId)) return null;
       return PendingLinkRecovery(provider: provider, playerId: playerId);
     }
-    if (parts.length >= 2 && parts[0] == 'continue') {
-      final provider = parts[1];
-      if (provider != 'apple' && provider != 'google') return null;
-      if (parts.length == 2) {
-        return PendingLinkRecovery(
-          provider: provider,
-          playerId: '',
-          kind: PendingAuthRecoveryKind.unifiedContinue,
-        );
-      }
-      if (parts.length == 3 && _uuid.hasMatch(parts[2])) {
-        return PendingLinkRecovery(
-          provider: provider,
-          playerId: parts[2],
-          kind: PendingAuthRecoveryKind.unifiedContinue,
-        );
-      }
-      return null;
-    }
-    if (parts.length == 3 && parts[0] == 'awaiting') {
+    if (parts.length == 4 && parts[0] == 'continue') {
       final provider = parts[1];
       final playerId = parts[2];
+      final operationId = parts[3];
       if (provider != 'apple' && provider != 'google') return null;
-      if (!_uuid.hasMatch(playerId)) return null;
+      if (playerId.isNotEmpty && !_uuid.hasMatch(playerId)) return null;
+      if (!_uuid.hasMatch(operationId)) return null;
+      return PendingLinkRecovery(
+        provider: provider,
+        playerId: playerId,
+        kind: PendingAuthRecoveryKind.unifiedContinue,
+        operationId: operationId,
+      );
+    }
+    if (parts.length == 4 && parts[0] == 'awaiting') {
+      final provider = parts[1];
+      final playerId = parts[2];
+      final operationId = parts[3];
+      if (provider != 'apple' && provider != 'google') return null;
+      if (!_uuid.hasMatch(playerId) || !_uuid.hasMatch(operationId)) {
+        return null;
+      }
       return PendingLinkRecovery(
         provider: provider,
         playerId: playerId,
         kind: PendingAuthRecoveryKind.unifiedAwaitingSwitch,
+        operationId: operationId,
       );
     }
-    if (parts.length == 3 && parts[0] == 'confirm') {
+    if (parts.length == 4 && parts[0] == 'confirm') {
       final provider = parts[1];
       final playerId = parts[2];
+      final operationId = parts[3];
       if (provider != 'apple' && provider != 'google') return null;
-      if (!_uuid.hasMatch(playerId)) return null;
+      if (!_uuid.hasMatch(playerId) || !_uuid.hasMatch(operationId)) {
+        return null;
+      }
       return PendingLinkRecovery(
         provider: provider,
         playerId: playerId,
         kind: PendingAuthRecoveryKind.unifiedConfirm,
+        operationId: operationId,
       );
     }
     return null;
@@ -913,6 +921,7 @@ final class GuestAuthClient {
   /// Durable marker before the first mutating unified continue request.
   Future<void> markPendingUnifiedContinue({
     required String provider,
+    required String operationId,
     String? sourcePlayerId,
   }) {
     return _persistPendingRecovery(
@@ -920,6 +929,7 @@ final class GuestAuthClient {
         provider: provider,
         playerId: sourcePlayerId ?? '',
         kind: PendingAuthRecoveryKind.unifiedContinue,
+        operationId: operationId,
       ),
     );
   }
@@ -929,12 +939,14 @@ final class GuestAuthClient {
   Future<void> markPendingUnifiedAwaitingSwitch({
     required String provider,
     required String targetPlayerId,
+    required String operationId,
   }) {
     return _persistPendingRecovery(
       PendingLinkRecovery(
         provider: provider,
         playerId: targetPlayerId,
         kind: PendingAuthRecoveryKind.unifiedAwaitingSwitch,
+        operationId: operationId,
       ),
     );
   }
@@ -943,12 +955,14 @@ final class GuestAuthClient {
   Future<void> markPendingUnifiedConfirm({
     required String provider,
     required String targetPlayerId,
+    required String operationId,
   }) {
     return _persistPendingRecovery(
       PendingLinkRecovery(
         provider: provider,
         playerId: targetPlayerId,
         kind: PendingAuthRecoveryKind.unifiedConfirm,
+        operationId: operationId,
       ),
     );
   }

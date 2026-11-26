@@ -1,10 +1,22 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
+
+String _newAuthOperationId() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  String hex(int value) => value.toRadixString(16).padLeft(2, '0');
+  final b = bytes.map(hex).join();
+  return '${b.substring(0, 8)}-${b.substring(8, 12)}-${b.substring(12, 16)}-'
+      '${b.substring(16, 20)}-${b.substring(20, 32)}';
+}
 
 /// Result of a provider authentication attempt. Never silently switches accounts.
 enum AuthFlowOutcome {
@@ -259,9 +271,12 @@ final class AuthCoordinator {
         );
       }
       _breadcrumb('provider_sign_in_completed');
-      // Durable intent before mutating continue — lost response must not mint guest.
+      // Durable operation binding before mutating continue — lost response recovery
+      // must prove this exact operation, not a historical provider receipt.
+      final operationId = _newAuthOperationId();
       await session.markPendingUnifiedContinue(
         provider: provider.name,
+        operationId: operationId,
         sourcePlayerId: access.isGuest ? access.playerId : null,
       );
       try {
@@ -270,6 +285,7 @@ final class AuthCoordinator {
           idToken: assertion.idToken,
           nonce: challenge.nonce,
           binding: binding,
+          operationId: operationId,
           localProgressProtected: localProgressProtected,
           guestBearer: guestBearer,
         );
@@ -318,6 +334,7 @@ final class AuthCoordinator {
           await session.markPendingUnifiedAwaitingSwitch(
             provider: provider.name,
             targetPlayerId: target,
+            operationId: operationId,
           );
           _breadcrumb('auth_switch_confirmation_required');
           return AuthFlowResult(
@@ -413,11 +430,13 @@ final class AuthCoordinator {
       final awaitingMatches = pending != null &&
           pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch &&
           pending.provider == provider.name &&
-          pending.playerId == targetPlayerId;
+          pending.playerId == targetPlayerId &&
+          pending.hasOperationBinding;
       final confirmMatches = pending != null &&
           pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
           pending.provider == provider.name &&
-          pending.playerId == targetPlayerId;
+          pending.playerId == targetPlayerId &&
+          pending.hasOperationBinding;
       if (!awaitingMatches && !confirmMatches) {
         _breadcrumb('auth_switch_confirm_missing_pending',
             errorCode: 'CONFIRM_INTENT_MISSING');
@@ -426,15 +445,18 @@ final class AuthCoordinator {
           errorCode: 'CONFIRM_INTENT_MISSING',
         );
       }
+      final operationId = pending!.operationId;
       // Persist approved confirm intent only after explicit user approval.
       if (awaitingMatches) {
         await session.markPendingUnifiedConfirm(
           provider: provider.name,
           targetPlayerId: targetPlayerId,
+          operationId: operationId,
         );
       }
       final bundle = await providers.confirmContinue(
         continuationToken: continuationToken,
+        operationId: operationId,
       );
       try {
         final access = await session.replaceWithVerifiedBundle(
@@ -802,12 +824,31 @@ final class AuthCoordinator {
       );
     }
 
-    // Receipt-backed recoverLinked only — never recover by target hint alone.
+    if (!pending.hasOperationBinding) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: 'RECOVERY_OPERATION_INCOMPLETE',
+        recoveryProvider: provider,
+        expectedPlayerId: pending.playerId.isEmpty ? null : pending.playerId,
+      );
+    }
+    // Exact operation receipt + verified provider — never operation id alone.
     final bundle = await providers.recoverLinked(
       provider: provider,
       idToken: assertion.idToken,
       nonce: challenge.nonce,
       binding: binding,
+      operationId: pending.operationId,
+      sourceGuestPlayerId:
+          pending.kind == PendingAuthRecoveryKind.unifiedContinue &&
+                  pending.playerId.isNotEmpty
+              ? pending.playerId
+              : null,
+      expectedTargetPlayerId:
+          pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+                  pending.playerId.isNotEmpty
+              ? pending.playerId
+              : null,
     );
     if (pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
         pending.playerId.isNotEmpty &&

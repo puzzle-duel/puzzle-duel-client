@@ -196,6 +196,9 @@ final class _FakeProviders implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
   }) async {
     recoverCalls++;
     if (recoverError != null) throw recoverError!;
@@ -219,6 +222,7 @@ final class _FakeProviders implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
     bool localProgressProtected = false,
     String? guestBearer,
   }) async {
@@ -233,6 +237,7 @@ final class _FakeProviders implements ProviderAuthPort {
   @override
   Future<ProviderCredentialBundle> confirmContinue({
     required String continuationToken,
+    required String operationId,
   }) async {
     throw const ProviderAuthException('NOT_USED');
   }

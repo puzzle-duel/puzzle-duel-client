@@ -94,13 +94,16 @@ abstract interface class ProviderAuthPort {
     required String expectedPlayerId,
   });
 
-  /// Create-forbidden recovery resolving the linked player from provider evidence.
-  /// Used for unified continue lost-response; never filters by source guest id.
+  /// Create-forbidden recovery resolving a committed operation receipt.
+  /// Requires [operationId] plus verified provider identity — never operation id alone.
   Future<ProviderCredentialBundle> recoverLinked({
     required AuthProviderKind provider,
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
   });
 
   Future<ProviderCredentialBundle> continueWithProvider({
@@ -108,12 +111,14 @@ abstract interface class ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
     bool localProgressProtected = false,
     String? guestBearer,
   });
 
   Future<ProviderCredentialBundle> confirmContinue({
     required String continuationToken,
+    required String operationId,
   });
 
   Future<void> logout({
@@ -319,16 +324,27 @@ final class ProviderAuthClient implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
   }) async {
+    final body = <String, Object?>{
+      'provider': provider.name,
+      'idToken': idToken,
+      'nonce': nonce,
+      'binding': binding,
+      'recoveryKind': 'provider_linked',
+      'operationId': operationId,
+    };
+    if (sourceGuestPlayerId != null && sourceGuestPlayerId.isNotEmpty) {
+      body['sourceGuestPlayerId'] = sourceGuestPlayerId;
+    }
+    if (expectedTargetPlayerId != null && expectedTargetPlayerId.isNotEmpty) {
+      body['expectedTargetPlayerId'] = expectedTargetPlayerId;
+    }
     final result = await _post(
       '/v1/auth/providers/recover',
-      {
-        'provider': provider.name,
-        'idToken': idToken,
-        'nonce': nonce,
-        'binding': binding,
-        'recoveryKind': 'provider_linked',
-      },
+      body,
       operation: 'provider_recover_linked_requested',
     );
     if (result.status != 201) {
@@ -348,6 +364,7 @@ final class ProviderAuthClient implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
     bool localProgressProtected = false,
     String? guestBearer,
   }) async {
@@ -356,6 +373,7 @@ final class ProviderAuthClient implements ProviderAuthPort {
       'idToken': idToken,
       'nonce': nonce,
       'binding': binding,
+      'operationId': operationId,
     };
     if (localProgressProtected) {
       body['localProgressProtected'] = true;
@@ -399,13 +417,17 @@ final class ProviderAuthClient implements ProviderAuthPort {
   @override
   Future<ProviderCredentialBundle> confirmContinue({
     required String continuationToken,
+    required String operationId,
   }) async {
-    if (continuationToken.isEmpty) {
+    if (continuationToken.isEmpty || operationId.isEmpty) {
       throw const ProviderAuthException('INVALID_REQUEST');
     }
     final result = await _post(
       '/v1/auth/providers/continue/confirm',
-      {'continuationToken': continuationToken},
+      {
+        'continuationToken': continuationToken,
+        'operationId': operationId,
+      },
       operation: 'provider_continue_confirm_requested',
     );
     if (result.status != 201) {

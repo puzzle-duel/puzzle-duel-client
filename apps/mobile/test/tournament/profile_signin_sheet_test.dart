@@ -104,6 +104,7 @@ final class _StubProviders implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
     bool localProgressProtected = false,
     String? guestBearer,
   }) async {
@@ -113,6 +114,7 @@ final class _StubProviders implements ProviderAuthPort {
   @override
   Future<ProviderCredentialBundle> confirmContinue({
     required String continuationToken,
+    required String operationId,
   }) async {
     throw const ProviderAuthException('NOT_USED');
   }
@@ -154,6 +156,9 @@ final class _StubProviders implements ProviderAuthPort {
     required String idToken,
     required String nonce,
     required String binding,
+    required String operationId,
+    String? sourceGuestPlayerId,
+    String? expectedTargetPlayerId,
   }) async {
     throw const ProviderAuthException('NOT_USED');
   }
