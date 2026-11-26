@@ -32,6 +32,15 @@ final class FakeGuestStore implements GuestCredentialStore {
   }
   @override
   Future<void> clearPendingLinkProvider() async { pendingLink = null; }
+  String? identityBinding;
+  @override
+  Future<String?> readIdentityBinding() async => identityBinding;
+  @override
+  Future<void> writeIdentityBinding(String encoded) async {
+    identityBinding = encoded;
+  }
+  @override
+  Future<void> clearIdentityBinding() async { identityBinding = null; }
 }
 
 void main() {

@@ -19,6 +19,7 @@ import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
@@ -139,6 +140,7 @@ final class TournamentController extends ChangeNotifier {
     GameSfx? sfx,
     LocalSettings? settings,
     this.sessionAuth,
+    GuestSessionRecovery? initialSessionRecovery,
     this._reduceMotion,
   }) : api =
            api ??
@@ -153,6 +155,9 @@ final class TournamentController extends ChangeNotifier {
        _kv = DirectoryKvStore(stateDirectory),
        _stateFile = File('${stateDirectory.path}/pzd-uat-session.json') {
     session.addListener(_onSessionResolution);
+    if (initialSessionRecovery != null) {
+      _applySessionRecovery(initialSessionRecovery);
+    }
   }
 
   final UatConfig config;
@@ -252,6 +257,15 @@ final class TournamentController extends ChangeNotifier {
   /// Guest must complete Apple/Google verification before claim (PZD-27).
   bool rankedAuthRequired = false;
 
+  /// Refresh family revoked/expired or transient auth outage: Practice open.
+  bool sessionRecoveryRequired = false;
+
+  /// Single mutable recovery snapshot (binding / pending link / requestId).
+  GuestSessionRecovery? activeSessionRecovery;
+
+  /// Compatibility alias for Settings / older call sites.
+  GuestSessionRecovery? get sessionRecovery => activeSessionRecovery;
+
   /// Set when the user explicitly requests ranked entry; consumed once after
   /// successful verification so claim is not auto-replayed.
   bool _pendingRankedEntryOnce = false;
@@ -336,6 +350,21 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _refreshTournamentBody({bool preserveRoute = false}) async {
     final epoch = ++_tournamentEpoch;
     InteractionPerf.mark('tournament.refresh.start');
+    if (sessionRecoveryRequired) {
+      final recovered = await _tryClearTransientSessionRecovery();
+      if (!recovered) {
+        rankedWriterLocked = true;
+        busy = false;
+        booting = false;
+        errorCode = null;
+        tournamentNoticeCode =
+            activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+        tournamentSync = TournamentSyncState.degraded;
+        if (!preserveRoute) route = const TournamentRoute();
+        notifyListeners();
+        return;
+      }
+    }
     tournamentSync = TournamentSyncState.syncing;
     tournamentNoticeCode = null;
     errorCode = null;
@@ -364,6 +393,21 @@ final class TournamentController extends ChangeNotifier {
     final activeEpoch = epoch ?? _tournamentEpoch;
     busy = true;
     notifyListeners();
+    if (sessionRecoveryRequired) {
+      final recovered = await _tryClearTransientSessionRecovery();
+      if (!recovered) {
+        rankedWriterLocked = true;
+        busy = false;
+        booting = false;
+        errorCode = null;
+        tournamentNoticeCode =
+            activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+        tournamentSync = TournamentSyncState.degraded;
+        if (presentHome) route = const TournamentRoute();
+        notifyListeners();
+        return;
+      }
+    }
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
@@ -386,6 +430,11 @@ final class TournamentController extends ChangeNotifier {
         }
         rankedAuthRequired = false;
       } on GuestAuthException catch (error) {
+        if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+          await enterSessionRecovery(error.code);
+          if (presentHome) route = const TournamentRoute();
+          return;
+        }
         _fail(error.code, degradedOnFailure: true);
         return;
       }
@@ -521,6 +570,26 @@ final class TournamentController extends ChangeNotifier {
 
   /// Home primary action when ranked auth may be required (PZD-27).
   Future<void> requestRankedEntry() async {
+    if (sessionRecoveryRequired) {
+      if (activeSessionRecovery?.isTransientNetwork == true) {
+        final recovered = await _tryClearTransientSessionRecovery();
+        if (recovered) {
+          // Fall through so guest/verified + writer gates still apply.
+        } else {
+          tournamentNoticeCode =
+              activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+          notifyListeners();
+          onRequestRankedAuth?.call();
+          return;
+        }
+      } else {
+        tournamentNoticeCode =
+            activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+        notifyListeners();
+        onRequestRankedAuth?.call();
+        return;
+      }
+    }
     if (sessionAuth == null) {
       await resume();
       return;
@@ -530,6 +599,11 @@ final class TournamentController extends ChangeNotifier {
       access = await sessionAuth!.authenticate();
       api.bearer = UatApi.normalizeBearer(access.accessToken);
     } on GuestAuthException catch (error) {
+      if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+        await enterSessionRecovery(error.code);
+        onRequestRankedAuth?.call();
+        return;
+      }
       _fail(error.code, degradedOnFailure: true);
       return;
     }
@@ -548,6 +622,8 @@ final class TournamentController extends ChangeNotifier {
   /// Applies post-logout guest credentials without starting a claim.
   void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
     this.rankedAuthRequired = rankedAuthRequired;
+    activeSessionRecovery = null;
+    sessionRecoveryRequired = false;
     if (rankedAuthRequired) {
       tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
@@ -555,11 +631,108 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Captures vault binding / pending link / last request id for recovery UX.
+  Future<void> enterSessionRecovery(String code) async {
+    if (sessionAuth != null) {
+      _applySessionRecovery(await sessionAuth!.captureSessionRecovery(code));
+    } else {
+      _applySessionRecovery(GuestSessionRecovery(code: code));
+    }
+  }
+
+  void _applySessionRecovery(GuestSessionRecovery recovery) {
+    activeSessionRecovery = recovery;
+    sessionRecoveryRequired = true;
+    rankedWriterLocked = true;
+    busy = false;
+    booting = false;
+    errorCode = null;
+    tournamentNoticeCode = recovery.code;
+    tournamentSync = TournamentSyncState.degraded;
+    notifyListeners();
+  }
+
+  /// Transient network only: retry refresh without minting a guest.
+  Future<bool> _tryClearTransientSessionRecovery() async {
+    final active = activeSessionRecovery;
+    final auth = sessionAuth;
+    if (active == null || auth == null || !active.isTransientNetwork) {
+      return false;
+    }
+    final vault = await auth.credentials.readRefreshToken();
+    if (vault == null || vault.isEmpty) {
+      // No existing session to restore; never mint a replacement guest here.
+      return false;
+    }
+    try {
+      final access = await auth.authenticate(allowGuestCreate: false);
+      clearSessionRecoveryGate(bearer: access.accessToken, access: access);
+      return true;
+    } on GuestAuthException catch (error) {
+      if (GuestSessionRecovery.isTransientNetworkCode(error.code) ||
+          GuestSessionRecovery.isHardRecoveryCode(error.code)) {
+        await enterSessionRecovery(error.code);
+      }
+      return false;
+    }
+  }
+
+  /// Clears recovery gate after identity-preserving recover or network retry.
+  ///
+  /// Does not unlock the writer: [rankedWriterLocked] stays until loadDay /
+  /// resume applies server-authoritative writer authorization. Account-type
+  /// gate follows the recovered access token (guest → ranked auth required).
+  void clearSessionRecoveryGate({
+    required String bearer,
+    GuestAccess? access,
+  }) {
+    api.bearer = UatApi.normalizeBearer(bearer);
+    activeSessionRecovery = null;
+    sessionRecoveryRequired = false;
+    final resolved = access ?? _guestAccessFromBearer(bearer);
+    if (resolved != null && resolved.isVerified) {
+      rankedAuthRequired = false;
+      tournamentNoticeCode = null;
+    } else if (resolved != null) {
+      rankedAuthRequired = true;
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+    } else if (tournamentNoticeCode != 'RANKED_AUTH_REQUIRED') {
+      tournamentNoticeCode = null;
+    }
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'guest_session_recovery_cleared',
+    )));
+    notifyListeners();
+  }
+
+  GuestAccess? _guestAccessFromBearer(String bearer) {
+    final trimmed = bearer.trim();
+    if (trimmed.isEmpty) return null;
+    final token = trimmed.length >= 7 &&
+            trimmed.substring(0, 7).toLowerCase() == 'bearer '
+        ? trimmed.substring(7).trim()
+        : trimmed;
+    if (token.isEmpty) return null;
+    try {
+      return GuestAccess.parse(
+        accessToken: token,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// After successful provider link/login: claim at most once, then resume.
   Future<void> completeRankedAuthAndEnter() async {
     final shouldEnter = _pendingRankedEntryOnce;
     _pendingRankedEntryOnce = false;
     rankedAuthRequired = false;
+    activeSessionRecovery = null;
+    sessionRecoveryRequired = false;
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.sessionRestored,
@@ -576,6 +749,10 @@ final class TournamentController extends ChangeNotifier {
           return;
         }
       } on GuestAuthException catch (error) {
+        if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+          await enterSessionRecovery(error.code);
+          return;
+        }
         _fail(error.code, degradedOnFailure: true);
         return;
       }

@@ -1,16 +1,23 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 
 /// Sound and haptics. This does not add gameplay settings.
 final class TournamentSettingsScreen extends StatelessWidget {
-  const TournamentSettingsScreen({super.key, required this.controller});
+  const TournamentSettingsScreen({
+    super.key,
+    required this.controller,
+    this.crashReporter,
+  });
 
   final TournamentController controller;
+  final CrashReporter? crashReporter;
 
   @override
   Widget build(BuildContext context) {
@@ -66,21 +73,18 @@ final class TournamentSettingsScreen extends StatelessWidget {
                       subtitle: const Text('Son güvenli hata kayıtlarını gönder'),
                       onTap: () async {
                         final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          final result = await controller.api.sendDiagnosticReport();
-                          if (!context.mounted) return;
-                          final reportId = result.map['reportId'];
-                          messenger.showSnackBar(SnackBar(
-                            content: Text(result.status == 201 && reportId is String
-                                ? 'Log gönderildi. Rapor: $reportId'
-                                : 'Log gönderilemedi (${result.status}).'),
-                          ));
-                        } catch (_) {
-                          if (!context.mounted) return;
-                          messenger.showSnackBar(const SnackBar(
-                            content: Text('Log gönderilemedi.'),
-                          ));
-                        }
+                        final result = await sendStagingManualDiagnostics(
+                          operation: 'settings_manual_report',
+                          requestId:
+                              controller.activeSessionRecovery?.lastRequestId,
+                          errorCode: controller.tournamentNoticeCode,
+                          crashReporter: crashReporter,
+                          api: controller.api,
+                        );
+                        if (!context.mounted) return;
+                        messenger.showSnackBar(SnackBar(
+                          content: Text(result.userMessage),
+                        ));
                       },
                     ),
                     const SizedBox(height: 12),

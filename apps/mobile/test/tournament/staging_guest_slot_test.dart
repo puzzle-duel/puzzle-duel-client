@@ -15,10 +15,10 @@ void main() {
     final b = StagingGuestCredentialKeys.forSlot(StagingGuestSlot.playerB);
     final old = StagingGuestCredentialKeys.forSlot(StagingGuestSlot.legacy);
     expect({
-      a.refresh, a.rotation, a.pendingLink,
-      b.refresh, b.rotation, b.pendingLink,
-      old.refresh, old.rotation, old.pendingLink,
-    }, hasLength(9));
+      a.refresh, a.rotation, a.pendingLink, a.identityBinding,
+      b.refresh, b.rotation, b.pendingLink, b.identityBinding,
+      old.refresh, old.rotation, old.pendingLink, old.identityBinding,
+    }, hasLength(12));
     expect(a.refresh, 'pzd.staging.guest.player-a.refresh.v1');
     expect(a.rotation, 'pzd.staging.guest.player-a.rotation.v1');
     expect(StagingGuestCredentialKeys.forSlot(StagingGuestSlot.playerA).refresh,

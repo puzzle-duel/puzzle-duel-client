@@ -431,6 +431,108 @@ final class AuthCoordinator {
     }
   }
 
+  /// Create-forbidden provider recovery for a known player_id binding.
+  /// Never calls login (which could mint a new verified account).
+  Future<AuthFlowResult> recoverKnownPlayer({
+    required AuthProviderKind provider,
+    required String expectedPlayerId,
+  }) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    if (!RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    ).hasMatch(expectedPlayerId)) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'RECOVERY_IDENTITY_MISSING',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_known_player_recovery_started_${provider.name}');
+      final challenge = await providers.challenge(
+        provider: provider,
+        purpose: ProviderAuthPurpose.login,
+      );
+      final binding = challenge.binding;
+      if (binding == null || binding.isEmpty) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: 'INVALID_PROVIDER_CHALLENGE',
+          recoveryProvider: provider,
+          expectedPlayerId: expectedPlayerId,
+        );
+      }
+      final assertion = await _nativeSignIn(provider, challenge.nonce);
+      if (assertion == null) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.cancelled,
+          errorCode: 'PROVIDER_SIGN_IN_CANCELLED',
+          recoveryProvider: provider,
+          expectedPlayerId: expectedPlayerId,
+        );
+      }
+      final bundle = await providers.recover(
+        provider: provider,
+        idToken: assertion.idToken,
+        nonce: challenge.nonce,
+        binding: binding,
+        expectedPlayerId: expectedPlayerId,
+      );
+      if (bundle.playerId != expectedPlayerId) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.recoveryRequired,
+          errorCode: 'RECOVERY_IDENTITY_MISMATCH',
+          recoveryProvider: provider,
+          expectedPlayerId: expectedPlayerId,
+        );
+      }
+      final access = await session.replaceWithVerifiedBundle(
+        accessToken: bundle.accessToken,
+        refreshToken: bundle.refreshToken,
+        expiresAt: bundle.expiresAt,
+      );
+      await session.clearPendingLinkProvider();
+      _breadcrumb('auth_known_player_recovery_succeeded');
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.loggedIn,
+        access: access,
+      );
+    } on ProviderSignInException catch (error) {
+      final cancelled =
+          error.cancelReason == ProviderSignInCancelReason.userCancelled;
+      return AuthFlowResult(
+        outcome:
+            cancelled ? AuthFlowOutcome.cancelled : AuthFlowOutcome.failed,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: expectedPlayerId,
+      );
+    } on GuestAuthException catch (error) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: expectedPlayerId,
+      );
+    } on ProviderAuthException catch (error) {
+      return AuthFlowResult(
+        outcome: error.code == 'RECOVERY_NOT_LINKED'
+            ? AuthFlowOutcome.failed
+            : AuthFlowOutcome.recoveryRequired,
+        errorCode: error.code,
+        recoveryProvider: provider,
+        expectedPlayerId: expectedPlayerId,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
   /// After restart: if pending link exists and guest refresh fails, surface
   /// recovery without minting a new guest player.
   Future<AuthFlowResult?> consumePendingLinkRecoveryIfNeeded() async {

@@ -260,6 +260,24 @@ final class TournamentCopy {
     'Apple or Google verification is required before official tournament play. Practice remains free.',
     'Resmi turnuva öncesi Apple veya Google doğrulaması gerekir. Pratik ücretsiz kalır.',
   );
+  String get sessionRecoveryRequired => pick(
+    'Your tournament session needs recovery. Practice stays available. Ranked play is paused until the same account is restored.',
+    'Turnuva oturumunun kurtarılması gerekiyor. Pratik açık kalır. Aynı hesap geri gelene kadar sıralı oyun durur.',
+  );
+  String get restoreSession => pick('Restore session', 'Oturumu kurtar');
+  String get sessionRecoveryPureGuest => pick(
+    'This device still holds the previous guest credentials, but the server refresh family was revoked. Practice remains available. Restoring ranked play for a pure guest requires owner-approved same-player recovery — do not create a new guest.',
+    'Cihazda önceki misafir kimlik bilgileri duruyor; sunucudaki refresh ailesi iptal edilmiş. Pratik açık. Saf misafir için sıralı oyunu geri getirmek owner onaylı same-player kurtarma ister — yeni misafir oluşturma.',
+  );
+  String get sessionRecoveryTransient => pick(
+    'Tournament connection is temporarily unavailable. Practice stays open. Retry when the network returns — a new guest account will not be created.',
+    'Turnuva bağlantısı geçici olarak yok. Pratik açık kalır. Ağ gelince yeniden dene — yeni misafir hesap oluşturulmaz.',
+  );
+  String get retryConnection => pick('Retry connection', 'Bağlantıyı yeniden dene');
+  String get sendDiagnosticsRecovery => pick(
+    'Send diagnostics',
+    'Log gönder',
+  );
   String get accountStatusGuest => pick('Guest account', 'Misafir hesap');
   String get accountStatusVerified =>
       pick('Verified account', 'Doğrulanmış hesap');
@@ -451,6 +469,15 @@ final class TournamentCopy {
       'OFFLINE' => offline,
       'UNAUTHENTICATED' => unauthorized,
       'RANKED_AUTH_REQUIRED' => rankedAuthRequired,
+      'GUEST_RECOVERY_REQUIRED' ||
+      'REFRESH_EXPIRED' ||
+      'REFRESH_REPLAY' ||
+      'INVALID_REFRESH' ||
+      'PROVIDER_LINK_RECOVERY_apple' ||
+      'PROVIDER_LINK_RECOVERY_google' =>
+        sessionRecoveryRequired,
+      'REFRESH_UNAVAILABLE' || 'AUTH_NETWORK_UNAVAILABLE' =>
+        sessionRecoveryTransient,
       'WRITER_NOT_AUTHORIZED' => writerBlocked,
       'RATE_LIMITED' => pick(
         'Too many tournament requests. Please try again shortly.',
