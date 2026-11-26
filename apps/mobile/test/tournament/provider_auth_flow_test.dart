@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
 
@@ -219,8 +220,10 @@ void main() {
       expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
     ));
     final genBefore = session.credentialGeneration;
+    const verifiedFid = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
     final verified = await session.replaceWithVerifiedBundle(
-      accessToken: _jwt(sub: guestId, accountType: 'verified', fid: 'v1'),
+      accessToken:
+          _jwt(sub: guestId, accountType: 'verified', fid: verifiedFid),
       refreshToken: 'verified-refresh',
       expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
     );
@@ -228,6 +231,10 @@ void main() {
     expect(verified.playerId, guestId);
     expect(store.token, 'verified-refresh');
     expect(session.credentialGeneration, greaterThan(genBefore));
+    final binding = GuestIdentityBinding.tryParse(store.identityBinding);
+    expect(binding?.accountType, AccountType.verified);
+    expect(binding?.playerId, guestId);
+    expect(binding?.familyId, verifiedFid);
   });
 
   test('stale refresh generation fails closed before overwrite', () async {
@@ -602,7 +609,7 @@ void main() {
         isA<GuestAuthException>().having(
           (e) => e.code,
           'code',
-          'PROVIDER_LINK_RECOVERY_google',
+          'PROVIDER_LINK_RECOVERY_GOOGLE',
         ),
       ),
     );

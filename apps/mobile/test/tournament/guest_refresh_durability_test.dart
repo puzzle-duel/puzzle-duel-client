@@ -7,6 +7,11 @@ final class FakeGuestStore implements GuestCredentialStore {
   String? pendingLink;
   bool failReadback = false;
   bool failWrite = false;
+  bool failBindingWrite = false;
+  bool failClearRotation = false;
+  /// After the first successful token write, further writes (restore) fail.
+  bool failRestoreAfterPartial = false;
+  var _successfulTokenWrites = 0;
   Duration writeDelay = Duration.zero;
   @override
   Future<String?> readRefreshToken() async => failReadback ? 'old-token' : token;
@@ -14,7 +19,11 @@ final class FakeGuestStore implements GuestCredentialStore {
   Future<void> writeRefreshToken(String value) async {
     if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
     if (failWrite) throw StateError('storage denied');
+    if (failRestoreAfterPartial && _successfulTokenWrites >= 1) {
+      throw StateError('restore denied');
+    }
     token = value;
+    _successfulTokenWrites++;
   }
   @override
   Future<void> clearRefreshToken() async { token = null; }
@@ -23,7 +32,10 @@ final class FakeGuestStore implements GuestCredentialStore {
   @override
   Future<void> writePendingRotationId(String id) async { rotationId = id; }
   @override
-  Future<void> clearPendingRotationId() async { rotationId = null; }
+  Future<void> clearPendingRotationId() async {
+    if (failClearRotation) throw StateError('clear rotation denied');
+    rotationId = null;
+  }
   @override
   Future<String?> readPendingLinkProvider() async => pendingLink;
   @override
@@ -37,6 +49,7 @@ final class FakeGuestStore implements GuestCredentialStore {
   Future<String?> readIdentityBinding() async => identityBinding;
   @override
   Future<void> writeIdentityBinding(String encoded) async {
+    if (failBindingWrite) throw StateError('binding denied');
     identityBinding = encoded;
   }
   @override

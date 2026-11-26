@@ -595,8 +595,14 @@ final class AuthCoordinator {
   }
 
   AuthProviderKind? _recoveryFromCode(String code) {
-    if (code == 'PROVIDER_LINK_RECOVERY_apple') return AuthProviderKind.apple;
-    if (code == 'PROVIDER_LINK_RECOVERY_google') return AuthProviderKind.google;
+    if (code == 'PROVIDER_LINK_RECOVERY_apple' ||
+        code == 'PROVIDER_LINK_RECOVERY_APPLE') {
+      return AuthProviderKind.apple;
+    }
+    if (code == 'PROVIDER_LINK_RECOVERY_google' ||
+        code == 'PROVIDER_LINK_RECOVERY_GOOGLE') {
+      return AuthProviderKind.google;
+    }
     return null;
   }
 

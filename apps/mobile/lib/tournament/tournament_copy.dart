@@ -303,8 +303,11 @@ final class TournamentCopy {
         'ACCOUNT_CONFLICT' => authConflictBody,
         'SECURE_STORE_UNAVAILABLE' ||
         'SECURE_STORE_VERIFY_FAILED' ||
+        'SECURE_STORE_RECOVERY_FAILED' ||
         'PROVIDER_LINK_RECOVERY_apple' ||
         'PROVIDER_LINK_RECOVERY_google' ||
+        'PROVIDER_LINK_RECOVERY_APPLE' ||
+        'PROVIDER_LINK_RECOVERY_GOOGLE' ||
         'STALE_CREDENTIAL_RESPONSE' ||
         'RECOVERY_IDENTITY_MISMATCH' ||
         'RECOVERY_PROVIDER_MISMATCH' ||
@@ -491,7 +494,9 @@ final class TournamentCopy {
       'REFRESH_REPLAY' ||
       'INVALID_REFRESH' ||
       'PROVIDER_LINK_RECOVERY_apple' ||
-      'PROVIDER_LINK_RECOVERY_google' =>
+      'PROVIDER_LINK_RECOVERY_google' ||
+      'PROVIDER_LINK_RECOVERY_APPLE' ||
+      'PROVIDER_LINK_RECOVERY_GOOGLE' =>
         sessionRecoveryRequired,
       'REFRESH_UNAVAILABLE' || 'AUTH_NETWORK_UNAVAILABLE' =>
         sessionRecoveryTransient,
