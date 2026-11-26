@@ -40,12 +40,42 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     status: BadgeCollectionStatus.loading,
   );
   var _loadingBadges = true;
+  var _accountStateEpoch = -1;
 
   @override
   void initState() {
     super.initState();
+    _accountStateEpoch = widget.controller.accountStateEpoch;
+    widget.controller.addListener(_onControllerChanged);
     _reloadLocal();
     _loadBadges();
+  }
+
+  @override
+  void didUpdateWidget(covariant PlayerProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+      _accountStateEpoch = widget.controller.accountStateEpoch;
+      unawaited(_refresh());
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) return;
+    final epoch = widget.controller.accountStateEpoch;
+    if (epoch != _accountStateEpoch) {
+      _accountStateEpoch = epoch;
+      unawaited(_refresh());
+    }
+    setState(() {});
   }
 
   Future<void> _reloadLocal() async {
@@ -175,8 +205,10 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   verified: widget.controller.sessionAuth?.cachedAccess
                           ?.isVerified ==
                       true,
+                  busy: widget.controller.authUiBusy,
                   copy: copy,
-                  onSignIn: widget.controller.onRequestRankedAuth == null
+                  onSignIn: widget.controller.onRequestRankedAuth == null ||
+                          widget.controller.authUiBusy
                       ? null
                       : () {
                           unawaited(DiagnosticRuntime.logger.log(LogEvent(
@@ -186,7 +218,10 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                           )));
                           widget.controller.onRequestRankedAuth!();
                         },
-                  onSignOut: widget.controller.onRequestSignOut,
+                  onSignOut: widget.controller.onRequestSignOut == null ||
+                          widget.controller.authUiBusy
+                      ? null
+                      : widget.controller.onRequestSignOut,
                 ),
                 const SizedBox(height: 20),
                 Text(
@@ -394,21 +429,25 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
 final class _AccountStatusCard extends StatelessWidget {
   const _AccountStatusCard({
     required this.verified,
+    required this.busy,
     required this.copy,
     this.onSignIn,
     this.onSignOut,
   });
 
   final bool verified;
+  final bool busy;
   final TournamentCopy copy;
   final VoidCallback? onSignIn;
   final VoidCallback? onSignOut;
 
   @override
   Widget build(BuildContext context) {
+    final statusLabel =
+        verified ? copy.accountStatusVerified : copy.accountStatusGuest;
     return Semantics(
       container: true,
-      label: verified ? copy.accountStatusVerified : copy.accountStatusGuest,
+      label: statusLabel,
       child: Container(
         key: const Key('profile-account-status'),
         padding: const EdgeInsets.all(GameTokens.spaceMd),
@@ -433,9 +472,12 @@ final class _AccountStatusCard extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    verified
-                        ? copy.accountStatusVerified
-                        : copy.accountStatusGuest,
+                    statusLabel,
+                    key: Key(
+                      verified
+                          ? 'profile-account-verified'
+                          : 'profile-account-guest',
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -444,6 +486,13 @@ final class _AccountStatusCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (busy)
+                  const SizedBox(
+                    key: Key('profile-auth-busy'),
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
               ],
             ),
             if (!verified && onSignIn != null) ...[
@@ -452,7 +501,7 @@ final class _AccountStatusCard extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   key: const Key('profile-sign-in'),
-                  onPressed: onSignIn,
+                  onPressed: busy ? null : onSignIn,
                   child: Text(
                     copy.signInToPlay,
                     maxLines: 2,
@@ -467,7 +516,7 @@ final class _AccountStatusCard extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   key: const Key('profile-sign-out'),
-                  onPressed: onSignOut,
+                  onPressed: busy ? null : onSignOut,
                   child: Text(copy.signOut),
                 ),
               ),
