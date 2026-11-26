@@ -354,7 +354,9 @@ final class GuestAuthClient {
   /// boolean flag (external callers during an await would race).
   Future<void> _mutationChain = Future<void>.value();
 
-  GuestAccess? get cachedAccess => _current;
+  /// Null while vault is unsafe or reconcile is outstanding — never bypass.
+  GuestAccess? get cachedAccess =>
+      (_vaultCorrupt || !_vaultReconciled) ? null : _current;
   int get credentialGeneration => _credentialGeneration;
   /// Last guest-auth HTTP `x-request-id` (32 hex). Never a token or player proof.
   String? get lastAuthRequestId => _lastAuthRequestId;
@@ -364,6 +366,17 @@ final class GuestAuthClient {
   @visibleForTesting
   void debugSeedAccess(GuestAccess access) {
     _current = access;
+    _vaultReconciled = true;
+    _vaultCorrupt = false;
+  }
+
+  void _invalidateVaultSession({required bool unsafe}) {
+    _vaultReconciled = false;
+    _current = null;
+    _pending = null;
+    if (unsafe) {
+      _vaultCorrupt = true;
+    }
   }
 
   /// Test-only auth HTTP transport. Production always uses HTTPS [HttpClient].
@@ -445,14 +458,12 @@ final class GuestAuthClient {
           _breadcrumb(LogCode.sessionRestored, 'guest_vault_reconciled');
         }
       } on GuestAuthException catch (error) {
-        _vaultCorrupt = true;
-        _vaultReconciled = true;
+        _invalidateVaultSession(unsafe: true);
         _breadcrumb(LogCode.sessionRestoreFailed, 'guest_vault_reconcile_failed',
             errorCode: error.code);
-        rethrow;
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
       } catch (_) {
-        _vaultCorrupt = true;
-        _vaultReconciled = true;
+        _invalidateVaultSession(unsafe: true);
         _breadcrumb(LogCode.sessionRestoreFailed, 'guest_vault_reconcile_failed',
             errorCode: 'SECURE_STORE_RECOVERY_FAILED');
         throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
@@ -503,6 +514,7 @@ final class GuestAuthClient {
       final oldToken = await credentials.readRefreshToken();
       final oldBindingRaw = await credentials.readIdentityBinding();
       final oldRotation = await credentials.readPendingRotationId();
+      final oldPendingLink = await credentials.readPendingLinkProvider();
       final binding = GuestIdentityBinding(
         playerId: access.playerId,
         familyId: access.familyId,
@@ -518,19 +530,16 @@ final class GuestAuthClient {
           ),
         );
       } catch (error) {
-        final code = error is GuestAuthException
-            ? error.code
-            : 'SECURE_STORE_UNAVAILABLE';
         _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_failed',
-            errorCode: code);
-        await _restoreVaultSnapshot(
+            errorCode: error is GuestAuthException
+                ? error.code
+                : 'SECURE_STORE_RECOVERY_FAILED');
+        await _rollbackVaultOrMarkUnsafe(
           token: oldToken,
           binding: oldBindingRaw,
           rotation: oldRotation,
+          pendingLink: oldPendingLink,
         );
-        await credentials.clearVaultJournal();
-        if (error is GuestAuthException) rethrow;
-        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
       }
       if (generation != _credentialGeneration) {
         _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_stale',
@@ -572,6 +581,7 @@ final class GuestAuthClient {
       final oldToken = await credentials.readRefreshToken();
       final oldBindingRaw = await credentials.readIdentityBinding();
       final oldRotation = await credentials.readPendingRotationId();
+      final oldPendingLink = await credentials.readPendingLinkProvider();
 
       final generation = ++_credentialGeneration;
       _pending = null;
@@ -626,19 +636,16 @@ final class GuestAuthClient {
           ),
         );
       } catch (error) {
-        final code = error is GuestAuthException
-            ? error.code
-            : 'SECURE_STORE_UNAVAILABLE';
         _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_vault_failed',
-            errorCode: code);
-        await _restoreVaultSnapshot(
+            errorCode: error is GuestAuthException
+                ? error.code
+                : 'SECURE_STORE_RECOVERY_FAILED');
+        await _rollbackVaultOrMarkUnsafe(
           token: oldToken,
           binding: oldBindingRaw,
           rotation: oldRotation,
+          pendingLink: oldPendingLink,
         );
-        await credentials.clearVaultJournal();
-        if (error is GuestAuthException) rethrow;
-        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
       }
       if (generation != _credentialGeneration) {
         _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_stale',
@@ -715,11 +722,14 @@ final class GuestAuthClient {
 
   /// Restores a prior vault snapshot after a failed replacement. Skips writes
   /// that already match the snapshot (partial-commit / first-step failure).
-  /// Throws [SECURE_STORE_RECOVERY_FAILED] if a needed restore cannot verify.
+  ///
+  /// Clears the durable journal **only** after the restored live keys verify.
+  /// Never clears the journal in a failure path — restart reconcile needs it.
   Future<void> _restoreVaultSnapshot({
     required String? token,
     required String? binding,
     required String? rotation,
+    required String? pendingLink,
   }) async {
     try {
       if (token != null && token.isNotEmpty) {
@@ -755,18 +765,52 @@ final class GuestAuthClient {
           throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
         }
       }
+      final currentPending = await credentials.readPendingLinkProvider();
+      if (pendingLink != null && pendingLink.isNotEmpty) {
+        if (currentPending != pendingLink) {
+          await credentials.writePendingLinkProvider(pendingLink);
+          if (await credentials.readPendingLinkProvider() != pendingLink) {
+            throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+          }
+        }
+      } else if (currentPending != null) {
+        await credentials.clearPendingLinkProvider();
+        if (await credentials.readPendingLinkProvider() != null) {
+          throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+        }
+      }
+      await credentials.clearVaultJournal();
+      if (await credentials.readVaultJournal() != null) {
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+      }
     } on GuestAuthException {
       rethrow;
     } catch (_) {
       throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
-    } finally {
-      try {
-        await credentials.clearVaultJournal();
-      } catch (_) {
-        // Best-effort journal clear after in-process rollback; restart
-        // reconcile remains the crash-safety path.
-      }
     }
+  }
+
+  /// In-process rollback after a failed journalled commit. On rollback failure
+  /// keeps the journal, marks the vault unsafe, and fails closed.
+  Future<void> _rollbackVaultOrMarkUnsafe({
+    required String? token,
+    required String? binding,
+    required String? rotation,
+    required String? pendingLink,
+  }) async {
+    try {
+      await _restoreVaultSnapshot(
+        token: token,
+        binding: binding,
+        rotation: rotation,
+        pendingLink: pendingLink,
+      );
+      _invalidateVaultSession(unsafe: false);
+    } catch (_) {
+      _invalidateVaultSession(unsafe: true);
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
+    throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
   }
 
   Future<void> markPendingLink({
@@ -817,6 +861,8 @@ final class GuestAuthClient {
       _credentialGeneration++;
       _pending = null;
       _current = null;
+      _vaultCorrupt = false;
+      _vaultReconciled = true;
       await credentials.clearVaultJournal();
       await credentials.clearRefreshToken();
       await credentials.clearPendingRotationId();
@@ -940,9 +986,11 @@ final class GuestAuthClient {
           ),
         );
       } catch (_) {
+        // Journal may remain for reconcile; never serve cached access meanwhile.
+        _invalidateVaultSession(unsafe: true);
         _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
-            errorCode: 'SECURE_STORE_UNAVAILABLE');
-        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+            errorCode: 'SECURE_STORE_RECOVERY_FAILED');
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
       }
       if (generation != _credentialGeneration) {
         // Newer commit owns the vault; discard this response without inventing

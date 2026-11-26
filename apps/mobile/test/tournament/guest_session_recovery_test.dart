@@ -1100,13 +1100,14 @@ void main() {
       throwsA(isA<GuestAuthException>().having(
         (e) => e.code,
         'code',
-        'SECURE_STORE_UNAVAILABLE',
+        'SECURE_STORE_RECOVERY_FAILED',
       )),
     );
     expect(store.token, 'q' * 64);
     expect(store.identityBinding,
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest');
     expect(store.rotationId, '0123456789abcdef0123456789abcdef');
+    expect(store.vaultJournal, isNull);
   });
 
   test('explicit new guest rotation-clear failure restores prior vault',
@@ -1147,13 +1148,14 @@ void main() {
       throwsA(isA<GuestAuthException>().having(
         (e) => e.code,
         'code',
-        'SECURE_STORE_UNAVAILABLE',
+        'SECURE_STORE_RECOVERY_FAILED',
       )),
     );
     expect(store.token, 'm' * 64);
     expect(store.identityBinding,
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest');
     expect(store.rotationId, 'fedcba9876543210fedcba9876543210');
+    expect(store.vaultJournal, isNull);
   });
 
   test('explicit new guest restore failure surfaces SECURE_STORE_RECOVERY_FAILED',
@@ -1197,8 +1199,11 @@ void main() {
         'SECURE_STORE_RECOVERY_FAILED',
       )),
     );
-    // Partial commit left new token; restore could not rewind.
+    // Partial commit left new token; restore could not rewind; journal kept.
     expect(store.token, 'j' * 64);
+    expect(store.vaultJournal, isNotNull);
+    expect(auth.vaultCorrupt, isTrue);
+    expect(auth.cachedAccess, isNull);
   });
 
   test('verified binding blocks explicit new guest mint', () async {
@@ -1402,13 +1407,14 @@ void main() {
       throwsA(isA<GuestAuthException>().having(
         (e) => e.code,
         'code',
-        'SECURE_STORE_UNAVAILABLE',
+        'SECURE_STORE_RECOVERY_FAILED',
       )),
     );
     // failWrite prevents overwrite; prior token remains.
     expect(store.token, 's' * 64);
     expect(store.identityBinding,
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest');
+    expect(store.vaultJournal, isNull);
   });
 
   test('pending link blocks explicit new guest mint', () async {

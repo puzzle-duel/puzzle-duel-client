@@ -9,6 +9,7 @@ final class FakeGuestStore implements GuestCredentialStore {
   bool failWrite = false;
   bool failBindingWrite = false;
   bool failClearRotation = false;
+  bool failClearPendingLink = false;
   /// After the first successful token write, further writes (restore) fail.
   bool failRestoreAfterPartial = false;
   var _successfulTokenWrites = 0;
@@ -43,7 +44,10 @@ final class FakeGuestStore implements GuestCredentialStore {
     pendingLink = provider;
   }
   @override
-  Future<void> clearPendingLinkProvider() async { pendingLink = null; }
+  Future<void> clearPendingLinkProvider() async {
+    if (failClearPendingLink) throw StateError('clear pending link denied');
+    pendingLink = null;
+  }
   String? identityBinding;
   @override
   Future<String?> readIdentityBinding() async => identityBinding;

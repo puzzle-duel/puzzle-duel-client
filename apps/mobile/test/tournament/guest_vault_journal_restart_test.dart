@@ -366,6 +366,193 @@ void main() {
     expect(recovery.allowsExplicitNewGuest, isFalse);
   });
 
+  test('partial commit + rollback failure keeps journal for restart reconcile',
+      () async {
+    final store = FakeGuestStore()
+      ..token = oldToken
+      ..identityBinding = oldGuestBinding
+      ..failBindingWrite = true
+      ..failRestoreAfterPartial = true;
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        return (
+          status: 201,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+              familyId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            ),
+            'refreshToken': newToken,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('unexpected $path');
+    };
+    await expectLater(
+      auth.replaceWithExplicitNewGuest(),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'SECURE_STORE_RECOVERY_FAILED',
+      )),
+    );
+    expect(auth.vaultCorrupt, isTrue);
+    expect(auth.cachedAccess, isNull);
+    expect(store.vaultJournal, isNotNull);
+    expect(store.token, newToken);
+    expect(store.identityBinding, oldGuestBinding);
+
+    // Restart: storage healthy again; no catch/rollback — reconcile completes.
+    store
+      ..failBindingWrite = false
+      ..failRestoreAfterPartial = false;
+    final restarted = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    await restarted.reconcilePersistedVault();
+    expect(store.token, newToken);
+    expect(store.identityBinding, newGuestBinding);
+    expect(store.vaultJournal, isNull);
+    expect(restarted.vaultCorrupt, isFalse);
+    expect(
+      GuestIdentityBinding.tryParse(store.identityBinding)?.playerId,
+      'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    );
+  });
+
+  test('partial commit + same-process authenticate cannot bypass reconcile',
+      () async {
+    final store = FakeGuestStore()
+      ..token = oldToken
+      ..identityBinding = oldGuestBinding
+      ..failBindingWrite = true
+      ..failRestoreAfterPartial = true;
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(
+        playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        familyId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    expect(auth.cachedAccess, isNotNull);
+
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        return (
+          status: 201,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+              familyId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            ),
+            'refreshToken': newToken,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('must not network while vault unsafe before reconcile');
+    };
+    await expectLater(
+      auth.replaceWithExplicitNewGuest(),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'SECURE_STORE_RECOVERY_FAILED',
+      )),
+    );
+    expect(auth.cachedAccess, isNull);
+    expect(auth.vaultCorrupt, isTrue);
+
+    store
+      ..failBindingWrite = false
+      ..failRestoreAfterPartial = false;
+    var guestCreates = 0;
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        guestCreates++;
+        fail('must not silent-mint after vault failure');
+      }
+      if (path == '/v1/auth/refresh') {
+        return (
+          status: 200,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+              familyId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            ),
+            'refreshToken': newToken,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('unexpected $path');
+    };
+    // Same process: authenticate must reconcile journal first (no ranked bypass).
+    final access = await auth.authenticate(allowGuestCreate: false);
+    expect(guestCreates, 0);
+    expect(auth.vaultCorrupt, isFalse);
+    expect(store.vaultJournal, isNull);
+    expect(store.identityBinding, newGuestBinding);
+    expect(access.playerId, 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+  });
+
+  test('pending-link cleanup failure restores prior pending marker', () async {
+    const pending = 'google|aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final store = FakeGuestStore()
+      ..token = oldToken
+      ..identityBinding = oldGuestBinding
+      ..pendingLink = pending
+      ..failClearPendingLink = true;
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    await expectLater(
+      auth.replaceWithVerifiedBundle(
+        accessToken: _jwt(
+          playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          familyId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          accountType: 'verified',
+        ),
+        refreshToken: newToken,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'SECURE_STORE_RECOVERY_FAILED',
+      )),
+    );
+    expect(store.token, oldToken);
+    expect(store.identityBinding, oldGuestBinding);
+    expect(store.pendingLink, pending);
+    expect(store.vaultJournal, isNull);
+    expect(auth.cachedAccess, isNull);
+  });
+
   testWidgets('recovery shell Practice remains after vault recovery code',
       (tester) async {
     final directory =
