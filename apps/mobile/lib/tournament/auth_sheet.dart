@@ -189,16 +189,25 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
     );
     if (!mounted) return;
     if (confirmed != true) {
-      Navigator.of(context).pop(
-        const AuthFlowResult(
-          outcome: AuthFlowOutcome.cancelled,
-          errorCode: 'ACCOUNT_SWITCH_CANCELLED',
-        ),
-      );
+      final cancelled = await widget.coordinator.cancelAccountSwitch();
+      if (!mounted) return;
+      Navigator.of(context).pop(cancelled);
+      return;
+    }
+    final targetPlayerId = pending.expectedPlayerId;
+    final provider = pending.recoveryProvider;
+    if (targetPlayerId == null ||
+        targetPlayerId.isEmpty ||
+        provider == null) {
+      setState(() => _errorCode = 'CONFIRM_INTENT_MISSING');
       return;
     }
     await _run(
-      () => widget.coordinator.confirmAccountSwitch(token),
+      () => widget.coordinator.confirmAccountSwitch(
+        token,
+        targetPlayerId: targetPlayerId,
+        provider: provider,
+      ),
       startedOperation: 'auth_switch_confirm_started',
     );
   }

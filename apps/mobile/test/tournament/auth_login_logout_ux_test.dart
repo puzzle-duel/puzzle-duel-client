@@ -371,6 +371,7 @@ void main() {
         'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
         httpStatus: 409,
         continuationToken: 'switch-token-opaque',
+        targetPlayerId: '11111111-1111-1111-1111-111111111111',
       ),
     );
     await _pumpApp(tester, verified: false, providers: providers);
@@ -466,6 +467,97 @@ void main() {
       find.text('9 kez kazanıldı', skipOffstage: false),
       findsNothing,
     );
+  });
+
+  testWidgets('cancel switch clears awaiting marker and keeps guest',
+      (tester) async {
+    final providers = _ScriptedProviders(
+      continueError: const ProviderAuthException(
+        'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+        httpStatus: 409,
+        continuationToken: 'switch-token-opaque',
+        targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      ),
+    );
+    final harness = await _pumpApp(
+      tester,
+      verified: false,
+      providers: providers,
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('profile-sign-in')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('auth-google')));
+    await _settle(tester);
+    expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
+    expect(harness.store.pendingLink, startsWith('awaiting|'));
+
+    await tester.tap(find.byKey(const Key('account-switch-keep-guest')));
+    await _settle(tester);
+    expect(harness.store.pendingLink, isNull);
+    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+    expect(providers.confirmContinueCalls, 0);
+  });
+
+  test('confirm without durable awaiting/confirm intent is rejected', () async {
+    final store = _MemStore()..token = 'g' * 64;
+    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final session = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    session.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final providers = _ScriptedProviders();
+    final coordinator = AuthCoordinator(
+      session: session,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final rejected = await coordinator.confirmAccountSwitch(
+      'switch-token-opaque',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+      provider: AuthProviderKind.google,
+    );
+    expect(rejected.outcome, AuthFlowOutcome.failed);
+    expect(rejected.errorCode, 'CONFIRM_INTENT_MISSING');
+    expect(providers.confirmContinueCalls, 0);
+
+    await session.markPendingUnifiedAwaitingSwitch(
+      provider: 'google',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+    );
+    final cancelled = await coordinator.cancelAccountSwitch();
+    expect(cancelled.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
+    expect(store.pendingLink, isNull);
+
+    // Kill-before-confirm simulation: awaiting survives restart, recovery clears.
+    await session.markPendingUnifiedAwaitingSwitch(
+      provider: 'google',
+      targetPlayerId: '11111111-1111-1111-1111-111111111111',
+    );
+    final restarted = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    restarted.debugSeedAccess(GuestAccess.parse(
+      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ));
+    final recoverCoordinator = AuthCoordinator(
+      session: restarted,
+      providers: providers,
+      signIn: FakeProviderSignIn(),
+    );
+    final recovered =
+        await recoverCoordinator.recoverPendingLink(AuthProviderKind.google);
+    expect(recovered.outcome, AuthFlowOutcome.cancelled);
+    expect(recovered.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
+    expect(store.pendingLink, isNull);
+    expect(providers.continueCalls, 0);
   });
 
   test('session survives restart after existing-account login', () async {

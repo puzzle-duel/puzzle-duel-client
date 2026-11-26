@@ -305,24 +305,27 @@ final class AuthCoordinator {
         if (error.code == 'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED') {
           final token = error.continuationToken;
           final target = error.targetPlayerId;
-          if (token == null || token.isEmpty) {
+          if (token == null ||
+              token.isEmpty ||
+              target == null ||
+              target.isEmpty) {
             return const AuthFlowResult(
               outcome: AuthFlowOutcome.failed,
               errorCode: 'INVALID_CONTINUATION',
             );
           }
-          if (target != null && target.isNotEmpty) {
-            await session.markPendingUnifiedConfirm(
-              provider: provider.name,
-              targetPlayerId: target,
-            );
-          }
+          // Awaiting consent only — never persist approved confirm intent here.
+          await session.markPendingUnifiedAwaitingSwitch(
+            provider: provider.name,
+            targetPlayerId: target,
+          );
           _breadcrumb('auth_switch_confirmation_required');
           return AuthFlowResult(
             outcome: AuthFlowOutcome.switchConfirmationRequired,
             continuationToken: token,
             expiresAt: error.expiresAt,
             expectedPlayerId: target,
+            recoveryProvider: provider,
           );
         }
         if (error.code == 'AUTH_NETWORK_UNAVAILABLE') {
@@ -369,15 +372,35 @@ final class AuthCoordinator {
     }
   }
 
-  /// Commits a server-issued account switch after user confirmation.
-  Future<AuthFlowResult> confirmAccountSwitch(String continuationToken) async {
+  /// Clears awaiting/confirm switch markers after the user keeps the guest.
+  Future<AuthFlowResult> cancelAccountSwitch() async {
+    final pending = await session.readPendingLinkRecovery();
+    if (pending != null &&
+        (pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch ||
+            pending.kind == PendingAuthRecoveryKind.unifiedConfirm ||
+            pending.kind == PendingAuthRecoveryKind.unifiedContinue)) {
+      await session.clearPendingLinkProvider();
+      _breadcrumb('auth_switch_cancelled');
+    }
+    return const AuthFlowResult(
+      outcome: AuthFlowOutcome.cancelled,
+      errorCode: 'ACCOUNT_SWITCH_CANCELLED',
+    );
+  }
+
+  /// Commits a server-issued account switch after explicit user confirmation.
+  Future<AuthFlowResult> confirmAccountSwitch(
+    String continuationToken, {
+    required String targetPlayerId,
+    required AuthProviderKind provider,
+  }) async {
     if (_inFlight) {
       return const AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: 'AUTH_IN_FLIGHT',
       );
     }
-    if (continuationToken.isEmpty) {
+    if (continuationToken.isEmpty || targetPlayerId.isEmpty) {
       return const AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: 'INVALID_REQUEST',
@@ -387,11 +410,28 @@ final class AuthCoordinator {
     try {
       _breadcrumb('auth_switch_confirm_started');
       final pending = await session.readPendingLinkRecovery();
-      // Confirm marker should already be present from confirmation-required;
-      // if missing, keep fail-closed recovery path without inventing a target.
-      if (pending == null ||
-          pending.kind != PendingAuthRecoveryKind.unifiedConfirm) {
-        _breadcrumb('auth_switch_confirm_missing_pending');
+      final awaitingMatches = pending != null &&
+          pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch &&
+          pending.provider == provider.name &&
+          pending.playerId == targetPlayerId;
+      final confirmMatches = pending != null &&
+          pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
+          pending.provider == provider.name &&
+          pending.playerId == targetPlayerId;
+      if (!awaitingMatches && !confirmMatches) {
+        _breadcrumb('auth_switch_confirm_missing_pending',
+            errorCode: 'CONFIRM_INTENT_MISSING');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: 'CONFIRM_INTENT_MISSING',
+        );
+      }
+      // Persist approved confirm intent only after explicit user approval.
+      if (awaitingMatches) {
+        await session.markPendingUnifiedConfirm(
+          provider: provider.name,
+          targetPlayerId: targetPlayerId,
+        );
       }
       final bundle = await providers.confirmContinue(
         continuationToken: continuationToken,
@@ -414,20 +454,11 @@ final class AuthCoordinator {
         );
       } on GuestAuthException catch (error) {
         _breadcrumb('auth_credential_commit_failed', errorCode: error.code);
-        final recoveryProvider = pending == null
-            ? null
-            : (pending.provider == 'apple'
-                ? AuthProviderKind.apple
-                : AuthProviderKind.google);
-        final expected = pending != null &&
-                pending.kind == PendingAuthRecoveryKind.unifiedConfirm
-            ? pending.playerId
-            : null;
         return AuthFlowResult(
           outcome: AuthFlowOutcome.recoveryRequired,
           errorCode: error.code,
-          recoveryProvider: recoveryProvider,
-          expectedPlayerId: expected,
+          recoveryProvider: provider,
+          expectedPlayerId: targetPlayerId,
         );
       }
     } on GuestAuthException catch (error) {
@@ -439,21 +470,11 @@ final class AuthCoordinator {
     } on ProviderAuthException catch (error) {
       if (error.code == 'AUTH_NETWORK_UNAVAILABLE') {
         _breadcrumb('auth_switch_confirm_uncertain', errorCode: error.code);
-        final pendingMarker = await session.readPendingLinkRecovery();
-        final recoveryProvider = pendingMarker == null
-            ? null
-            : (pendingMarker.provider == 'apple'
-                ? AuthProviderKind.apple
-                : AuthProviderKind.google);
-        final expected = pendingMarker != null &&
-                pendingMarker.kind == PendingAuthRecoveryKind.unifiedConfirm
-            ? pendingMarker.playerId
-            : null;
         return AuthFlowResult(
           outcome: AuthFlowOutcome.recoveryRequired,
           errorCode: error.code,
-          recoveryProvider: recoveryProvider,
-          expectedPlayerId: expected,
+          recoveryProvider: provider,
+          expectedPlayerId: targetPlayerId,
         );
       }
       _breadcrumb('auth_switch_confirm_failed', errorCode: error.code);
@@ -578,6 +599,7 @@ final class AuthCoordinator {
       }
 
       if (pending.kind == PendingAuthRecoveryKind.unifiedContinue ||
+          pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch ||
           pending.kind == PendingAuthRecoveryKind.unifiedConfirm) {
         return await _recoverUnifiedPending(provider, pending);
       }
@@ -706,20 +728,31 @@ final class AuthCoordinator {
   }
 
   /// Unified continue/confirm lost-response recovery.
-  /// Resolves the committed target from verified provider evidence.
-  /// Never treats the source guest id as the expected switch target.
+  /// Requires a server auth receipt for provider_linked recovery — an existing
+  /// identity link alone must not complete an unconfirmed account switch.
   Future<AuthFlowResult> _recoverUnifiedPending(
     AuthProviderKind provider,
     PendingLinkRecovery pending,
   ) async {
     _breadcrumb('auth_unified_recovery_started_${provider.name}');
+
+    // Consent not granted: clear awaiting marker and keep the guest session.
+    if (pending.kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch) {
+      await session.clearPendingLinkProvider();
+      _breadcrumb('auth_unified_recovery_awaiting_cleared',
+          errorCode: 'ACCOUNT_SWITCH_CANCELLED');
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.cancelled,
+        errorCode: 'ACCOUNT_SWITCH_CANCELLED',
+      );
+    }
+
     try {
       final existing = await session.authenticate(
         forceRefresh: true,
         allowGuestCreate: false,
       );
       if (existing.isVerified) {
-        // Confirm target hint when present; otherwise accept provider-linked session.
         if (pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
             pending.playerId.isNotEmpty &&
             existing.playerId != pending.playerId) {
@@ -769,24 +802,23 @@ final class AuthCoordinator {
       );
     }
 
-    final ProviderCredentialBundle bundle;
+    // Receipt-backed recoverLinked only — never recover by target hint alone.
+    final bundle = await providers.recoverLinked(
+      provider: provider,
+      idToken: assertion.idToken,
+      nonce: challenge.nonce,
+      binding: binding,
+    );
     if (pending.kind == PendingAuthRecoveryKind.unifiedConfirm &&
-        pending.playerId.isNotEmpty) {
-      // Exact target filter when server advertised targetPlayerId.
-      bundle = await providers.recover(
-        provider: provider,
-        idToken: assertion.idToken,
-        nonce: challenge.nonce,
-        binding: binding,
+        pending.playerId.isNotEmpty &&
+        bundle.playerId != pending.playerId) {
+      _breadcrumb('auth_unified_recovery_identity_mismatch',
+          errorCode: 'RECOVERY_IDENTITY_MISMATCH');
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.recoveryRequired,
+        errorCode: 'RECOVERY_IDENTITY_MISMATCH',
+        recoveryProvider: provider,
         expectedPlayerId: pending.playerId,
-      );
-    } else {
-      // provider_linked: do not filter by source guest id.
-      bundle = await providers.recoverLinked(
-        provider: provider,
-        idToken: assertion.idToken,
-        nonce: challenge.nonce,
-        binding: binding,
       );
     }
 

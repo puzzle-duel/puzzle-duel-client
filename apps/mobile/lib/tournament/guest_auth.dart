@@ -132,7 +132,11 @@ enum PendingAuthRecoveryKind {
   /// [playerId] is optional source guest context only — never the switch target.
   unifiedContinue,
 
-  /// Unified confirm in flight / after confirmation required.
+  /// Server asked for account-switch consent; user has not approved yet.
+  /// Recovery must retain the guest — never recoverLinked to [playerId] target.
+  unifiedAwaitingSwitch,
+
+  /// User explicitly approved switch; mutating confirm may be in flight.
   /// [playerId] is the server-issued target player (opaque hint, not proof).
   unifiedConfirm,
 }
@@ -143,7 +147,8 @@ enum PendingAuthRecoveryKind {
 /// - `apple|<uuid>` / `google|<uuid>` — legacy/exact link expected player
 /// - `continue|apple` / `continue|google` — unified continue (provider_linked)
 /// - `continue|apple|<sourceGuestUuid>` — unified continue with source context
-/// - `confirm|apple|<targetPlayerUuid>` — unified confirm expected target hint
+/// - `awaiting|apple|<targetPlayerUuid>` — confirmation required, not yet approved
+/// - `confirm|apple|<targetPlayerUuid>` — user-approved confirm mutate intent
 final class PendingLinkRecovery {
   const PendingLinkRecovery({
     required this.provider,
@@ -153,19 +158,23 @@ final class PendingLinkRecovery {
 
   final String provider;
   /// Link: expected guest id. Unified continue: optional source guest.
-  /// Unified confirm: server-advertised target player id.
+  /// Awaiting/confirm: server-advertised target player id.
   final String playerId;
   final PendingAuthRecoveryKind kind;
 
   bool get resolvesViaProviderLinked =>
-      kind == PendingAuthRecoveryKind.unifiedContinue ||
-      (kind == PendingAuthRecoveryKind.unifiedConfirm && playerId.isEmpty);
+      kind == PendingAuthRecoveryKind.unifiedContinue;
+
+  bool get isAwaitingSwitchConsent =>
+      kind == PendingAuthRecoveryKind.unifiedAwaitingSwitch;
 
   String encode() => switch (kind) {
         PendingAuthRecoveryKind.link => '$provider|$playerId',
         PendingAuthRecoveryKind.unifiedContinue => playerId.isEmpty
             ? 'continue|$provider'
             : 'continue|$provider|$playerId',
+        PendingAuthRecoveryKind.unifiedAwaitingSwitch =>
+          'awaiting|$provider|$playerId',
         PendingAuthRecoveryKind.unifiedConfirm => 'confirm|$provider|$playerId',
       };
 
@@ -176,7 +185,10 @@ final class PendingLinkRecovery {
   static PendingLinkRecovery? tryParse(String? raw) {
     if (raw == null || raw.isEmpty) return null;
     final parts = raw.split('|');
-    if (parts.length == 2 && parts[0] != 'continue' && parts[0] != 'confirm') {
+    if (parts.length == 2 &&
+        parts[0] != 'continue' &&
+        parts[0] != 'confirm' &&
+        parts[0] != 'awaiting') {
       final provider = parts[0];
       final playerId = parts[1];
       if (provider != 'apple' && provider != 'google') return null;
@@ -201,6 +213,17 @@ final class PendingLinkRecovery {
         );
       }
       return null;
+    }
+    if (parts.length == 3 && parts[0] == 'awaiting') {
+      final provider = parts[1];
+      final playerId = parts[2];
+      if (provider != 'apple' && provider != 'google') return null;
+      if (!_uuid.hasMatch(playerId)) return null;
+      return PendingLinkRecovery(
+        provider: provider,
+        playerId: playerId,
+        kind: PendingAuthRecoveryKind.unifiedAwaitingSwitch,
+      );
     }
     if (parts.length == 3 && parts[0] == 'confirm') {
       final provider = parts[1];
@@ -901,7 +924,22 @@ final class GuestAuthClient {
     );
   }
 
-  /// Durable marker after confirmation-required / before confirm commit.
+  /// Durable marker while the UI awaits explicit account-switch consent.
+  /// Must not be treated as an approved confirm intent.
+  Future<void> markPendingUnifiedAwaitingSwitch({
+    required String provider,
+    required String targetPlayerId,
+  }) {
+    return _persistPendingRecovery(
+      PendingLinkRecovery(
+        provider: provider,
+        playerId: targetPlayerId,
+        kind: PendingAuthRecoveryKind.unifiedAwaitingSwitch,
+      ),
+    );
+  }
+
+  /// Durable marker after the user approves switch and before confirm HTTP.
   Future<void> markPendingUnifiedConfirm({
     required String provider,
     required String targetPlayerId,
