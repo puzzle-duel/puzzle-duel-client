@@ -242,7 +242,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
               }
             : null,
         onRecovered: (access) async {
-          controller.clearSessionRecoveryGate(bearer: access.accessToken);
+          controller.clearSessionRecoveryGate(
+            bearer: access.accessToken,
+            access: access,
+          );
           await controller.completeRankedAuthAndEnter();
         },
       ),

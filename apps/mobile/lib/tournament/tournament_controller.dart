@@ -430,6 +430,11 @@ final class TournamentController extends ChangeNotifier {
         }
         rankedAuthRequired = false;
       } on GuestAuthException catch (error) {
+        if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+          await enterSessionRecovery(error.code);
+          if (presentHome) route = const TournamentRoute();
+          return;
+        }
         _fail(error.code, degradedOnFailure: true);
         return;
       }
@@ -569,15 +574,21 @@ final class TournamentController extends ChangeNotifier {
       if (activeSessionRecovery?.isTransientNetwork == true) {
         final recovered = await _tryClearTransientSessionRecovery();
         if (recovered) {
-          await resume();
+          // Fall through so guest/verified + writer gates still apply.
+        } else {
+          tournamentNoticeCode =
+              activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+          notifyListeners();
+          onRequestRankedAuth?.call();
           return;
         }
+      } else {
+        tournamentNoticeCode =
+            activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
+        notifyListeners();
+        onRequestRankedAuth?.call();
+        return;
       }
-      tournamentNoticeCode =
-          activeSessionRecovery?.code ?? 'GUEST_RECOVERY_REQUIRED';
-      notifyListeners();
-      onRequestRankedAuth?.call();
-      return;
     }
     if (sessionAuth == null) {
       await resume();
@@ -655,7 +666,7 @@ final class TournamentController extends ChangeNotifier {
     }
     try {
       final access = await auth.authenticate(allowGuestCreate: false);
-      clearSessionRecoveryGate(bearer: access.accessToken);
+      clearSessionRecoveryGate(bearer: access.accessToken, access: access);
       return true;
     } on GuestAuthException catch (error) {
       if (GuestSessionRecovery.isTransientNetworkCode(error.code) ||
@@ -667,19 +678,52 @@ final class TournamentController extends ChangeNotifier {
   }
 
   /// Clears recovery gate after identity-preserving recover or network retry.
-  void clearSessionRecoveryGate({required String bearer}) {
+  ///
+  /// Does not unlock the writer: [rankedWriterLocked] stays until loadDay /
+  /// resume applies server-authoritative writer authorization. Account-type
+  /// gate follows the recovered access token (guest → ranked auth required).
+  void clearSessionRecoveryGate({
+    required String bearer,
+    GuestAccess? access,
+  }) {
     api.bearer = UatApi.normalizeBearer(bearer);
     activeSessionRecovery = null;
     sessionRecoveryRequired = false;
-    rankedWriterLocked = false;
-    rankedAuthRequired = false;
-    tournamentNoticeCode = null;
+    final resolved = access ?? _guestAccessFromBearer(bearer);
+    if (resolved != null && resolved.isVerified) {
+      rankedAuthRequired = false;
+      tournamentNoticeCode = null;
+    } else if (resolved != null) {
+      rankedAuthRequired = true;
+      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      tournamentSync = TournamentSyncState.degraded;
+    } else if (tournamentNoticeCode != 'RANKED_AUTH_REQUIRED') {
+      tournamentNoticeCode = null;
+    }
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.sessionRestored,
       operation: 'guest_session_recovery_cleared',
     )));
     notifyListeners();
+  }
+
+  GuestAccess? _guestAccessFromBearer(String bearer) {
+    final trimmed = bearer.trim();
+    if (trimmed.isEmpty) return null;
+    final token = trimmed.length >= 7 &&
+            trimmed.substring(0, 7).toLowerCase() == 'bearer '
+        ? trimmed.substring(7).trim()
+        : trimmed;
+    if (token.isEmpty) return null;
+    try {
+      return GuestAccess.parse(
+        accessToken: token,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// After successful provider link/login: claim at most once, then resume.

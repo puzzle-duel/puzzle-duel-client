@@ -170,9 +170,14 @@ void main() {
     );
     expect(controller.sessionRecoveryRequired, isTrue);
     final access = await auth.authenticate(allowGuestCreate: false);
-    controller.clearSessionRecoveryGate(bearer: access.accessToken);
+    controller.clearSessionRecoveryGate(
+      bearer: access.accessToken,
+      access: access,
+    );
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(controller.activeSessionRecovery, isNull);
+    expect(controller.rankedAuthRequired, isFalse);
+    expect(controller.rankedWriterLocked, isTrue);
     expect(controller.api.bearer, contains(access.accessToken.substring(0, 20)));
     final refreshed = await auth.authenticate(forceRefresh: true);
     expect(refreshed.accessToken, isNotEmpty);
@@ -259,6 +264,10 @@ void main() {
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(store.token, 'f' * 64);
     expect(guestCreates, 0);
+    // Guest account type + writer lock preserved after transient clear.
+    // (Session restore may still degrade with OFFLINE from the scripted API.)
+    expect(controller.rankedAuthRequired, isTrue);
+    expect(controller.rankedWriterLocked, isTrue);
     controller.dispose();
   });
 
@@ -475,15 +484,211 @@ void main() {
     );
     expect(controller.activeSessionRecovery?.code, 'GUEST_RECOVERY_REQUIRED');
     final access = await auth.authenticate(allowGuestCreate: false);
-    controller.clearSessionRecoveryGate(bearer: access.accessToken);
+    controller.clearSessionRecoveryGate(
+      bearer: access.accessToken,
+      access: access,
+    );
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(controller.activeSessionRecovery, isNull);
+    expect(controller.rankedAuthRequired, isFalse);
+    // Writer stays locked until server-authoritative loadDay/resume.
+    expect(controller.rankedWriterLocked, isTrue);
     // Ranked entry after clear must not re-enter recovery from seed alone.
     var openedRecovery = false;
     controller.onRequestRankedAuth = () => openedRecovery = true;
     await controller.requestRankedEntry();
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(openedRecovery, isFalse);
+    controller.dispose();
+  });
+
+  test('loadDay revoked-family routes through enterSessionRecovery', () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd27-loadday-revoked');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final store = FakeGuestStore()
+      ..token = 'j' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest'
+      ..pendingLink =
+          'apple|aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugTransport = (path, body) async =>
+        (status: 401, body: {'error': 'INVALID_REFRESH'});
+    var claimPosts = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path.endsWith('/claims/daily')) {
+        claimPosts += 1;
+        fail('ranked claim must not run during revoked-family recovery');
+      }
+      return const UatHttpResult(200, {});
+    });
+    final identity = PracticeIdentityStore(directory, random: Random(6));
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'https://staging.puzzle-duel.app',
+        bearer: 'Bearer prior',
+        playerLabel: 'Guest',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      sessionAuth: auth,
+    );
+    await controller.beginLocal();
+    await controller.loadDay(presentHome: true);
+    expect(controller.sessionRecoveryRequired, isTrue);
+    expect(controller.activeSessionRecovery?.code,
+        'PROVIDER_LINK_RECOVERY_apple');
+    expect(controller.activeSessionRecovery?.expectedPlayerId,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(controller.activeSessionRecovery?.pendingLink?.provider, 'apple');
+    expect(controller.activeSessionRecovery?.lastRequestId, isNotNull);
+    expect(controller.rankedWriterLocked, isTrue);
+    expect(controller.tournamentNoticeCode, 'PROVIDER_LINK_RECOVERY_apple');
+    expect(claimPosts, 0);
+    expect(store.token, 'j' * 64);
+    controller.dispose();
+  });
+
+  test('loadDay transient recovery keeps guest ranked gate', () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd27-loadday-transient-guest');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final store = FakeGuestStore()
+      ..token = 'k' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugTransport = (path, body) async => (
+          status: 200,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+              familyId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+              accountType: 'guest',
+            ),
+            'refreshToken': 'l' * 64,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+    var claimPosts = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path.endsWith('/claims/daily')) {
+        claimPosts += 1;
+        fail('guest must not claim after transient recovery');
+      }
+      return const UatHttpResult(200, {});
+    });
+    final identity = PracticeIdentityStore(directory, random: Random(7));
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'https://staging.puzzle-duel.app',
+        bearer: '',
+        playerLabel: 'Guest',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      sessionAuth: auth,
+      initialSessionRecovery: await auth.captureSessionRecovery(
+        'AUTH_NETWORK_UNAVAILABLE',
+      ),
+    );
+    expect(controller.rankedWriterLocked, isTrue);
+    await controller.beginLocal();
+    await controller.loadDay(presentHome: true);
+    expect(controller.sessionRecoveryRequired, isFalse);
+    expect(controller.rankedAuthRequired, isTrue);
+    expect(controller.rankedWriterLocked, isTrue);
+    expect(controller.tournamentNoticeCode, 'RANKED_AUTH_REQUIRED');
+    expect(claimPosts, 0);
+    controller.dispose();
+  });
+
+  test('loadDay transient recovery verified keeps writer lock until server',
+      () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd27-loadday-transient-verified');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final store = FakeGuestStore()
+      ..token = 'm' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||verified';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    final verifiedToken = _jwt(
+      playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      familyId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      accountType: 'verified',
+    );
+    auth.debugTransport = (path, body) async => (
+          status: 200,
+          body: {
+            'accessToken': verifiedToken,
+            'refreshToken': 'n' * 64,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+    var claimPosts = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path.endsWith('/claims/daily')) {
+        claimPosts += 1;
+        // Deny writer so server-authoritative lock remains true.
+        return const UatHttpResult(403, {'error': 'WRITER_NOT_AUTHORIZED'});
+      }
+      return const UatHttpResult(200, {});
+    });
+    final identity = PracticeIdentityStore(directory, random: Random(8));
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'https://staging.puzzle-duel.app',
+        bearer: '',
+        playerLabel: 'Verified',
+      ),
+      api: api,
+      stateDirectory: directory,
+      identity: identity,
+      sessionAuth: auth,
+      initialSessionRecovery: await auth.captureSessionRecovery(
+        'REFRESH_UNAVAILABLE',
+      ),
+    );
+    expect(controller.rankedWriterLocked, isTrue);
+    await controller.beginLocal();
+    await controller.loadDay(presentHome: true);
+    expect(controller.sessionRecoveryRequired, isFalse);
+    expect(controller.rankedAuthRequired, isFalse);
+    // clearSessionRecoveryGate must not have unlocked the writer; loadDay
+    // then keeps/sets lock from server-authoritative claim outcome.
+    expect(controller.rankedWriterLocked, isTrue);
+    expect(claimPosts, 1);
     controller.dispose();
   });
 }
