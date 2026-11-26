@@ -191,6 +191,29 @@ final class _FakeProviders implements ProviderAuthPort {
   }
 
   @override
+  Future<ProviderCredentialBundle> recoverLinked({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+  }) async {
+    recoverCalls++;
+    if (recoverError != null) throw recoverError!;
+    return ProviderCredentialBundle(
+      playerId: loginPlayerId,
+      accountType: 'verified',
+      accessToken: _jwt(
+        sub: loginPlayerId,
+        accountType: 'verified',
+        fid: 'recover-linked-fid',
+      ),
+      refreshToken: 'verified-refresh-recover-linked',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      linkedProviders: [provider.name],
+    );
+  }
+
+  @override
   Future<ProviderCredentialBundle> continueWithProvider({
     required AuthProviderKind provider,
     required String idToken,

@@ -149,6 +149,16 @@ final class _StubProviders implements ProviderAuthPort {
   }
 
   @override
+  Future<ProviderCredentialBundle> recoverLinked({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+  }) async {
+    throw const ProviderAuthException('NOT_USED');
+  }
+
+  @override
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,

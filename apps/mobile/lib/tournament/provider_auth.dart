@@ -53,11 +53,13 @@ final class ProviderAuthException implements Exception {
     this.httpStatus,
     this.continuationToken,
     this.expiresAt,
+    this.targetPlayerId,
   });
   final String code;
   final int? httpStatus;
   final String? continuationToken;
   final DateTime? expiresAt;
+  final String? targetPlayerId;
   @override
   String toString() => code;
 }
@@ -90,6 +92,15 @@ abstract interface class ProviderAuthPort {
     required String nonce,
     required String binding,
     required String expectedPlayerId,
+  });
+
+  /// Create-forbidden recovery resolving the linked player from provider evidence.
+  /// Used for unified continue lost-response; never filters by source guest id.
+  Future<ProviderCredentialBundle> recoverLinked({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
   });
 
   Future<ProviderCredentialBundle> continueWithProvider({
@@ -303,6 +314,35 @@ final class ProviderAuthClient implements ProviderAuthPort {
   }
 
   @override
+  Future<ProviderCredentialBundle> recoverLinked({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+  }) async {
+    final result = await _post(
+      '/v1/auth/providers/recover',
+      {
+        'provider': provider.name,
+        'idToken': idToken,
+        'nonce': nonce,
+        'binding': binding,
+        'recoveryKind': 'provider_linked',
+      },
+      operation: 'provider_recover_linked_requested',
+    );
+    if (result.status != 201) {
+      throw ProviderAuthException(
+        _safeError(result.body) ?? 'AUTH_UNAVAILABLE',
+        httpStatus: result.status,
+      );
+    }
+    _breadcrumb(LogCode.httpCompleted, 'provider_recover_linked_completed',
+        requestId: result.requestId, httpStatus: result.status);
+    return _parseBundle(result.body);
+  }
+
+  @override
   Future<ProviderCredentialBundle> continueWithProvider({
     required AuthProviderKind provider,
     required String idToken,
@@ -335,11 +375,13 @@ final class ProviderAuthClient implements ProviderAuthPort {
         if (expires is String) {
           expiresAt = DateTime.tryParse(expires)?.toUtc();
         }
+        final target = result.body['targetPlayerId'];
         throw ProviderAuthException(
           'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
           httpStatus: 409,
           continuationToken: token is String ? token : null,
           expiresAt: expiresAt,
+          targetPlayerId: target is String ? target : null,
         );
       }
     }
