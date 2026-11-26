@@ -445,7 +445,7 @@ final class AuthCoordinator {
           errorCode: 'CONFIRM_INTENT_MISSING',
         );
       }
-      final operationId = pending!.operationId;
+      final operationId = pending.operationId;
       // Persist approved confirm intent only after explicit user approval.
       if (awaitingMatches) {
         await session.markPendingUnifiedConfirm(
