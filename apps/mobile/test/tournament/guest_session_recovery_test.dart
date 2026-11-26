@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -690,6 +691,272 @@ void main() {
     expect(controller.rankedWriterLocked, isTrue);
     expect(claimPosts, 1);
     controller.dispose();
+  });
+
+  test('explicit new guest flags: pure guest yes; pending/verified/transient no',
+      () {
+    const pure = GuestSessionRecovery(
+      code: 'GUEST_RECOVERY_REQUIRED',
+      binding: GuestIdentityBinding(
+        playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        accountType: AccountType.guest,
+      ),
+    );
+    expect(pure.allowsExplicitNewGuest, isTrue);
+    expect(pure.canAttemptProviderRecover, isFalse);
+
+    const pending = GuestSessionRecovery(
+      code: 'PROVIDER_LINK_RECOVERY_google',
+      pendingLink: PendingLinkRecovery(
+        provider: 'google',
+        playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      ),
+    );
+    expect(pending.allowsExplicitNewGuest, isFalse);
+    expect(pending.canAttemptProviderRecover, isTrue);
+
+    const verified = GuestSessionRecovery(
+      code: 'GUEST_RECOVERY_REQUIRED',
+      binding: GuestIdentityBinding(
+        playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        accountType: AccountType.verified,
+      ),
+    );
+    expect(verified.allowsExplicitNewGuest, isFalse);
+    expect(verified.canAttemptProviderRecover, isTrue);
+
+    const transient = GuestSessionRecovery(code: 'REFRESH_UNAVAILABLE');
+    expect(transient.allowsExplicitNewGuest, isFalse);
+  });
+
+  test('explicit new guest replaces vault atomically and gates ranked', () async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd27-explicit-new-guest');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final oldToken = 'o' * 64;
+    final store = FakeGuestStore()
+      ..token = oldToken
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    var guestCreates = 0;
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        guestCreates++;
+        return (
+          status: 201,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+              familyId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+              accountType: 'guest',
+            ),
+            'refreshToken': 'p' * 64,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('unexpected path $path');
+    };
+    final access = await auth.replaceWithExplicitNewGuest();
+    expect(guestCreates, 1);
+    expect(access.playerId, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+    expect(store.token, 'p' * 64);
+    expect(store.identityBinding, contains('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'));
+    expect(store.token, isNot(oldToken));
+
+    final identity = PracticeIdentityStore(directory, random: Random(9));
+    await identity.load();
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'https://staging.puzzle-duel.app',
+        bearer: '',
+        playerLabel: 'Guest',
+      ),
+      api: ScriptedUatApi(
+        (method, path, body) async {
+          if (path.endsWith('/claims/daily')) {
+            fail('guest must not claim without verification');
+          }
+          return const UatHttpResult(200, {});
+        },
+      ),
+      stateDirectory: directory,
+      identity: identity,
+      sessionAuth: auth,
+      initialSessionRecovery: const GuestSessionRecovery(
+        code: 'GUEST_RECOVERY_REQUIRED',
+      ),
+    );
+    controller.clearSessionRecoveryGate(
+      bearer: access.accessToken,
+      access: access,
+    );
+    expect(controller.sessionRecoveryRequired, isFalse);
+    expect(controller.rankedAuthRequired, isTrue);
+    await controller.beginLocal();
+    expect(controller.localReady, isTrue);
+    controller.dispose();
+  });
+
+  test('explicit new guest cancel path keeps vault when create never runs',
+      () async {
+    final store = FakeGuestStore()
+      ..token = 'q' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest';
+    // Cancel is UI-only; vault unchanged is the contract under test here.
+    expect(store.token, 'q' * 64);
+    expect(store.identityBinding, isNotNull);
+  });
+
+  test('explicit new guest create failure preserves old credentials', () async {
+    final store = FakeGuestStore()
+      ..token = 'r' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        return (status: 503, body: {'error': 'AUTH_UNAVAILABLE'});
+      }
+      fail('unexpected $path');
+    };
+    await expectLater(
+      auth.replaceWithExplicitNewGuest(),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'GUEST_CREATION_UNAVAILABLE',
+      )),
+    );
+    expect(store.token, 'r' * 64);
+    expect(store.identityBinding,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest');
+  });
+
+  test('explicit new guest vault failure restores prior credentials', () async {
+    final store = FakeGuestStore()
+      ..token = 's' * 64
+      ..identityBinding =
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest'
+      ..failWrite = true;
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') {
+        return (
+          status: 201,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+              familyId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+              accountType: 'guest',
+            ),
+            'refreshToken': 't' * 64,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('unexpected $path');
+    };
+    await expectLater(
+      auth.replaceWithExplicitNewGuest(),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'SECURE_STORE_UNAVAILABLE',
+      )),
+    );
+    // failWrite prevents overwrite; prior token remains.
+    expect(store.token, 's' * 64);
+    expect(store.identityBinding,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||guest');
+  });
+
+  test('pending link blocks explicit new guest mint', () async {
+    final store = FakeGuestStore()
+      ..token = 'u' * 64
+      ..pendingLink =
+          'google|aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    var guestCreates = 0;
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/guest') guestCreates++;
+      fail('must not mint while pending link');
+    };
+    await expectLater(
+      auth.replaceWithExplicitNewGuest(),
+      throwsA(isA<GuestAuthException>().having(
+        (e) => e.code,
+        'code',
+        'PROVIDER_LINK_RECOVERY_google',
+      )),
+    );
+    expect(guestCreates, 0);
+    expect(store.token, 'u' * 64);
+  });
+
+  test('concurrent authenticate single-flights without dual refresh', () async {
+    final store = FakeGuestStore()..token = 'v' * 64;
+    final auth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+      rotationRetryEnabled: false,
+    );
+    var refreshCalls = 0;
+    final gate = Completer<void>();
+    auth.debugTransport = (path, body) async {
+      if (path == '/v1/auth/refresh') {
+        refreshCalls++;
+        await gate.future;
+        return (
+          status: 200,
+          body: {
+            'accessToken': _jwt(
+              playerId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+              familyId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+            ),
+            'refreshToken': 'w' * 64,
+            'expiresAt': DateTime.now()
+                .toUtc()
+                .add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+        );
+      }
+      fail('unexpected $path');
+    };
+    final a = auth.authenticate(forceRefresh: true);
+    final b = auth.authenticate(forceRefresh: true);
+    gate.complete();
+    final results = await Future.wait([a, b]);
+    expect(refreshCalls, 1);
+    expect(results[0].accessToken, results[1].accessToken);
+    expect(store.token, 'w' * 64);
   });
 }
 

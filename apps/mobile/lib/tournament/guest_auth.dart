@@ -377,6 +377,107 @@ final class GuestAuthClient {
     });
   }
 
+  /// Owner-approved UX: mint a **new** guest after explicit confirmation.
+  ///
+  /// Never silent: pending provider link and verified bindings refuse.
+  /// Create-on-server first; vault write is generation-safe. On vault failure
+  /// the previous refresh token and identity binding are restored. Server-side
+  /// old player/family/score rows are never deleted by this path.
+  Future<GuestAccess> replaceWithExplicitNewGuest() {
+    return _serializedMutation(() async {
+      final pendingCode = await _pendingLinkRecoveryCode();
+      if (pendingCode != null) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_blocked',
+            errorCode: 'PROVIDER_LINK_RECOVERY');
+        throw GuestAuthException(pendingCode);
+      }
+      final priorBinding = GuestIdentityBinding.tryParse(
+        await credentials.readIdentityBinding(),
+      );
+      if (priorBinding?.accountType == AccountType.verified) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_blocked',
+            errorCode: 'RECOVERY_NOT_LINKED');
+        throw const GuestAuthException('RECOVERY_NOT_LINKED');
+      }
+
+      final oldToken = await credentials.readRefreshToken();
+      final oldBindingRaw = await credentials.readIdentityBinding();
+      final oldRotation = await credentials.readPendingRotationId();
+
+      final generation = ++_credentialGeneration;
+      _pending = null;
+      _breadcrumb(LogCode.authRefreshSucceeded, 'guest_explicit_new_started');
+
+      final result = await _post('/v1/auth/guest', const {});
+      if (result.status != 201 && result.status != 200) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_create_failed',
+            httpStatus: result.status, errorCode: 'GUEST_CREATION_UNAVAILABLE');
+        throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
+      }
+      if (generation != _credentialGeneration) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_stale',
+            errorCode: 'STALE_CREDENTIAL_RESPONSE');
+        throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+      }
+
+      final accessToken = result.body['accessToken'];
+      final refresh = result.body['refreshToken'];
+      final expiry = result.body['expiresAt'];
+      if (accessToken is! String ||
+          accessToken.isEmpty ||
+          refresh is! String ||
+          refresh.isEmpty ||
+          expiry is! String) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      final expiresAt = DateTime.tryParse(expiry)?.toUtc();
+      if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      final access = GuestAccess.parse(
+        accessToken: accessToken,
+        expiresAt: expiresAt,
+      );
+      if (!access.isGuest) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+
+      try {
+        await persistVerifiedGuestCredential(credentials, refresh);
+        await credentials.writeIdentityBinding(GuestIdentityBinding(
+          playerId: access.playerId,
+          familyId: access.familyId,
+          accountType: access.accountType,
+        ).encode());
+        await credentials.clearPendingRotationId();
+      } catch (_) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_vault_failed',
+            errorCode: 'SECURE_STORE_UNAVAILABLE');
+        try {
+          if (oldToken != null && oldToken.isNotEmpty) {
+            await credentials.writeRefreshToken(oldToken);
+          }
+          if (oldBindingRaw != null && oldBindingRaw.isNotEmpty) {
+            await credentials.writeIdentityBinding(oldBindingRaw);
+          }
+          if (oldRotation != null && oldRotation.isNotEmpty) {
+            await credentials.writePendingRotationId(oldRotation);
+          }
+        } catch (_) {
+          // Best-effort restore; surface the original vault failure.
+        }
+        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+      }
+      if (generation != _credentialGeneration) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_stale',
+            errorCode: 'STALE_CREDENTIAL_RESPONSE');
+        throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+      }
+      _breadcrumb(LogCode.authRefreshSucceeded, 'guest_explicit_new_replaced');
+      return _current = access;
+    });
+  }
+
   Future<void> markPendingLink({
     required String provider,
     required String playerId,
