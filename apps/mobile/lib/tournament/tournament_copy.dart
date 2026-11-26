@@ -221,13 +221,25 @@ final class TournamentCopy {
     'Sınırsız bulmaca. Sıralamaya girmez ve bugünün turnuvasına yazılmaz.',
   );
   String get authSheetTitle => pick(
-    'Verify to play ranked',
-    'Sıralamalı oyun için doğrula',
+    'Sign in to Puzzle Duel',
+    'Puzzle Duel\'e giriş yap',
   );
   String get authSheetBody => pick(
-    'Choose how to verify. Linking keeps this guest’s progress on the same player. Signing in to an existing account switches to that player — accounts are never merged automatically.',
-    'Nasıl doğrulayacağını seç. Bağlama, bu misafir ilerlemesini aynı oyuncuda tutar. Mevcut hesaba giriş o oyuncuya geçer — hesaplar otomatik birleştirilmez.',
+    'Continue with Apple or Google. Your local practice progress may require confirmation before switching to an existing linked account.',
+    'Apple veya Google ile devam et. Mevcut hesaba geçerken yerel pratik ilerlemen onay isteyebilir.',
   );
+  String get accountSwitchTitle => pick(
+    'Switch to your linked account?',
+    'Mevcut hesabına geçilsin mi?',
+  );
+  String get accountSwitchBody => pick(
+    'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress on this device will not be merged automatically.',
+    'Bu Apple veya Google hesabı başka bir Puzzle Duel oyuncusuna bağlı. Bu cihazdaki misafir ilerlemen otomatik birleştirilmez.',
+  );
+  String get accountSwitchConfirm =>
+      pick('Switch to my account', 'Mevcut hesabıma geç');
+  String get accountSwitchKeepGuest =>
+      pick('Stay as guest', 'Misafir olarak kal');
   String get authLinkSectionTitle => pick(
     'Link this guest account',
     'Bu misafir hesabını bağla',

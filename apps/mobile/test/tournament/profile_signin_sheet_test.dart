@@ -91,8 +91,30 @@ final class _StubProviders implements ProviderAuthPort {
       provider: provider,
       purpose: purpose,
       nonce: 'n' * 43,
-      binding: purpose == ProviderAuthPurpose.login ? 'binding' : null,
+      binding: purpose == ProviderAuthPurpose.login ||
+              purpose == ProviderAuthPurpose.continueWith
+          ? 'binding'
+          : null,
     );
+  }
+
+  @override
+  Future<ProviderCredentialBundle> continueWithProvider({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    bool localProgressProtected = false,
+    String? guestBearer,
+  }) async {
+    throw const ProviderAuthException('NOT_USED');
+  }
+
+  @override
+  Future<ProviderCredentialBundle> confirmContinue({
+    required String continuationToken,
+  }) async {
+    throw const ProviderAuthException('NOT_USED');
   }
 
   @override
@@ -164,6 +186,8 @@ void main() {
       expect(find.byKey(const Key('auth-sheet-title')), findsOneWidget);
       expect(find.byKey(const Key('auth-google')), findsOneWidget);
       expect(find.byKey(const Key('auth-apple')), findsOneWidget);
+      expect(find.byKey(const Key('auth-link-section')), findsNothing);
+      expect(find.byKey(const Key('auth-login-section')), findsNothing);
       // Profile-only must not claim tournament attempts.
       expect(harness.claimPosts, 0);
     },

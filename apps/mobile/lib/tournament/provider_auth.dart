@@ -24,7 +24,7 @@ final class ProviderChallenge {
   final String? binding;
 }
 
-enum ProviderAuthPurpose { login, link }
+enum ProviderAuthPurpose { login, link, continueWith }
 
 final class ProviderCredentialBundle {
   const ProviderCredentialBundle({
@@ -34,6 +34,7 @@ final class ProviderCredentialBundle {
     required this.refreshToken,
     required this.expiresAt,
     required this.linkedProviders,
+    this.resolution,
   });
 
   final String playerId;
@@ -42,12 +43,21 @@ final class ProviderCredentialBundle {
   final String refreshToken;
   final DateTime expiresAt;
   final List<String> linkedProviders;
+  /// Backend continue resolution: link_guest, existing_account, etc.
+  final String? resolution;
 }
 
 final class ProviderAuthException implements Exception {
-  const ProviderAuthException(this.code, {this.httpStatus});
+  const ProviderAuthException(
+    this.code, {
+    this.httpStatus,
+    this.continuationToken,
+    this.expiresAt,
+  });
   final String code;
   final int? httpStatus;
+  final String? continuationToken;
+  final DateTime? expiresAt;
   @override
   String toString() => code;
 }
@@ -82,6 +92,19 @@ abstract interface class ProviderAuthPort {
     required String expectedPlayerId,
   });
 
+  Future<ProviderCredentialBundle> continueWithProvider({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    bool localProgressProtected = false,
+    String? guestBearer,
+  });
+
+  Future<ProviderCredentialBundle> confirmContinue({
+    required String continuationToken,
+  });
+
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,
@@ -109,6 +132,10 @@ final class ProviderAuthClient implements ProviderAuthPort {
   final String origin;
   final HttpClient Function() _factory;
   final PuzzleDuelLogger _logger;
+
+  static String _purposeWire(ProviderAuthPurpose purpose) {
+    return purpose == ProviderAuthPurpose.continueWith ? 'continue' : purpose.name;
+  }
 
   void _breadcrumb(
     LogCode code,
@@ -147,13 +174,17 @@ final class ProviderAuthClient implements ProviderAuthPort {
     }
     final body = <String, Object?>{
       'provider': provider.name,
-      'purpose': purpose.name,
+      'purpose': _purposeWire(purpose),
     };
+    final guestProof = purpose == ProviderAuthPurpose.link ||
+        purpose == ProviderAuthPurpose.continueWith;
     final result = await _post(
       '/v1/auth/providers/challenge',
       body,
       operation: 'provider_challenge_requested',
-      bearer: purpose == ProviderAuthPurpose.link ? guestBearer : null,
+      bearer: guestProof && guestBearer != null && guestBearer.isNotEmpty
+          ? guestBearer
+          : null,
     );
     if (result.status != 201) {
       throw ProviderAuthException(
@@ -166,7 +197,8 @@ final class ProviderAuthClient implements ProviderAuthPort {
       throw const ProviderAuthException('INVALID_PROVIDER_CHALLENGE');
     }
     final binding = result.body['binding'];
-    if (purpose == ProviderAuthPurpose.login) {
+    if (purpose == ProviderAuthPurpose.login ||
+        purpose == ProviderAuthPurpose.continueWith) {
       if (binding is! String || binding.isEmpty) {
         throw const ProviderAuthException('INVALID_PROVIDER_CHALLENGE');
       }
@@ -271,6 +303,81 @@ final class ProviderAuthClient implements ProviderAuthPort {
   }
 
   @override
+  Future<ProviderCredentialBundle> continueWithProvider({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    bool localProgressProtected = false,
+    String? guestBearer,
+  }) async {
+    final body = <String, Object?>{
+      'provider': provider.name,
+      'idToken': idToken,
+      'nonce': nonce,
+      'binding': binding,
+    };
+    if (localProgressProtected) {
+      body['localProgressProtected'] = true;
+    }
+    final result = await _post(
+      '/v1/auth/providers/continue',
+      body,
+      operation: 'provider_continue_requested',
+      bearer: guestBearer,
+    );
+    if (result.status == 409) {
+      final code = result.body['error']?.toString();
+      if (code == 'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED') {
+        final token = result.body['continuationToken'];
+        final expires = result.body['expiresAt'];
+        DateTime? expiresAt;
+        if (expires is String) {
+          expiresAt = DateTime.tryParse(expires)?.toUtc();
+        }
+        throw ProviderAuthException(
+          'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+          httpStatus: 409,
+          continuationToken: token is String ? token : null,
+          expiresAt: expiresAt,
+        );
+      }
+    }
+    if (result.status != 201) {
+      throw ProviderAuthException(
+        _safeError(result.body) ?? 'AUTH_UNAVAILABLE',
+        httpStatus: result.status,
+      );
+    }
+    _breadcrumb(LogCode.httpCompleted, 'provider_continue_completed',
+        requestId: result.requestId, httpStatus: result.status);
+    return _parseBundle(result.body);
+  }
+
+  @override
+  Future<ProviderCredentialBundle> confirmContinue({
+    required String continuationToken,
+  }) async {
+    if (continuationToken.isEmpty) {
+      throw const ProviderAuthException('INVALID_REQUEST');
+    }
+    final result = await _post(
+      '/v1/auth/providers/continue/confirm',
+      {'continuationToken': continuationToken},
+      operation: 'provider_continue_confirm_requested',
+    );
+    if (result.status != 201) {
+      throw ProviderAuthException(
+        _safeError(result.body) ?? 'AUTH_UNAVAILABLE',
+        httpStatus: result.status,
+      );
+    }
+    _breadcrumb(LogCode.httpCompleted, 'provider_continue_confirm_completed',
+        requestId: result.requestId, httpStatus: result.status);
+    return _parseBundle(result.body);
+  }
+
+  @override
   Future<void> logout({
     required String refreshToken,
     String? accessBearer,
@@ -316,6 +423,7 @@ final class ProviderAuthClient implements ProviderAuthPort {
         if (item == 'apple' || item == 'google') providers.add(item);
       }
     }
+    final resolution = data['resolution'];
     return ProviderCredentialBundle(
       playerId: playerId,
       accountType: accountType,
@@ -323,6 +431,7 @@ final class ProviderAuthClient implements ProviderAuthPort {
       refreshToken: refresh,
       expiresAt: expiresAt,
       linkedProviders: providers,
+      resolution: resolution is String ? resolution : null,
     );
   }
 
@@ -332,6 +441,8 @@ final class ProviderAuthClient implements ProviderAuthPort {
       'INVALID_PROVIDER_ASSERTION',
       'INVALID_PROVIDER_CHALLENGE',
       'ACCOUNT_CONFLICT',
+      'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+      'INVALID_CONTINUATION',
       'GUEST_PROOF_REQUIRED',
       'RANKED_AUTH_REQUIRED',
       'AUTH_UNAVAILABLE',

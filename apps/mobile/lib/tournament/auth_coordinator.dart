@@ -15,6 +15,8 @@ enum AuthFlowOutcome {
   failed,
   /// Backend may have upgraded the guest; identity-preserving recovery required.
   recoveryRequired,
+  /// Unified continue: switching to an existing linked account needs confirm.
+  switchConfirmationRequired,
 }
 
 final class AuthFlowResult {
@@ -25,6 +27,8 @@ final class AuthFlowResult {
     this.conflictPlayerId,
     this.recoveryProvider,
     this.expectedPlayerId,
+    this.continuationToken,
+    this.expiresAt,
   });
 
   final AuthFlowOutcome outcome;
@@ -34,6 +38,8 @@ final class AuthFlowResult {
   final AuthProviderKind? recoveryProvider;
   /// Original guest/verified player id that recovery must resolve.
   final String? expectedPlayerId;
+  final String? continuationToken;
+  final DateTime? expiresAt;
 }
 
 /// Orchestrates challenge → native provider → backend link/login with
@@ -196,6 +202,177 @@ final class AuthCoordinator {
         errorCode: error.code,
       );
     } on ProviderAuthException catch (error) {
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  /// Unified provider continue (Apple/Google). Backend resolves link vs login.
+  Future<AuthFlowResult> continueWithProvider(
+    AuthProviderKind provider, {
+    bool localProgressProtected = false,
+  }) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_unified_started');
+      _breadcrumb('auth_provider_selected_${provider.name}');
+      var access = await session.authenticate();
+      if (access.isVerified) {
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.loggedIn,
+          access: access,
+        );
+      }
+      final guestBearer = access.isGuest ? access.accessToken : null;
+      _breadcrumb('provider_challenge_requested');
+      final challenge = await providers.challenge(
+        provider: provider,
+        purpose: ProviderAuthPurpose.continueWith,
+        guestBearer: guestBearer,
+      );
+      final binding = challenge.binding;
+      if (binding == null || binding.isEmpty) {
+        _breadcrumb('auth_unified_failed', errorCode: 'INVALID_PROVIDER_CHALLENGE');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: 'INVALID_PROVIDER_CHALLENGE',
+        );
+      }
+      _breadcrumb('provider_sign_in_started');
+      final assertion = await _nativeSignIn(provider, challenge.nonce);
+      if (assertion == null) {
+        _breadcrumb('provider_sign_in_cancelled',
+            errorCode: 'PROVIDER_SIGN_IN_CANCELLED');
+        return const AuthFlowResult(
+          outcome: AuthFlowOutcome.cancelled,
+          errorCode: 'PROVIDER_SIGN_IN_CANCELLED',
+        );
+      }
+      _breadcrumb('provider_sign_in_completed');
+      try {
+        final bundle = await providers.continueWithProvider(
+          provider: provider,
+          idToken: assertion.idToken,
+          nonce: challenge.nonce,
+          binding: binding,
+          localProgressProtected: localProgressProtected,
+          guestBearer: guestBearer,
+        );
+        final verified = await session.replaceWithVerifiedBundle(
+          accessToken: bundle.accessToken,
+          refreshToken: bundle.refreshToken,
+          expiresAt: bundle.expiresAt,
+        );
+        _breadcrumb('auth_unified_completed');
+        final resolution = bundle.resolution;
+        if (resolution != null && resolution.isNotEmpty) {
+          _breadcrumb('auth_unified_resolution_$resolution');
+        }
+        final outcome = resolution == 'link_guest'
+            ? AuthFlowOutcome.linked
+            : AuthFlowOutcome.loggedIn;
+        return AuthFlowResult(
+          outcome: outcome,
+          access: verified,
+        );
+      } on ProviderAuthException catch (error) {
+        if (error.code == 'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED') {
+          final token = error.continuationToken;
+          if (token == null || token.isEmpty) {
+            return const AuthFlowResult(
+              outcome: AuthFlowOutcome.failed,
+              errorCode: 'INVALID_CONTINUATION',
+            );
+          }
+          return AuthFlowResult(
+            outcome: AuthFlowOutcome.switchConfirmationRequired,
+            continuationToken: token,
+            expiresAt: error.expiresAt,
+          );
+        }
+        _breadcrumb('auth_unified_failed', errorCode: error.code);
+        return AuthFlowResult(
+          outcome: AuthFlowOutcome.failed,
+          errorCode: error.code,
+        );
+      }
+    } on ProviderSignInException catch (error) {
+      final cancelled =
+          error.cancelReason == ProviderSignInCancelReason.userCancelled;
+      return AuthFlowResult(
+        outcome:
+            cancelled ? AuthFlowOutcome.cancelled : AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on GuestAuthException catch (error) {
+      _breadcrumb('auth_unified_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on ProviderAuthException catch (error) {
+      _breadcrumb('auth_unified_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  /// Commits a server-issued account switch after user confirmation.
+  Future<AuthFlowResult> confirmAccountSwitch(String continuationToken) async {
+    if (_inFlight) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'AUTH_IN_FLIGHT',
+      );
+    }
+    if (continuationToken.isEmpty) {
+      return const AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: 'INVALID_REQUEST',
+      );
+    }
+    _inFlight = true;
+    try {
+      _breadcrumb('auth_switch_confirm_started');
+      final bundle = await providers.confirmContinue(
+        continuationToken: continuationToken,
+      );
+      final access = await session.replaceWithVerifiedBundle(
+        accessToken: bundle.accessToken,
+        refreshToken: bundle.refreshToken,
+        expiresAt: bundle.expiresAt,
+      );
+      _breadcrumb('auth_unified_completed');
+      final resolution = bundle.resolution;
+      if (resolution != null && resolution.isNotEmpty) {
+        _breadcrumb('auth_unified_resolution_$resolution');
+      }
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.loggedIn,
+        access: access,
+      );
+    } on GuestAuthException catch (error) {
+      _breadcrumb('auth_switch_confirm_failed', errorCode: error.code);
+      return AuthFlowResult(
+        outcome: AuthFlowOutcome.failed,
+        errorCode: error.code,
+      );
+    } on ProviderAuthException catch (error) {
+      _breadcrumb('auth_switch_confirm_failed', errorCode: error.code);
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,

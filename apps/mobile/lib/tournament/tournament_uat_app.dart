@@ -22,6 +22,7 @@ import 'package:puzzle_duel_mobile/tournament/app_state_directory.dart';
 import 'package:puzzle_duel_mobile/tournament/player_profile_screen.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_leaderboard_view.dart';
@@ -226,9 +227,14 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         code: LogCode.screenOpened,
         operation: 'ranked_auth_sheet_present',
       )));
+      final localProgressProtected =
+          await PracticeStore.hasMeaningfulLocalProgress(
+        controller.practiceStore(),
+      );
       final result = await showRankedAuthSheet(
         context: presentContext,
         coordinator: coordinator,
+        localProgressProtected: localProgressProtected,
         recoverySeed:
             pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
                 ? pendingRecovery

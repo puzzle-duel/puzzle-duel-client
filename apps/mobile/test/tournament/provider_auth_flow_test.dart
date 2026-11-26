@@ -110,11 +110,13 @@ final class _FakeProviders implements ProviderAuthPort {
         (guestBearer == null || guestBearer.isEmpty)) {
       throw const ProviderAuthException('GUEST_PROOF_REQUIRED');
     }
+    final needsBinding = purpose == ProviderAuthPurpose.login ||
+        purpose == ProviderAuthPurpose.continueWith;
     return ProviderChallenge(
       provider: provider,
       purpose: purpose,
       nonce: 'n' * 43,
-      binding: purpose == ProviderAuthPurpose.login ? 'binding-secret' : null,
+      binding: needsBinding ? 'binding-secret' : null,
     );
   }
 
@@ -186,6 +188,30 @@ final class _FakeProviders implements ProviderAuthPort {
       expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
       linkedProviders: [provider.name],
     );
+  }
+
+  @override
+  Future<ProviderCredentialBundle> continueWithProvider({
+    required AuthProviderKind provider,
+    required String idToken,
+    required String nonce,
+    required String binding,
+    bool localProgressProtected = false,
+    String? guestBearer,
+  }) async {
+    return login(
+      provider: provider,
+      idToken: idToken,
+      nonce: nonce,
+      binding: binding,
+    );
+  }
+
+  @override
+  Future<ProviderCredentialBundle> confirmContinue({
+    required String continuationToken,
+  }) async {
+    throw const ProviderAuthException('NOT_USED');
   }
 
   @override

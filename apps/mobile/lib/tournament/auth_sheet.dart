@@ -8,16 +8,11 @@ import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 
-/// Modal authentication sheet for ranked entry (Apple or Google — one is enough).
-///
-/// Default mode shows two explicit actions: link this guest, or sign in to an
-/// existing account. Link may still surface [AuthFlowOutcome.conflict]; that
-/// security gate is preserved without forcing conflict for existing-account
-/// login after logout.
+/// Modal authentication sheet — unified Apple/Google continue only.
 Future<AuthFlowResult?> showRankedAuthSheet({
   required BuildContext context,
   required AuthCoordinator coordinator,
-  bool allowExplicitLogin = true,
+  bool localProgressProtected = false,
   AuthFlowResult? recoverySeed,
 }) {
   return showModalBottomSheet<AuthFlowResult>(
@@ -29,7 +24,7 @@ Future<AuthFlowResult?> showRankedAuthSheet({
     ),
     builder: (context) => _AuthSheetBody(
       coordinator: coordinator,
-      allowExplicitLogin: allowExplicitLogin,
+      localProgressProtected: localProgressProtected,
       recoverySeed: recoverySeed,
     ),
   );
@@ -38,12 +33,12 @@ Future<AuthFlowResult?> showRankedAuthSheet({
 final class _AuthSheetBody extends StatefulWidget {
   const _AuthSheetBody({
     required this.coordinator,
-    required this.allowExplicitLogin,
+    required this.localProgressProtected,
     this.recoverySeed,
   });
 
   final AuthCoordinator coordinator;
-  final bool allowExplicitLogin;
+  final bool localProgressProtected;
   final AuthFlowResult? recoverySeed;
 
   @override
@@ -89,6 +84,11 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
     )));
     final result = await action();
     if (!mounted) return;
+    if (result.outcome == AuthFlowOutcome.switchConfirmationRequired) {
+      setState(() => _busy = false);
+      await _presentAccountSwitchDialog(result);
+      return;
+    }
     if (result.outcome == AuthFlowOutcome.conflict) {
       setState(() {
         _busy = false;
@@ -122,7 +122,6 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
     }
     if (result.outcome == AuthFlowOutcome.failed &&
         result.errorCode == 'RECOVERY_RETRY_LINK') {
-      // Link never committed; guest still valid — return to link buttons.
       setState(() {
         _busy = false;
         _conflict = false;
@@ -130,12 +129,6 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
         _recoveryProvider = null;
         _errorCode = 'RECOVERY_RETRY_LINK';
       });
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.warning,
-        code: LogCode.authRefreshFailed,
-        operation: 'auth_login_failed',
-        errorCode: 'RECOVERY_RETRY_LINK',
-      )));
       return;
     }
     if (result.outcome == AuthFlowOutcome.cancelled) {
@@ -166,9 +159,52 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
     Navigator.of(context).pop(result);
   }
 
+  Future<void> _presentAccountSwitchDialog(AuthFlowResult pending) async {
+    final copy = TournamentCopy.of(context);
+    final token = pending.continuationToken;
+    if (token == null || token.isEmpty) {
+      setState(() => _errorCode = 'INVALID_CONTINUATION');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: !_busy,
+      builder: (dialogContext) => AlertDialog(
+        key: const Key('account-switch-dialog'),
+        title: Text(copy.accountSwitchTitle),
+        content: Text(copy.accountSwitchBody),
+        actions: [
+          TextButton(
+            key: const Key('account-switch-keep-guest'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(copy.accountSwitchKeepGuest),
+          ),
+          TextButton(
+            key: const Key('account-switch-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(copy.accountSwitchConfirm),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (confirmed != true) {
+      Navigator.of(context).pop(
+        const AuthFlowResult(
+          outcome: AuthFlowOutcome.cancelled,
+          errorCode: 'ACCOUNT_SWITCH_CANCELLED',
+        ),
+      );
+      return;
+    }
+    await _run(
+      () => widget.coordinator.confirmAccountSwitch(token),
+      startedOperation: 'auth_switch_confirm_started',
+    );
+  }
+
   bool get _showDuplicateSafeError {
     if (_errorCode == null) return false;
-    // Body already carries the full conflict/recovery explanation.
     if (_conflict && _errorCode == 'ACCOUNT_CONFLICT') return false;
     if (_recovery &&
         (_errorCode == 'SECURE_STORE_UNAVAILABLE' ||
@@ -189,8 +225,7 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
     final bottom = MediaQuery.paddingOf(context).bottom;
-    final showConflictOrRecovery =
-        (_conflict || _recovery) && widget.allowExplicitLogin;
+    final showRecoveryLogin = _recovery || _conflict;
     final showLoginApple = !_recovery ||
         _recoveryProvider == null ||
         _recoveryProvider == AuthProviderKind.apple;
@@ -244,7 +279,7 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
               ),
             ],
             const SizedBox(height: 20),
-            if (showConflictOrRecovery) ...[
+            if (showRecoveryLogin) ...[
               if (showLoginApple)
                 _ProviderButton(
                   key: const Key('auth-login-apple'),
@@ -295,15 +330,6 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                 ),
               ],
             ] else ...[
-              Text(
-                copy.authLinkSectionTitle,
-                key: const Key('auth-link-section'),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: GameTokens.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
               _ProviderButton(
                 key: const Key('auth-apple'),
                 label: copy.continueWithApple,
@@ -311,9 +337,11 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                 foreground: Colors.white,
                 enabled: !_busy,
                 onPressed: () => _run(
-                  () => widget.coordinator
-                      .linkCurrentGuest(AuthProviderKind.apple),
-                  startedOperation: 'auth_login_started',
+                  () => widget.coordinator.continueWithProvider(
+                    AuthProviderKind.apple,
+                    localProgressProtected: widget.localProgressProtected,
+                  ),
+                  startedOperation: 'auth_unified_started',
                 ),
               ),
               const SizedBox(height: 12),
@@ -325,49 +353,13 @@ final class _AuthSheetBodyState extends State<_AuthSheetBody> {
                 border: true,
                 enabled: !_busy,
                 onPressed: () => _run(
-                  () => widget.coordinator
-                      .linkCurrentGuest(AuthProviderKind.google),
-                  startedOperation: 'auth_login_started',
+                  () => widget.coordinator.continueWithProvider(
+                    AuthProviderKind.google,
+                    localProgressProtected: widget.localProgressProtected,
+                  ),
+                  startedOperation: 'auth_unified_started',
                 ),
               ),
-              if (widget.allowExplicitLogin) ...[
-                const SizedBox(height: 20),
-                Text(
-                  copy.authLoginSectionTitle,
-                  key: const Key('auth-login-section'),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: GameTokens.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _ProviderButton(
-                  key: const Key('auth-login-apple'),
-                  label: copy.signInExistingApple,
-                  background: Colors.black,
-                  foreground: Colors.white,
-                  enabled: !_busy,
-                  onPressed: () => _run(
-                    () => widget.coordinator
-                        .loginExisting(AuthProviderKind.apple),
-                    startedOperation: 'auth_login_started',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _ProviderButton(
-                  key: const Key('auth-login-google'),
-                  label: copy.signInExistingGoogle,
-                  background: Colors.white,
-                  foreground: Colors.black87,
-                  border: true,
-                  enabled: !_busy,
-                  onPressed: () => _run(
-                    () => widget.coordinator
-                        .loginExisting(AuthProviderKind.google),
-                    startedOperation: 'auth_login_started',
-                  ),
-                ),
-              ],
             ],
             const SizedBox(height: 8),
             if (_busy)
