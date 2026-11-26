@@ -126,7 +126,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         stateDirectory: directory,
         identity: identity,
         sessionAuth: widget.sessionAuth,
-        sessionRecovery: widget.sessionRecovery,
+        initialSessionRecovery: widget.sessionRecovery,
         sfx: _sfx,
         settings: settings,
         haptics:
@@ -141,8 +141,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
             ),
       );
       controller.onRequestRankedAuth = () {
-        unawaited(widget.sessionRecovery != null ||
-                controller.sessionRecoveryRequired
+        unawaited(controller.sessionRecoveryRequired
             ? _presentSessionRecovery(controller)
             : _presentRankedAuth(controller));
       };
@@ -162,13 +161,14 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       unawaited(
         controller.refreshTournament(origin: TournamentRefreshOrigin.startup),
       );
-      if (widget.sessionRecovery != null) {
+      final bootRecovery = controller.activeSessionRecovery;
+      if (bootRecovery != null) {
         unawaited(DiagnosticRuntime.logger.log(LogEvent(
           level: LogLevel.warning,
           code: LogCode.sessionRestoreFailed,
           operation: 'guest_recovery_shell_ready',
-          requestId: widget.sessionRecovery!.lastRequestId,
-          errorCode: widget.sessionRecovery!.code,
+          requestId: bootRecovery.lastRequestId,
+          errorCode: bootRecovery.code,
         )));
       }
       // Audio warm-up must not delay first tap.
@@ -211,9 +211,9 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
   Future<void> _presentSessionRecovery(TournamentController controller) async {
     final navContext = _navKey.currentContext;
     if (!mounted || navContext == null) return;
-    final recovery = widget.sessionRecovery ??
-        GuestSessionRecovery(code: controller.tournamentNoticeCode ??
-            'GUEST_RECOVERY_REQUIRED');
+    // Always use the mutable controller snapshot — never stale widget seed.
+    final recovery = controller.activeSessionRecovery;
+    if (recovery == null || !controller.sessionRecoveryRequired) return;
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.screenOpened,
@@ -233,6 +233,14 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         coordinator: widget.authCoordinator,
         crashReporter: widget.crashReporter,
         api: controller.api,
+        onRetryNetwork: recovery.isTransientNetwork
+            ? () async {
+                await controller.refreshTournament(
+                  origin: TournamentRefreshOrigin.pullToRefresh,
+                );
+                return !controller.sessionRecoveryRequired;
+              }
+            : null,
         onRecovered: (access) async {
           controller.clearSessionRecoveryGate(bearer: access.accessToken);
           await controller.completeRankedAuthAndEnter();
@@ -316,8 +324,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
               )
             : ListenableBuilder(
                 listenable: controller,
-                builder: (context, _) =>
-                    _TournamentShell(controller: controller),
+                builder: (context, _) => _TournamentShell(
+                  controller: controller,
+                  crashReporter: widget.crashReporter,
+                ),
               ),
       ),
     );
@@ -339,9 +349,13 @@ final class SilentGameSfx extends GameSfx {
 }
 
 final class _TournamentShell extends StatelessWidget {
-  const _TournamentShell({required this.controller});
+  const _TournamentShell({
+    required this.controller,
+    this.crashReporter,
+  });
 
   final TournamentController controller;
+  final CrashReporter? crashReporter;
 
   @override
   Widget build(BuildContext context) {
@@ -376,11 +390,17 @@ final class _TournamentShell extends StatelessWidget {
       // pop reveals a stable Home backdrop instead of a second leaderboard.
       TournamentPlace.daily || TournamentPlace.weekly =>
         controller.route.leaderboardReturn == TournamentPlace.home
-            ? _HomeScreen(controller: controller)
+            ? _HomeScreen(
+                controller: controller,
+                crashReporter: crashReporter,
+              )
             : TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
-      TournamentPlace.home => _HomeScreen(controller: controller),
+      TournamentPlace.home => _HomeScreen(
+          controller: controller,
+          crashReporter: crashReporter,
+        ),
     };
   }
 }
@@ -435,10 +455,17 @@ final class _PlayFeedback extends StatelessWidget {
   }
 }
 
-void _openSettings(BuildContext context, TournamentController controller) {
+void _openSettings(
+  BuildContext context,
+  TournamentController controller, {
+  CrashReporter? crashReporter,
+}) {
   Navigator.of(context).push(
     tournamentPageRoute<void>(
-      builder: (context) => TournamentSettingsScreen(controller: controller),
+      builder: (context) => TournamentSettingsScreen(
+        controller: controller,
+        crashReporter: crashReporter,
+      ),
     ),
   );
 }
@@ -537,9 +564,13 @@ final class _Loading extends StatelessWidget {
 }
 
 final class _HomeScreen extends StatelessWidget {
-  const _HomeScreen({required this.controller});
+  const _HomeScreen({
+    required this.controller,
+    this.crashReporter,
+  });
 
   final TournamentController controller;
+  final CrashReporter? crashReporter;
 
   @override
   Widget build(BuildContext context) {
@@ -657,7 +688,11 @@ final class _HomeScreen extends StatelessWidget {
                         IconButton(
                           key: const Key('settings'),
                           tooltip: copy.settingsTitle,
-                          onPressed: () => _openSettings(context, controller),
+                          onPressed: () => _openSettings(
+                            context,
+                            controller,
+                            crashReporter: crashReporter,
+                          ),
                           icon: const Icon(Icons.settings_rounded),
                         ),
                       ],
@@ -2045,6 +2080,7 @@ final class _GuestSessionRecoverySheet extends StatefulWidget {
   const _GuestSessionRecoverySheet({
     required this.recovery,
     required this.onRecovered,
+    this.onRetryNetwork,
     this.coordinator,
     this.crashReporter,
     this.api,
@@ -2052,6 +2088,7 @@ final class _GuestSessionRecoverySheet extends StatefulWidget {
 
   final GuestSessionRecovery recovery;
   final Future<void> Function(GuestAccess access) onRecovered;
+  final Future<bool> Function()? onRetryNetwork;
   final AuthCoordinator? coordinator;
   final CrashReporter? crashReporter;
   final UatApi? api;
@@ -2097,6 +2134,26 @@ final class _GuestSessionRecoverySheetState
     });
   }
 
+  Future<void> _retryNetwork() async {
+    final retry = widget.onRetryNetwork;
+    if (retry == null || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _status = null;
+    });
+    final cleared = await retry();
+    if (!mounted) return;
+    if (cleared) {
+      Navigator.pop(context);
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _error = widget.recovery.code;
+    });
+  }
+
   Future<void> _sendDiagnostics() async {
     if (_busy) return;
     setState(() {
@@ -2104,49 +2161,22 @@ final class _GuestSessionRecoverySheetState
       _status = null;
       _error = null;
     });
-    final requestId = widget.recovery.lastRequestId;
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.warning,
-      code: LogCode.diagnosticFailure,
+    final result = await sendStagingManualDiagnostics(
       operation: 'guest_recovery_manual_report',
-      requestId: requestId,
+      requestId: widget.recovery.lastRequestId,
       errorCode: widget.recovery.code,
-    )));
-    // Authenticated diagnostic endpoint needs a live tournament session.
-    // Do not bypass auth: flush safe Crashlytics breadcrumbs via nonfatal.
-    try {
-      final reporter = widget.crashReporter;
-      if (reporter != null) {
-        await reporter.recordNonFatal(
-          StateError('GUEST_SESSION_RECOVERY_DIAGNOSTIC'),
-          StackTrace.current,
-        );
+      crashReporter: widget.crashReporter,
+      api: widget.api,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (result.serverDelivered || result.crashlyticsRecorded) {
+        _status = result.userMessage;
+      } else {
+        _error = result.userMessage;
       }
-      final api = widget.api;
-      if (api != null && api.bearer.trim().isNotEmpty) {
-        final result = await api.sendDiagnosticReport();
-        if (!mounted) return;
-        final reportId = result.map['reportId'];
-        setState(() {
-          _busy = false;
-          _status = result.status == 201 && reportId is String
-              ? 'report:$reportId'
-              : 'crashlytics:${requestId ?? 'none'}';
-        });
-        return;
-      }
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _status = 'crashlytics:${requestId ?? 'none'}';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = 'DIAGNOSTIC_SEND_FAILED';
-      });
-    }
+    });
   }
 
   @override
@@ -2154,6 +2184,7 @@ final class _GuestSessionRecoverySheetState
     final copy = TournamentCopy.of(context);
     final canProvider = widget.recovery.canAttemptProviderRecover &&
         widget.coordinator != null;
+    final transient = widget.recovery.isTransientNetwork;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -2168,9 +2199,11 @@ final class _GuestSessionRecoverySheetState
             ),
             const SizedBox(height: 8),
             Text(
-              canProvider
-                  ? copy.sessionRecoveryRequired
-                  : copy.sessionRecoveryPureGuest,
+              transient
+                  ? copy.sessionRecoveryTransient
+                  : canProvider
+                      ? copy.sessionRecoveryRequired
+                      : copy.sessionRecoveryPureGuest,
               key: const Key('guest-recovery-body'),
             ),
             const SizedBox(height: 8),
@@ -2188,6 +2221,14 @@ final class _GuestSessionRecoverySheetState
               ),
             ],
             const SizedBox(height: 16),
+            if (transient) ...[
+              FilledButton(
+                key: const Key('guest-recovery-retry-network'),
+                onPressed: _busy ? null : () => unawaited(_retryNetwork()),
+                child: Text(copy.retryConnection),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (canProvider) ...[
               FilledButton(
                 key: const Key('guest-recovery-google'),

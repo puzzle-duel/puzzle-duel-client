@@ -75,6 +75,8 @@ Future<void> main() async {
         providers: providers,
         signIn: PlatformProviderSignIn(),
       );
+      Future<String> liveAccessToken() async =>
+          (await auth.authenticate(allowGuestCreate: false)).accessToken;
       try {
         final access = await auth.authenticate();
         await runTournamentUatApp(UatConfig(
@@ -90,6 +92,7 @@ Future<void> main() async {
         ), stagingGuestSlot: guestSlot,
           sessionAuth: auth,
           authCoordinator: coordinator,
+          crashReporter: crashReporter,
         );
       } on GuestAuthException catch (error) {
         if (!GuestSessionRecovery.isRecoverableStartup(error.code)) {
@@ -97,6 +100,7 @@ Future<void> main() async {
           return;
         }
         // Keep vault credentials. Practice stays available; ranked stays gated.
+        // accessTokenProvider stays live so successful recovery can refresh.
         final recovery = await auth.captureSessionRecovery(error.code);
         unawaited(DiagnosticRuntime.logger.log(LogEvent(
           level: LogLevel.warning,
@@ -116,9 +120,7 @@ Future<void> main() async {
         ), api: UatApi(
           baseUrl: UatApi.apiOrigin(staging),
           bearer: '',
-          accessTokenProvider: () async {
-            throw GuestAuthException(recovery.code);
-          },
+          accessTokenProvider: liveAccessToken,
         ), stagingGuestSlot: guestSlot,
           sessionAuth: auth,
           authCoordinator: coordinator,

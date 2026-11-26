@@ -269,6 +269,11 @@ final class TournamentCopy {
     'This device still holds the previous guest credentials, but the server refresh family was revoked. Practice remains available. Restoring ranked play for a pure guest requires owner-approved same-player recovery — do not create a new guest.',
     'Cihazda önceki misafir kimlik bilgileri duruyor; sunucudaki refresh ailesi iptal edilmiş. Pratik açık. Saf misafir için sıralı oyunu geri getirmek owner onaylı same-player kurtarma ister — yeni misafir oluşturma.',
   );
+  String get sessionRecoveryTransient => pick(
+    'Tournament connection is temporarily unavailable. Practice stays open. Retry when the network returns — a new guest account will not be created.',
+    'Turnuva bağlantısı geçici olarak yok. Pratik açık kalır. Ağ gelince yeniden dene — yeni misafir hesap oluşturulmaz.',
+  );
+  String get retryConnection => pick('Retry connection', 'Bağlantıyı yeniden dene');
   String get sendDiagnosticsRecovery => pick(
     'Send diagnostics',
     'Log gönder',
@@ -471,6 +476,8 @@ final class TournamentCopy {
       'PROVIDER_LINK_RECOVERY_apple' ||
       'PROVIDER_LINK_RECOVERY_google' =>
         sessionRecoveryRequired,
+      'REFRESH_UNAVAILABLE' || 'AUTH_NETWORK_UNAVAILABLE' =>
+        sessionRecoveryTransient,
       'WRITER_NOT_AUTHORIZED' => writerBlocked,
       'RATE_LIMITED' => pick(
         'Too many tournament requests. Please try again shortly.',
