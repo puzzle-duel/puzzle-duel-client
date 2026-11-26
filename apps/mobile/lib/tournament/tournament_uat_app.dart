@@ -231,8 +231,18 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
           await PracticeStore.hasMeaningfulLocalProgress(
         controller.practiceStore(),
       );
+      final sheetContext = _navKey.currentContext;
+      if (!mounted || sheetContext == null || !sheetContext.mounted) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.authRefreshFailed,
+          operation: 'ranked_auth_sheet_present_failed',
+          errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+        )));
+        return;
+      }
       final result = await showRankedAuthSheet(
-        context: presentContext,
+        context: sheetContext,
         coordinator: coordinator,
         localProgressProtected: localProgressProtected,
         recoverySeed:

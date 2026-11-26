@@ -81,7 +81,6 @@ final class _MemStore implements GuestCredentialStore {
 
 final class _ScriptedProviders implements ProviderAuthPort {
   _ScriptedProviders({
-    this.linkError,
     this.continueError,
     this.logoutError,
     this.logoutDelay,
