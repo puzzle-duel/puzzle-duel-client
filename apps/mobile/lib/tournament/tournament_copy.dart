@@ -225,8 +225,16 @@ final class TournamentCopy {
     'Sıralamalı oyun için doğrula',
   );
   String get authSheetBody => pick(
-    'Sign in with Apple or Google to enter today’s official tournament. Practice stays available as a guest. Your current progress stays on this account.',
-    'Bugünün resmi turnuvasına girmek için Apple veya Google ile oturum aç. Pratik misafir olarak kullanılmaya devam eder. Mevcut ilerlemen bu hesapta kalır.',
+    'Choose how to verify. Linking keeps this guest’s progress on the same player. Signing in to an existing account switches to that player — accounts are never merged automatically.',
+    'Nasıl doğrulayacağını seç. Bağlama, bu misafir ilerlemesini aynı oyuncuda tutar. Mevcut hesaba giriş o oyuncuya geçer — hesaplar otomatik birleştirilmez.',
+  );
+  String get authLinkSectionTitle => pick(
+    'Link this guest account',
+    'Bu misafir hesabını bağla',
+  );
+  String get authLoginSectionTitle => pick(
+    'Sign in to an existing account',
+    'Mevcut hesaba giriş yap',
   );
   String get authConflictBody => pick(
     'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress was not changed. Sign into the existing account only if you intend to switch — identities are never merged.',
@@ -240,12 +248,12 @@ final class TournamentCopy {
   String get continueWithGoogle =>
       pick('Continue with Google', 'Google ile devam et');
   String get signInExistingApple => pick(
-    'Sign in to existing Apple account',
-    'Mevcut Apple hesabına giriş yap',
+    'Sign in with Apple',
+    'Apple ile giriş yap',
   );
   String get signInExistingGoogle => pick(
-    'Sign in to existing Google account',
-    'Mevcut Google hesabına giriş yap',
+    'Sign in with Google',
+    'Google ile giriş yap',
   );
   String get keepGuestProgress => pick(
     'Keep guest progress',
@@ -255,6 +263,28 @@ final class TournamentCopy {
   String get signInToPlay => pick(
     'Sign in to play tournament',
     'Turnuva için oturum aç',
+  );
+  String get signOutConfirmTitle => pick('Sign out?', 'Oturum kapatılsın mı?');
+  String get signOutConfirmBody => pick(
+    'You will return to a guest account on this device. Tournament play will require verification again. Practice stays available.',
+    'Bu cihazda misafir hesaba döneceksin. Turnuva için yeniden doğrulama gerekir. Pratik açık kalır.',
+  );
+  String get signOutConfirmAction => pick('Sign out', 'Oturumu kapat');
+  String get logoutSucceeded => pick(
+    'Signed out. You are playing as a guest.',
+    'Oturum kapatıldı. Misafir olarak devam ediyorsun.',
+  );
+  String get logoutFailed => pick(
+    'Sign-out could not be completed. Try again.',
+    'Oturum kapatılamadı. Yeniden dene.',
+  );
+  String get loginSucceeded => pick(
+    'Signed in successfully.',
+    'Oturum açıldı.',
+  );
+  String get loginFailed => pick(
+    'Sign-in could not be completed. Try again.',
+    'Oturum açılamadı. Yeniden dene.',
   );
   String get rankedAuthRequired => pick(
     'Apple or Google verification is required before official tournament play. Practice remains free.',
@@ -300,7 +330,12 @@ final class TournamentCopy {
       pick('Verified account', 'Doğrulanmış hesap');
   String get signOut => pick('Sign out', 'Oturumu kapat');
   String authError(String code) => switch (code) {
-        'ACCOUNT_CONFLICT' => authConflictBody,
+        // Conflict/recovery bodies are shown once in the sheet; keep a short
+        // secondary line only when the sheet is not already in that mode.
+        'ACCOUNT_CONFLICT' => pick(
+          'Choose an existing-account sign-in below, or keep guest progress.',
+          'Aşağıdan mevcut hesaba giriş yap veya misafir ilerlemesini koru.',
+        ),
         'SECURE_STORE_UNAVAILABLE' ||
         'SECURE_STORE_VERIFY_FAILED' ||
         'SECURE_STORE_RECOVERY_FAILED' ||
@@ -313,7 +348,10 @@ final class TournamentCopy {
         'RECOVERY_PROVIDER_MISMATCH' ||
         'RECOVERY_MARKER_MISSING' ||
         'RECOVERY_NOT_LINKED' =>
-          authRecoveryBody,
+          pick(
+            'Use the same Apple or Google account to finish restoring this session.',
+            'Oturumu tamamlamak için aynı Apple veya Google hesabını kullan.',
+          ),
         'RECOVERY_RETRY_LINK' => pick(
           'Your guest session is still active. Continue with Apple or Google to finish linking this account.',
           'Misafir oturumun hâlâ aktif. Bu hesabı bağlamak için Apple veya Google ile devam et.',

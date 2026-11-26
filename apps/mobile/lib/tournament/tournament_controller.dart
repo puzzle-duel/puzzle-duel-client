@@ -276,6 +276,28 @@ final class TournamentController extends ChangeNotifier {
   /// UI hook: sign out verified session and restore a guest Practice session.
   VoidCallback? onRequestSignOut;
 
+  /// True while logout/login UI work is in flight (blocks duplicate taps).
+  bool authUiBusy = false;
+
+  /// Bumps when account type / player scope changes so Profile can refresh.
+  int accountStateEpoch = 0;
+
+  void setAuthUiBusy(bool value) {
+    if (authUiBusy == value) return;
+    authUiBusy = value;
+    notifyListeners();
+  }
+
+  void markAccountStateUpdated() {
+    accountStateEpoch++;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'profile_account_state_updated',
+    )));
+    notifyListeners();
+  }
+
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
 
   /// Origin of the current or just-finished Tournament refresh (banner policy).
@@ -628,7 +650,7 @@ final class TournamentController extends ChangeNotifier {
       tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
-    notifyListeners();
+    markAccountStateUpdated();
   }
 
   /// Captures vault binding / pending link / last request id for recovery UX.
@@ -745,7 +767,7 @@ final class TournamentController extends ChangeNotifier {
         if (!access.isVerified) {
           rankedAuthRequired = true;
           tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
-          notifyListeners();
+          markAccountStateUpdated();
           return;
         }
       } on GuestAuthException catch (error) {
@@ -757,6 +779,7 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
     }
+    markAccountStateUpdated();
     await refreshTournament(
       origin: TournamentRefreshOrigin.pullToRefresh,
       preserveRoute: true,

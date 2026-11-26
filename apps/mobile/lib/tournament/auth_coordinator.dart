@@ -216,6 +216,7 @@ final class AuthCoordinator {
     }
     _inFlight = true;
     try {
+      _breadcrumb('auth_login_started');
       _breadcrumb('auth_provider_selected_${provider.name}');
       _breadcrumb('provider_challenge_requested');
       final challenge = await providers.challenge(
@@ -224,6 +225,7 @@ final class AuthCoordinator {
       );
       final binding = challenge.binding;
       if (binding == null || binding.isEmpty) {
+        _breadcrumb('auth_login_failed', errorCode: 'INVALID_PROVIDER_CHALLENGE');
         return const AuthFlowResult(
           outcome: AuthFlowOutcome.failed,
           errorCode: 'INVALID_PROVIDER_CHALLENGE',
@@ -250,6 +252,7 @@ final class AuthCoordinator {
         expiresAt: bundle.expiresAt,
       );
       _breadcrumb('auth_credential_replaced');
+      _breadcrumb('auth_login_succeeded');
       return AuthFlowResult(
         outcome: AuthFlowOutcome.loggedIn,
         access: access,
@@ -257,17 +260,22 @@ final class AuthCoordinator {
     } on ProviderSignInException catch (error) {
       final cancelled =
           error.cancelReason == ProviderSignInCancelReason.userCancelled;
+      if (!cancelled) {
+        _breadcrumb('auth_login_failed', errorCode: error.code);
+      }
       return AuthFlowResult(
         outcome:
             cancelled ? AuthFlowOutcome.cancelled : AuthFlowOutcome.failed,
         errorCode: error.code,
       );
     } on GuestAuthException catch (error) {
+      _breadcrumb('auth_login_failed', errorCode: error.code);
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,
       );
     } on ProviderAuthException catch (error) {
+      _breadcrumb('auth_login_failed', errorCode: error.code);
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,
@@ -629,7 +637,7 @@ final class AuthCoordinator {
     }
     _inFlight = true;
     try {
-      _breadcrumb('auth_logout');
+      _breadcrumb('auth_logout_started');
       final refresh = await session.credentials.readRefreshToken();
       final cached = session.cachedAccess;
       if (refresh != null && refresh.isNotEmpty) {
@@ -640,6 +648,7 @@ final class AuthCoordinator {
           );
         } on ProviderAuthException catch (error) {
           if (error.code != 'INVALID_REFRESH') {
+            _breadcrumb('auth_logout_failed', errorCode: error.code);
             return AuthFlowResult(
               outcome: AuthFlowOutcome.failed,
               errorCode: error.code,
@@ -650,12 +659,13 @@ final class AuthCoordinator {
       await session.clearPendingLinkProvider();
       await session.clearSessionLocally();
       final guest = await session.authenticate();
-      _breadcrumb('auth_logout_guest_ready');
+      _breadcrumb('auth_logout_succeeded');
       return AuthFlowResult(
         outcome: AuthFlowOutcome.loggedIn,
         access: guest,
       );
     } on GuestAuthException catch (error) {
+      _breadcrumb('auth_logout_failed', errorCode: error.code);
       return AuthFlowResult(
         outcome: AuthFlowOutcome.failed,
         errorCode: error.code,

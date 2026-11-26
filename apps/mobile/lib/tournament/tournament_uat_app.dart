@@ -183,15 +183,21 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     // Must use Navigator descendant context (same as recovery sheet) — the
     // State.context sits above MaterialApp and cannot present a modal route.
     final navContext = _navKey.currentContext;
-    if (coordinator == null || !mounted || navContext == null) {
+    if (coordinator == null ||
+        !mounted ||
+        navContext == null ||
+        controller.authUiBusy) {
       unawaited(DiagnosticRuntime.logger.log(LogEvent(
         level: LogLevel.warning,
         code: LogCode.authRefreshFailed,
         operation: 'ranked_auth_sheet_present_failed',
-        errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+        errorCode: controller.authUiBusy
+            ? 'AUTH_IN_FLIGHT'
+            : 'AUTH_SHEET_CONTEXT_MISSING',
       )));
       return;
     }
+    controller.setAuthUiBusy(true);
     try {
       final pendingRecovery =
           await coordinator.consumePendingLinkRecoveryIfNeeded();
@@ -202,6 +208,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         controller.api.bearer =
             UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
         await controller.completeRankedAuthAndEnter();
+        _showAuthFeedback(controller, success: true);
         return;
       }
       final presentContext = _navKey.currentContext;
@@ -232,6 +239,9 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       if (result.outcome == AuthFlowOutcome.linked ||
           result.outcome == AuthFlowOutcome.loggedIn) {
         await controller.completeRankedAuthAndEnter();
+        _showAuthFeedback(controller, success: true);
+      } else if (result.outcome == AuthFlowOutcome.failed) {
+        _showAuthFeedback(controller, success: false);
       }
     } catch (_) {
       unawaited(DiagnosticRuntime.logger.log(LogEvent(
@@ -240,7 +250,31 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         operation: 'ranked_auth_sheet_present_failed',
         errorCode: 'AUTH_SHEET_PRESENT_FAILED',
       )));
+      _showAuthFeedback(controller, success: false);
+    } finally {
+      if (mounted) controller.setAuthUiBusy(false);
     }
+  }
+
+  void _showAuthFeedback(
+    TournamentController controller, {
+    required bool success,
+    bool logout = false,
+  }) {
+    final navContext = _navKey.currentContext;
+    if (navContext == null || !navContext.mounted) return;
+    final copy = TournamentCopy.of(navContext);
+    final message = logout
+        ? (success ? copy.logoutSucceeded : copy.logoutFailed)
+        : (success ? copy.loginSucceeded : copy.loginFailed);
+    ScaffoldMessenger.of(navContext).showSnackBar(
+      SnackBar(
+        key: Key(success
+            ? (logout ? 'auth-logout-success' : 'auth-login-success')
+            : (logout ? 'auth-logout-failure' : 'auth-login-failure')),
+        content: Text(message),
+      ),
+    );
   }
 
   Future<void> _presentSessionRecovery(TournamentController controller) async {
@@ -296,18 +330,82 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
 
   Future<void> _presentSignOut(TournamentController controller) async {
     final coordinator = widget.authCoordinator;
-    if (coordinator == null || !mounted) return;
-    final result = await coordinator.logoutAndStartGuest();
-    if (!mounted) return;
-    if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
+    final navContext = _navKey.currentContext;
+    if (coordinator == null ||
+        !mounted ||
+        navContext == null ||
+        !navContext.mounted ||
+        controller.authUiBusy) {
       return;
     }
-    controller.api.bearer =
-        UatApi.normalizeBearer(result.access!.accessToken);
-    await controller.clearAuthenticatedPracticeScope();
-    controller.applyGuestSessionAfterLogout(
-      rankedAuthRequired: result.access!.isGuest,
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'profile_logout_tapped',
+    )));
+    final copy = TournamentCopy.of(navContext);
+    final confirmed = await showDialog<bool>(
+      context: navContext,
+      builder: (dialogContext) => AlertDialog(
+        key: const Key('profile-sign-out-dialog'),
+        title: Text(copy.signOutConfirmTitle),
+        content: Text(copy.signOutConfirmBody),
+        actions: [
+          TextButton(
+            key: const Key('profile-sign-out-cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(copy.cancel),
+          ),
+          FilledButton(
+            key: const Key('profile-sign-out-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(copy.signOutConfirmAction),
+          ),
+        ],
+      ),
     );
+    if (!mounted) return;
+    if (confirmed != true) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.screenOpened,
+        operation: 'auth_logout_cancelled',
+      )));
+      return;
+    }
+    controller.setAuthUiBusy(true);
+    try {
+      final result = await coordinator.logoutAndStartGuest();
+      if (!mounted) return;
+      if (result.outcome != AuthFlowOutcome.loggedIn ||
+          result.access == null) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.authRefreshFailed,
+          operation: 'auth_logout_failed',
+          errorCode: result.errorCode ?? 'AUTH_UNAVAILABLE',
+        )));
+        _showAuthFeedback(controller, success: false, logout: true);
+        return;
+      }
+      controller.api.bearer =
+          UatApi.normalizeBearer(result.access!.accessToken);
+      await controller.clearAuthenticatedPracticeScope();
+      controller.applyGuestSessionAfterLogout(
+        rankedAuthRequired: result.access!.isGuest,
+      );
+      _showAuthFeedback(controller, success: true, logout: true);
+    } catch (_) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.authRefreshFailed,
+        operation: 'auth_logout_failed',
+        errorCode: 'AUTH_UNAVAILABLE',
+      )));
+      _showAuthFeedback(controller, success: false, logout: true);
+    } finally {
+      if (mounted) controller.setAuthUiBusy(false);
+    }
   }
 
   @override
