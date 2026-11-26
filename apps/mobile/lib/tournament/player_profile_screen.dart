@@ -41,14 +41,18 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   );
   var _loadingBadges = true;
   var _accountStateEpoch = -1;
+  var _localLoadGeneration = 0;
+  var _badgeLoadGeneration = 0;
+
+  bool get _isVerifiedAccount =>
+      widget.controller.sessionAuth?.cachedAccess?.isVerified == true;
 
   @override
   void initState() {
     super.initState();
     _accountStateEpoch = widget.controller.accountStateEpoch;
     widget.controller.addListener(_onControllerChanged);
-    _reloadLocal();
-    _loadBadges();
+    unawaited(_refresh());
   }
 
   @override
@@ -57,8 +61,10 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
-      _accountStateEpoch = widget.controller.accountStateEpoch;
-      unawaited(_refresh());
+      _beginAccountScopedRefresh(
+        epoch: widget.controller.accountStateEpoch,
+        clearImmediately: true,
+      );
     }
   }
 
@@ -72,13 +78,64 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     if (!mounted) return;
     final epoch = widget.controller.accountStateEpoch;
     if (epoch != _accountStateEpoch) {
-      _accountStateEpoch = epoch;
-      unawaited(_refresh());
+      _beginAccountScopedRefresh(epoch: epoch, clearImmediately: true);
+      return;
     }
     setState(() {});
   }
 
-  Future<void> _reloadLocal() async {
+  void _clearAccountScopedUi() {
+    _stats = const PracticeStats(
+      completedCount: 0,
+      difficultyCounts: {},
+    );
+    _bests = const {
+      'easy': null,
+      'medium': null,
+      'hard': null,
+    };
+    _loadingBadges = true;
+    _badges = BadgeCollectionSnapshot.lockedCatalog(
+      status: BadgeCollectionStatus.loading,
+    );
+  }
+
+  void _beginAccountScopedRefresh({
+    required int epoch,
+    required bool clearImmediately,
+  }) {
+    _accountStateEpoch = epoch;
+    final localGeneration = ++_localLoadGeneration;
+    final badgeGeneration = ++_badgeLoadGeneration;
+    if (clearImmediately) {
+      _clearAccountScopedUi();
+    }
+    setState(() {});
+    unawaited(_reloadLocal(
+      expectedEpoch: epoch,
+      generation: localGeneration,
+    ));
+    unawaited(_loadBadges(
+      expectedEpoch: epoch,
+      generation: badgeGeneration,
+    ));
+  }
+
+  bool _isStaleLoad({
+    required int expectedEpoch,
+    required int generation,
+    required int currentGeneration,
+  }) {
+    return !mounted ||
+        expectedEpoch != widget.controller.accountStateEpoch ||
+        expectedEpoch != _accountStateEpoch ||
+        generation != currentGeneration;
+  }
+
+  Future<void> _reloadLocal({
+    required int expectedEpoch,
+    required int generation,
+  }) async {
     _store = widget.controller.practiceStore();
     final stats = await _store.stats();
     final bests = <String, PracticeBest?>{};
@@ -89,25 +146,46 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         preferredGeneratorVersion: _practiceGenerator,
       );
     }
-    if (!mounted) return;
+    if (_isStaleLoad(
+      expectedEpoch: expectedEpoch,
+      generation: generation,
+      currentGeneration: _localLoadGeneration,
+    )) {
+      return;
+    }
     setState(() {
       _stats = stats;
       _bests = bests;
     });
   }
 
-  Future<void> _loadBadges() async {
-    setState(() {
-      _loadingBadges = true;
-      _badges = BadgeCollectionSnapshot.lockedCatalog(
-        status: BadgeCollectionStatus.loading,
-      );
-    });
+  Future<void> _loadBadges({
+    required int expectedEpoch,
+    required int generation,
+  }) async {
+    if (!_isStaleLoad(
+      expectedEpoch: expectedEpoch,
+      generation: generation,
+      currentGeneration: _badgeLoadGeneration,
+    )) {
+      setState(() {
+        _loadingBadges = true;
+        _badges = BadgeCollectionSnapshot.lockedCatalog(
+          status: BadgeCollectionStatus.loading,
+        );
+      });
+    }
     try {
       final result = await widget.controller.api.get(
         '/v1/tournament/me/badges',
       );
-      if (!mounted) return;
+      if (_isStaleLoad(
+        expectedEpoch: expectedEpoch,
+        generation: generation,
+        currentGeneration: _badgeLoadGeneration,
+      )) {
+        return;
+      }
       if (result.status == 0) {
         setState(() {
           _loadingBadges = false;
@@ -145,7 +223,13 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         _badges = BadgeCollectionSnapshot.fromServerPayload(result.map);
       });
     } catch (_) {
-      if (!mounted) return;
+      if (_isStaleLoad(
+        expectedEpoch: expectedEpoch,
+        generation: generation,
+        currentGeneration: _badgeLoadGeneration,
+      )) {
+        return;
+      }
       setState(() {
         _loadingBadges = false;
         _badges = BadgeCollectionSnapshot.lockedCatalog(
@@ -156,16 +240,22 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   }
 
   Future<void> _refresh() async {
-    await _reloadLocal();
-    await _loadBadges();
+    final epoch = widget.controller.accountStateEpoch;
+    _accountStateEpoch = epoch;
+    final localGeneration = ++_localLoadGeneration;
+    final badgeGeneration = ++_badgeLoadGeneration;
+    await Future.wait([
+      _reloadLocal(expectedEpoch: epoch, generation: localGeneration),
+      _loadBadges(expectedEpoch: epoch, generation: badgeGeneration),
+    ]);
   }
 
   @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
-    final displayName = widget.controller.config.playerLabel.trim().isEmpty
-        ? copy.playerFallback
-        : widget.controller.config.playerLabel;
+    final verified = _isVerifiedAccount;
+    final accountLabel =
+        verified ? copy.accountStatusVerified : copy.accountStatusGuest;
     return Scaffold(
       backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
@@ -196,15 +286,14 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                 ),
                 const SizedBox(height: 8),
                 _ProfileHeader(
-                  displayName: displayName,
+                  accountLabel: accountLabel,
+                  verified: verified,
                   stats: _stats,
                   copy: copy,
                 ),
                 const SizedBox(height: 12),
                 _AccountStatusCard(
-                  verified: widget.controller.sessionAuth?.cachedAccess
-                          ?.isVerified ==
-                      true,
+                  verified: verified,
                   busy: widget.controller.authUiBusy,
                   copy: copy,
                   onSignIn: widget.controller.onRequestRankedAuth == null ||
@@ -289,7 +378,15 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   snapshot: _badges,
                   loading: _loadingBadges,
                   copy: copy,
-                  onRetry: _loadBadges,
+                  onRetry: () {
+                    final epoch = widget.controller.accountStateEpoch;
+                    _accountStateEpoch = epoch;
+                    final generation = ++_badgeLoadGeneration;
+                    unawaited(_loadBadges(
+                      expectedEpoch: epoch,
+                      generation: generation,
+                    ));
+                  },
                 ),
                 const SizedBox(height: 12),
                 if (FirebaseDiagnostics.stagingDiagnosticsEnabled) ...[
@@ -530,12 +627,14 @@ final class _AccountStatusCard extends StatelessWidget {
 
 final class _ProfileHeader extends StatelessWidget {
   const _ProfileHeader({
-    required this.displayName,
+    required this.accountLabel,
+    required this.verified,
     required this.stats,
     required this.copy,
   });
 
-  final String displayName;
+  final String accountLabel;
+  final bool verified;
   final PracticeStats stats;
   final TournamentCopy copy;
 
@@ -543,7 +642,7 @@ final class _ProfileHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       container: true,
-      label: '${copy.profile}, $displayName',
+      label: '${copy.profile}, $accountLabel',
       child: Container(
         key: const Key('profile-header'),
         padding: const EdgeInsets.all(GameTokens.spaceMd),
@@ -558,8 +657,10 @@ final class _ProfileHeader extends StatelessWidget {
               radius: 28,
               backgroundColor: GameTokens.surfaceHigh,
               child: Icon(
-                Icons.person_rounded,
-                color: GameTokens.accent,
+                verified
+                    ? Icons.verified_user_rounded
+                    : Icons.person_rounded,
+                color: verified ? GameTokens.success : GameTokens.accent,
                 size: 28,
               ),
             ),
@@ -569,7 +670,12 @@ final class _ProfileHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    displayName,
+                    accountLabel,
+                    key: Key(
+                      verified
+                          ? 'profile-header-verified'
+                          : 'profile-header-guest',
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleLarge

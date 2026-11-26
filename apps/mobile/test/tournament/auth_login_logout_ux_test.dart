@@ -337,6 +337,67 @@ void main() {
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
   });
 
+  testWidgets(
+      'profile header and account card stay consistent after logout',
+      (tester) async {
+    // Static config label must not stick as "Verified" after guest switch.
+    await _pumpApp(
+      tester,
+      verified: true,
+      playerLabel: 'Verified',
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await _settle(tester);
+    expect(find.byKey(const Key('profile-header-verified')), findsOneWidget);
+    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+    expect(find.text('Doğrulanmış hesap'), findsNWidgets(2));
+
+    await tester.tap(find.byKey(const Key('profile-sign-out')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
+    await _settle(tester);
+
+    expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
+    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+    expect(find.text('Misafir hesap'), findsNWidgets(2));
+    expect(find.byKey(const Key('profile-header-verified')), findsNothing);
+    expect(find.text('Verified'), findsNothing);
+  });
+
+  testWidgets(
+      'delayed pre-logout badge response is discarded after account switch',
+      (tester) async {
+    final badgeGate = Completer<void>();
+    final harness = await _pumpApp(
+      tester,
+      verified: true,
+      badgeDelay: badgeGate,
+      verifiedBadgeEarnedCount: 9,
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(harness.badgeRequests, greaterThanOrEqualTo(1));
+
+    await tester.tap(find.byKey(const Key('profile-sign-out')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
+    await _settle(tester);
+    expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
+    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+
+    // Old verified badge payload arrives late — must be ignored.
+    badgeGate.complete();
+    await _settle(tester);
+    expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
+    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+    expect(find.textContaining('9'), findsNothing);
+    expect(
+      find.text('9 kez kazanıldı', skipOffstage: false),
+      findsNothing,
+    );
+  });
+
   test('session survives restart after existing-account login', () async {
     final store = _MemStore()..token = 'g' * 64;
     const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -391,6 +452,7 @@ void main() {
 
 final class _Harness {
   var claimPosts = 0;
+  var badgeRequests = 0;
   late GuestAuthClient session;
   late _MemStore store;
 }
@@ -399,6 +461,9 @@ Future<_Harness> _pumpApp(
   WidgetTester tester, {
   required bool verified,
   _ScriptedProviders? providers,
+  String? playerLabel,
+  Completer<void>? badgeDelay,
+  int verifiedBadgeEarnedCount = 2,
 }) async {
   final directory =
       Directory.systemTemp.createTempSync('pzd27-login-logout-ux');
@@ -471,6 +536,7 @@ Future<_Harness> _pumpApp(
   final harness = _Harness()
     ..session = guestSession
     ..store = store;
+  var firstBadgeDelayed = false;
   final api = ScriptedUatApi((method, path, body) async {
     if (path == '/v1/tournament/claims/daily' && method == 'POST') {
       harness.claimPosts++;
@@ -500,14 +566,37 @@ Future<_Harness> _pumpApp(
       });
     }
     if (path == '/v1/tournament/me/badges') {
+      harness.badgeRequests++;
+      final delay = badgeDelay;
+      if (delay != null && !firstBadgeDelayed) {
+        firstBadgeDelayed = true;
+        await delay.future;
+        // Always return the pre-switch verified payload for the delayed call.
+        return UatHttpResult(200, {
+          'playerScoped': true,
+          'catalogVersion': 1,
+          'badges': [
+            {
+              'badgeId': 'on_time',
+              'earnedCount': verifiedBadgeEarnedCount,
+              'lastEarnedAt': '2026-11-18',
+              'repeatable': true,
+              'provenance': 'f2b_publication',
+              'grants': [],
+            },
+          ],
+        });
+      }
+      final showVerifiedBadges =
+          guestSession.cachedAccess?.isVerified == true;
       return UatHttpResult(200, {
         'playerScoped': true,
         'catalogVersion': 1,
         'badges': [
-          if (verified)
+          if (showVerifiedBadges)
             {
               'badgeId': 'on_time',
-              'earnedCount': 2,
+              'earnedCount': verifiedBadgeEarnedCount,
               'lastEarnedAt': '2026-11-18',
               'repeatable': true,
               'provenance': 'f2b_publication',
@@ -529,7 +618,7 @@ Future<_Harness> _pumpApp(
       config: UatConfig(
         baseUrl: 'https://staging.puzzle-duel.app',
         bearer: token,
-        playerLabel: verified ? 'Verified' : 'Guest',
+        playerLabel: playerLabel ?? (verified ? 'Verified' : 'Guest'),
       ),
       api: api,
       stateDirectory: directory,
