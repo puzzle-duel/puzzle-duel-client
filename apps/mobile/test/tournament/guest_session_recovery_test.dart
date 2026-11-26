@@ -432,7 +432,7 @@ void main() {
     expect(find.byKey(const Key('guest-recovery-request-id')), findsOneWidget);
   });
 
-  Future<void> _pumpRecoveryHome(
+  Future<void> pumpRecoveryHome(
     WidgetTester tester, {
     required Directory directory,
     required GuestSessionRecovery recovery,
@@ -484,7 +484,7 @@ void main() {
       if (path == '/v1/auth/guest') guestCreates++;
       fail('cancel must not hit auth transport');
     };
-    await _pumpRecoveryHome(
+    await pumpRecoveryHome(
       tester,
       directory: directory,
       sessionAuth: auth,
@@ -549,7 +549,7 @@ void main() {
       }
       fail('unexpected $path');
     };
-    await _pumpRecoveryHome(
+    await pumpRecoveryHome(
       tester,
       directory: directory,
       sessionAuth: auth,
@@ -593,7 +593,7 @@ void main() {
       }
       fail('unexpected $path');
     };
-    await _pumpRecoveryHome(
+    await pumpRecoveryHome(
       tester,
       directory: directory,
       sessionAuth: auth,
@@ -634,7 +634,7 @@ void main() {
     auth.debugTransport = (path, body) async {
       fail('verified recovery must not mint guest');
     };
-    await _pumpRecoveryHome(
+    await pumpRecoveryHome(
       tester,
       directory: directory,
       sessionAuth: auth,
@@ -669,7 +669,7 @@ void main() {
     auth.debugTransport = (path, body) async {
       fail('pending recovery must not mint guest');
     };
-    await _pumpRecoveryHome(
+    await pumpRecoveryHome(
       tester,
       directory: directory,
       sessionAuth: auth,
