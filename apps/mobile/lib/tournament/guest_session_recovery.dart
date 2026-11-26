@@ -69,8 +69,21 @@ final class GuestSessionRecovery {
   String? get expectedPlayerId =>
       pendingLink?.playerId ?? binding?.playerId;
 
-  bool get canAttemptProviderRecover =>
-      expectedPlayerId != null && expectedPlayerId!.isNotEmpty;
+  /// Provider Google/Apple recovery: pending link or previously verified account.
+  /// Pure guest bindings alone must not imply a provider can restore the family.
+  bool get canAttemptProviderRecover {
+    if (pendingLink != null && expectedPlayerId != null) return true;
+    return binding?.accountType == AccountType.verified &&
+        binding!.playerId.isNotEmpty;
+  }
+
+  /// Explicit "start as new guest" is only for hard recovery of pure guests.
+  /// Never for transient network, pending link, or verified recovery paths.
+  bool get allowsExplicitNewGuest =>
+      !isTransientNetwork &&
+      isHardRecoveryCode(code) &&
+      pendingLink == null &&
+      binding?.accountType != AccountType.verified;
 
   bool get isTransientNetwork => isTransientNetworkCode(code);
 
@@ -78,7 +91,8 @@ final class GuestSessionRecovery {
   static bool isRecoverableStartup(String code) =>
       isHardRecoveryCode(code) ||
       isTransientNetworkCode(code) ||
-      code.startsWith('PROVIDER_LINK_RECOVERY_');
+      code.startsWith('PROVIDER_LINK_RECOVERY_') ||
+      code == 'SECURE_STORE_RECOVERY_FAILED';
 
   static bool isTransientNetworkCode(String code) =>
       code == 'REFRESH_UNAVAILABLE' || code == 'AUTH_NETWORK_UNAVAILABLE';

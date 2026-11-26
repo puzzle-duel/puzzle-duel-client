@@ -42,6 +42,11 @@ flutter pub get --enforce-lockfile
 echo "==> release build + install on $DEVICE_ID"
 # Prefer release-mode physical-device UAT. Firebase Crashlytics staging remains opt-in.
 # PZD_STAGING_FIREBASE=1 also injects the staging Google URL scheme into Info.plist.
+#
+# PZD_GUEST_RETRY_ENABLED is intentionally OMITTED (client default false).
+# Oracle staging currently has PZD_STAGING_GUEST_RETRY_ENABLED unset/off.
+# Do not pass --dart-define=PZD_GUEST_RETRY_ENABLED=true until that server
+# flag is confirmed true — mismatched retry enables REFRESH_REPLAY risk.
 PZD_STAGING_FIREBASE=1 flutter build ios --release \
   --dart-define=PZD_STAGING_BASE_URL="$STAGING_ORIGIN" \
   --dart-define=PZD_FIREBASE_CONFIGURED=true \

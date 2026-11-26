@@ -233,6 +233,7 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         coordinator: widget.authCoordinator,
         crashReporter: widget.crashReporter,
         api: controller.api,
+        sessionAuth: controller.sessionAuth,
         onRetryNetwork: recovery.isTransientNetwork
             ? () async {
                 await controller.refreshTournament(
@@ -247,6 +248,12 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
             access: access,
           );
           await controller.completeRankedAuthAndEnter();
+        },
+        onExplicitNewGuest: (access) async {
+          controller.clearSessionRecoveryGate(
+            bearer: access.accessToken,
+            access: access,
+          );
         },
       ),
     );
@@ -2083,16 +2090,20 @@ final class _GuestSessionRecoverySheet extends StatefulWidget {
   const _GuestSessionRecoverySheet({
     required this.recovery,
     required this.onRecovered,
+    this.onExplicitNewGuest,
     this.onRetryNetwork,
     this.coordinator,
+    this.sessionAuth,
     this.crashReporter,
     this.api,
   });
 
   final GuestSessionRecovery recovery;
   final Future<void> Function(GuestAccess access) onRecovered;
+  final Future<void> Function(GuestAccess access)? onExplicitNewGuest;
   final Future<bool> Function()? onRetryNetwork;
   final AuthCoordinator? coordinator;
+  final GuestAuthClient? sessionAuth;
   final CrashReporter? crashReporter;
   final UatApi? api;
 
@@ -2116,6 +2127,13 @@ final class _GuestSessionRecoverySheetState
       _error = null;
       _status = null;
     });
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'guest_recovery_provider_started',
+      requestId: widget.recovery.lastRequestId,
+      errorCode: widget.recovery.code,
+    )));
     final AuthFlowResult result;
     if (widget.recovery.pendingLink != null) {
       result = await coordinator.recoverPendingLink(provider);
@@ -2157,6 +2175,87 @@ final class _GuestSessionRecoverySheetState
     });
   }
 
+  Future<void> _confirmStartNewGuest() async {
+    final auth = widget.sessionAuth;
+    final onNew = widget.onExplicitNewGuest;
+    if (auth == null || onNew == null || _busy) return;
+    if (!widget.recovery.allowsExplicitNewGuest) return;
+
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'guest_explicit_new_prompt',
+      requestId: widget.recovery.lastRequestId,
+      errorCode: widget.recovery.code,
+    )));
+
+    final copy = TournamentCopy.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(copy.startAsNewGuestConfirmTitle),
+        content: Text(
+          copy.startAsNewGuestConfirmBody,
+          key: const Key('guest-recovery-new-guest-confirm-body'),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('guest-recovery-new-guest-cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(copy.cancel),
+          ),
+          FilledButton(
+            key: const Key('guest-recovery-new-guest-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(copy.startAsNewGuest),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (confirmed != true) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.screenOpened,
+        operation: 'guest_explicit_new_cancelled',
+        requestId: widget.recovery.lastRequestId,
+        errorCode: widget.recovery.code,
+      )));
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+      _status = null;
+    });
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.authRefreshSucceeded,
+      operation: 'guest_explicit_new_confirmed',
+      requestId: widget.recovery.lastRequestId,
+      errorCode: widget.recovery.code,
+    )));
+    try {
+      final access = await auth.replaceWithExplicitNewGuest();
+      await onNew(access);
+      if (mounted) Navigator.pop(context);
+    } on GuestAuthException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = error.code;
+      });
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.authRefreshFailed,
+        operation: 'guest_explicit_new_failed',
+        requestId: auth.lastAuthRequestId,
+        errorCode: error.code,
+      )));
+    }
+  }
+
   Future<void> _sendDiagnostics() async {
     if (_busy) return;
     setState(() {
@@ -2187,6 +2286,9 @@ final class _GuestSessionRecoverySheetState
     final copy = TournamentCopy.of(context);
     final canProvider = widget.recovery.canAttemptProviderRecover &&
         widget.coordinator != null;
+    final canNewGuest = widget.recovery.allowsExplicitNewGuest &&
+        widget.sessionAuth != null &&
+        widget.onExplicitNewGuest != null;
     final transient = widget.recovery.isTransientNetwork;
     return SafeArea(
       child: Padding(
@@ -2196,7 +2298,7 @@ final class _GuestSessionRecoverySheetState
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              copy.restoreSession,
+              copy.sessionRecoveryTitle,
               key: const Key('guest-recovery-title'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
@@ -2204,9 +2306,7 @@ final class _GuestSessionRecoverySheetState
             Text(
               transient
                   ? copy.sessionRecoveryTransient
-                  : canProvider
-                      ? copy.sessionRecoveryRequired
-                      : copy.sessionRecoveryPureGuest,
+                  : copy.sessionRecoveryRequired,
               key: const Key('guest-recovery-body'),
             ),
             const SizedBox(height: 8),
@@ -2233,6 +2333,12 @@ final class _GuestSessionRecoverySheetState
               const SizedBox(height: 8),
             ],
             if (canProvider) ...[
+              Text(
+                copy.recoverMyAccount,
+                key: const Key('guest-recovery-recover-label'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
               FilledButton(
                 key: const Key('guest-recovery-google'),
                 onPressed: _busy
@@ -2247,6 +2353,15 @@ final class _GuestSessionRecoverySheetState
                     ? null
                     : () => unawaited(_recover(AuthProviderKind.apple)),
                 child: Text(copy.continueWithApple),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (canNewGuest) ...[
+              FilledButton.tonal(
+                key: const Key('guest-recovery-new-guest'),
+                onPressed:
+                    _busy ? null : () => unawaited(_confirmStartNewGuest()),
+                child: Text(copy.startAsNewGuest),
               ),
               const SizedBox(height: 8),
             ],

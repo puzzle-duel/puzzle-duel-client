@@ -8,6 +8,7 @@ void main() {
     final keys = StagingGuestCredentialKeys.forSlot(StagingGuestSlot.legacy);
     expect(keys.refresh, 'pzd.staging.guest.refresh.v1');
     expect(keys.rotation, 'pzd.staging.guest.rotation.v1');
+    expect(keys.vaultJournal, 'pzd.staging.guest.vault_journal.v1');
   });
 
   test('new Player A does not read or overwrite legacy or Player B slots', () {
@@ -15,12 +16,14 @@ void main() {
     final b = StagingGuestCredentialKeys.forSlot(StagingGuestSlot.playerB);
     final old = StagingGuestCredentialKeys.forSlot(StagingGuestSlot.legacy);
     expect({
-      a.refresh, a.rotation, a.pendingLink, a.identityBinding,
-      b.refresh, b.rotation, b.pendingLink, b.identityBinding,
+      a.refresh, a.rotation, a.pendingLink, a.identityBinding, a.vaultJournal,
+      b.refresh, b.rotation, b.pendingLink, b.identityBinding, b.vaultJournal,
       old.refresh, old.rotation, old.pendingLink, old.identityBinding,
-    }, hasLength(12));
+      old.vaultJournal,
+    }, hasLength(15));
     expect(a.refresh, 'pzd.staging.guest.player-a.refresh.v1');
     expect(a.rotation, 'pzd.staging.guest.player-a.rotation.v1');
+    expect(a.vaultJournal, 'pzd.staging.guest.player-a.vault_journal.v1');
     expect(StagingGuestCredentialKeys.forSlot(StagingGuestSlot.playerA).refresh,
         a.refresh); // survives a rebuild/process kill
   });

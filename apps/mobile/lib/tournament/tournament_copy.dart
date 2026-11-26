@@ -261,19 +261,36 @@ final class TournamentCopy {
     'Resmi turnuva öncesi Apple veya Google doğrulaması gerekir. Pratik ücretsiz kalır.',
   );
   String get sessionRecoveryRequired => pick(
-    'Your tournament session needs recovery. Practice stays available. Ranked play is paused until the same account is restored.',
-    'Turnuva oturumunun kurtarılması gerekiyor. Pratik açık kalır. Aynı hesap geri gelene kadar sıralı oyun durur.',
+    'Your session could not be restored. You can keep practicing or recover your account.',
+    'Oturumunuz yeniden kurulamadı. Pratik yapmaya devam edebilir veya hesabınızı kurtarabilirsiniz.',
   );
   String get restoreSession => pick('Restore session', 'Oturumu kurtar');
+  String get sessionRecoveryTitle => pick(
+    'Tournament login needs attention',
+    'Turnuva girişi dikkat gerektiriyor',
+  );
   String get sessionRecoveryPureGuest => pick(
-    'This device still holds the previous guest credentials, but the server refresh family was revoked. Practice remains available. Restoring ranked play for a pure guest requires owner-approved same-player recovery — do not create a new guest.',
-    'Cihazda önceki misafir kimlik bilgileri duruyor; sunucudaki refresh ailesi iptal edilmiş. Pratik açık. Saf misafir için sıralı oyunu geri getirmek owner onaylı same-player kurtarma ister — yeni misafir oluşturma.',
+    'Your session could not be restored. You can keep practicing or recover your account.',
+    'Oturumunuz yeniden kurulamadı. Pratik yapmaya devam edebilir veya hesabınızı kurtarabilirsiniz.',
   );
   String get sessionRecoveryTransient => pick(
     'Tournament connection is temporarily unavailable. Practice stays open. Retry when the network returns — a new guest account will not be created.',
     'Turnuva bağlantısı geçici olarak yok. Pratik açık kalır. Ağ gelince yeniden dene — yeni misafir hesap oluşturulmaz.',
   );
   String get retryConnection => pick('Retry connection', 'Bağlantıyı yeniden dene');
+  String get recoverMyAccount => pick('Recover my account', 'Hesabımı kurtar');
+  String get startAsNewGuest => pick(
+    'Start as a new guest',
+    'Yeni misafir olarak başla',
+  );
+  String get startAsNewGuestConfirmTitle => pick(
+    'Start as a new guest?',
+    'Yeni misafir olarak başlansın mı?',
+  );
+  String get startAsNewGuestConfirmBody => pick(
+    'If you start with a new guest account, you may lose access to your previous account and progress. Do you want to continue?',
+    'Yeni bir misafir hesabıyla başlarsanız önceki hesabınıza ve ilerlemenize erişiminizi kaybedebilirsiniz. Devam etmek istiyor musunuz?',
+  );
   String get sendDiagnosticsRecovery => pick(
     'Send diagnostics',
     'Log gönder',
@@ -286,8 +303,11 @@ final class TournamentCopy {
         'ACCOUNT_CONFLICT' => authConflictBody,
         'SECURE_STORE_UNAVAILABLE' ||
         'SECURE_STORE_VERIFY_FAILED' ||
+        'SECURE_STORE_RECOVERY_FAILED' ||
         'PROVIDER_LINK_RECOVERY_apple' ||
         'PROVIDER_LINK_RECOVERY_google' ||
+        'PROVIDER_LINK_RECOVERY_APPLE' ||
+        'PROVIDER_LINK_RECOVERY_GOOGLE' ||
         'STALE_CREDENTIAL_RESPONSE' ||
         'RECOVERY_IDENTITY_MISMATCH' ||
         'RECOVERY_PROVIDER_MISMATCH' ||
@@ -474,7 +494,9 @@ final class TournamentCopy {
       'REFRESH_REPLAY' ||
       'INVALID_REFRESH' ||
       'PROVIDER_LINK_RECOVERY_apple' ||
-      'PROVIDER_LINK_RECOVERY_google' =>
+      'PROVIDER_LINK_RECOVERY_google' ||
+      'PROVIDER_LINK_RECOVERY_APPLE' ||
+      'PROVIDER_LINK_RECOVERY_GOOGLE' =>
         sessionRecoveryRequired,
       'REFRESH_UNAVAILABLE' || 'AUTH_NETWORK_UNAVAILABLE' =>
         sessionRecoveryTransient,

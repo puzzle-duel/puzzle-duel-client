@@ -27,6 +27,100 @@ abstract interface class GuestCredentialStore {
   Future<String?> readIdentityBinding();
   Future<void> writeIdentityBinding(String encoded);
   Future<void> clearIdentityBinding();
+  /// Write-ahead vault journal (secure storage only). Never log contents.
+  Future<String?> readVaultJournal();
+  Future<void> writeVaultJournal(String encoded);
+  Future<void> clearVaultJournal();
+}
+
+/// Pending-link field action encoded in [GuestVaultJournal].
+enum GuestVaultPendingLinkAction { keep, clear, set }
+
+/// Durable write-ahead intent for multi-key vault commits.
+///
+/// Crash between live-key writes leaves this journal intact; startup
+/// [GuestAuthClient.reconcilePersistedVault] completes the intent before any
+/// refresh/create consumes credentials. Contents stay in secure storage only.
+final class GuestVaultJournal {
+  const GuestVaultJournal({
+    required this.nextRefresh,
+    required this.nextBinding,
+    this.clearRotation = true,
+    this.nextRotation,
+    this.pendingLinkAction = GuestVaultPendingLinkAction.keep,
+    this.nextPendingLink,
+  });
+
+  final String nextRefresh;
+  final String nextBinding;
+  final bool clearRotation;
+  final String? nextRotation;
+  final GuestVaultPendingLinkAction pendingLinkAction;
+  final String? nextPendingLink;
+
+  String encode() {
+    final payload = <String, Object?>{
+      'v': 1,
+      'nr': nextRefresh,
+      'nb': nextBinding,
+      'cr': clearRotation,
+      'nrn': nextRotation,
+      'pla': switch (pendingLinkAction) {
+        GuestVaultPendingLinkAction.keep => 'keep',
+        GuestVaultPendingLinkAction.clear => 'clear',
+        GuestVaultPendingLinkAction.set => 'set',
+      },
+      'npl': nextPendingLink,
+    };
+    return 'v1:${base64Url.encode(utf8.encode(jsonEncode(payload)))}';
+  }
+
+  static GuestVaultJournal? tryParse(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    if (!raw.startsWith('v1:')) return null;
+    try {
+      final decoded = utf8.decode(base64Url.decode(raw.substring(3)));
+      final map = jsonDecode(decoded);
+      if (map is! Map) return null;
+      final nextRefresh = map['nr'];
+      final nextBinding = map['nb'];
+      if (nextRefresh is! String ||
+          nextRefresh.isEmpty ||
+          nextBinding is! String ||
+          nextBinding.isEmpty) {
+        return null;
+      }
+      final pla = map['pla'];
+      final GuestVaultPendingLinkAction action;
+      if (pla == 'clear') {
+        action = GuestVaultPendingLinkAction.clear;
+      } else if (pla == 'set') {
+        action = GuestVaultPendingLinkAction.set;
+      } else if (pla == 'keep' || pla == null) {
+        action = GuestVaultPendingLinkAction.keep;
+      } else {
+        return null;
+      }
+      final nextPending = map['npl'];
+      if (action == GuestVaultPendingLinkAction.set &&
+          (nextPending is! String || nextPending.isEmpty)) {
+        return null;
+      }
+      final nextRotation = map['nrn'];
+      if (nextRotation != null && nextRotation is! String) return null;
+      return GuestVaultJournal(
+        nextRefresh: nextRefresh,
+        nextBinding: nextBinding,
+        clearRotation: map['cr'] == true,
+        nextRotation: nextRotation as String?,
+        pendingLinkAction: action,
+        nextPendingLink:
+            nextPending is String && nextPending.isNotEmpty ? nextPending : null,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// Identity-preserving recovery intent after uncertain guest→verified link.
@@ -217,6 +311,10 @@ final class GuestAuthClient {
   final PuzzleDuelLogger _logger;
   final bool _rotationRetryEnabled;
 
+  /// Mirrors compile-time `PZD_GUEST_RETRY_ENABLED` (default false). Must stay
+  /// false unless Oracle `PZD_STAGING_GUEST_RETRY_ENABLED=true` is confirmed.
+  bool get rotationRetryEnabled => _rotationRetryEnabled;
+
   void _breadcrumb(
     LogCode code,
     String operation, {
@@ -247,6 +345,8 @@ final class GuestAuthClient {
   GuestAccess? _current;
   int _credentialGeneration = 0;
   String? _lastAuthRequestId;
+  var _vaultReconciled = false;
+  var _vaultCorrupt = false;
 
   /// Serializes durable vault mutations so stale refresh cannot interleave with
   /// link/logout commits. Nested vault work inside a held mutation must call
@@ -254,14 +354,29 @@ final class GuestAuthClient {
   /// boolean flag (external callers during an await would race).
   Future<void> _mutationChain = Future<void>.value();
 
-  GuestAccess? get cachedAccess => _current;
+  /// Null while vault is unsafe or reconcile is outstanding — never bypass.
+  GuestAccess? get cachedAccess =>
+      (_vaultCorrupt || !_vaultReconciled) ? null : _current;
   int get credentialGeneration => _credentialGeneration;
   /// Last guest-auth HTTP `x-request-id` (32 hex). Never a token or player proof.
   String? get lastAuthRequestId => _lastAuthRequestId;
+  /// True after a failed journal reconcile; ranked/auth stay fail-closed.
+  bool get vaultCorrupt => _vaultCorrupt;
 
   @visibleForTesting
   void debugSeedAccess(GuestAccess access) {
     _current = access;
+    _vaultReconciled = true;
+    _vaultCorrupt = false;
+  }
+
+  void _invalidateVaultSession({required bool unsafe}) {
+    _vaultReconciled = false;
+    _current = null;
+    _pending = null;
+    if (unsafe) {
+      _vaultCorrupt = true;
+    }
   }
 
   /// Test-only auth HTTP transport. Production always uses HTTPS [HttpClient].
@@ -295,13 +410,17 @@ final class GuestAuthClient {
   Future<GuestAccess> authenticate({
     bool forceRefresh = false,
     bool allowGuestCreate = true,
-  }) {
+  }) async {
+    await reconcilePersistedVault();
+    if (_vaultCorrupt) {
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
     final cached = _current;
     if (!forceRefresh &&
         cached != null &&
         cached.expiresAt
             .isAfter(DateTime.now().toUtc().add(const Duration(minutes: 1)))) {
-      return Future.value(cached);
+      return cached;
     }
     final pending = _pending;
     if (pending != null && _pendingGeneration == _credentialGeneration) {
@@ -318,6 +437,36 @@ final class GuestAuthClient {
     return next.whenComplete(() {
       if (identical(_pending, next)) {
         _pending = null;
+      }
+    });
+  }
+
+  /// Completes or clears a crash-torn vault journal before auth consumes keys.
+  /// Idempotent per client instance. Fail-closed on corrupt journal/apply.
+  Future<void> reconcilePersistedVault() {
+    if (_vaultReconciled && !_vaultCorrupt) {
+      return Future<void>.value();
+    }
+    return _serializedMutation(() async {
+      if (_vaultReconciled && !_vaultCorrupt) return;
+      try {
+        final pending = await credentials.readVaultJournal();
+        await _applyVaultJournalUnlocked();
+        _vaultReconciled = true;
+        _vaultCorrupt = false;
+        if (pending != null && pending.isNotEmpty) {
+          _breadcrumb(LogCode.sessionRestored, 'guest_vault_reconciled');
+        }
+      } on GuestAuthException catch (error) {
+        _invalidateVaultSession(unsafe: true);
+        _breadcrumb(LogCode.sessionRestoreFailed, 'guest_vault_reconcile_failed',
+            errorCode: error.code);
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+      } catch (_) {
+        _invalidateVaultSession(unsafe: true);
+        _breadcrumb(LogCode.sessionRestoreFailed, 'guest_vault_reconcile_failed',
+            errorCode: 'SECURE_STORE_RECOVERY_FAILED');
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
       }
     });
   }
@@ -346,7 +495,11 @@ final class GuestAuthClient {
     required String accessToken,
     required String refreshToken,
     required DateTime expiresAt,
-  }) {
+  }) async {
+    await reconcilePersistedVault();
+    if (_vaultCorrupt) {
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
     return _serializedMutation(() async {
       final generation = ++_credentialGeneration;
       _pending = null;
@@ -358,23 +511,306 @@ final class GuestAuthClient {
       if (!access.isVerified) {
         throw const GuestAuthException('INVALID_AUTH_RESPONSE');
       }
+      final oldToken = await credentials.readRefreshToken();
+      final oldBindingRaw = await credentials.readIdentityBinding();
+      final oldRotation = await credentials.readPendingRotationId();
+      final oldPendingLink = await credentials.readPendingLinkProvider();
+      final binding = GuestIdentityBinding(
+        playerId: access.playerId,
+        familyId: access.familyId,
+        accountType: AccountType.verified,
+      ).encode();
       try {
-        await persistVerifiedGuestCredential(credentials, refreshToken);
-      } catch (_) {
+        await _commitVaultJournalled(
+          GuestVaultJournal(
+            nextRefresh: refreshToken,
+            nextBinding: binding,
+            clearRotation: true,
+            pendingLinkAction: GuestVaultPendingLinkAction.clear,
+          ),
+        );
+      } catch (error) {
         _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_failed',
-            errorCode: 'SECURE_STORE_UNAVAILABLE');
-        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+            errorCode: error is GuestAuthException
+                ? error.code
+                : 'SECURE_STORE_RECOVERY_FAILED');
+        await _rollbackVaultOrMarkUnsafe(
+          token: oldToken,
+          binding: oldBindingRaw,
+          rotation: oldRotation,
+          pendingLink: oldPendingLink,
+        );
       }
       if (generation != _credentialGeneration) {
         _breadcrumb(LogCode.authRefreshFailed, 'auth_credential_replace_stale',
             errorCode: 'STALE_CREDENTIAL_RESPONSE');
         throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
       }
-      await credentials.clearPendingRotationId();
-      await credentials.clearPendingLinkProvider();
       _breadcrumb(LogCode.authRefreshSucceeded, 'auth_credential_replaced');
       return _current = access;
     });
+  }
+
+  /// Owner-approved UX: mint a **new** guest after explicit confirmation.
+  ///
+  /// Never silent: pending provider link and verified bindings refuse.
+  /// Create-on-server first; vault commit is ordered token→binding→rotation
+  /// clear with readback. Any step failure restores the prior snapshot (or
+  /// surfaces [SECURE_STORE_RECOVERY_FAILED] if restore itself fails).
+  Future<GuestAccess> replaceWithExplicitNewGuest() async {
+    await reconcilePersistedVault();
+    if (_vaultCorrupt) {
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
+    return _serializedMutation(() async {
+      final pendingCode = await _pendingLinkRecoveryCode();
+      if (pendingCode != null) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_blocked',
+            errorCode: 'PROVIDER_LINK_RECOVERY');
+        throw GuestAuthException(pendingCode);
+      }
+      final priorBinding = GuestIdentityBinding.tryParse(
+        await credentials.readIdentityBinding(),
+      );
+      if (priorBinding?.accountType == AccountType.verified) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_blocked',
+            errorCode: 'RECOVERY_NOT_LINKED');
+        throw const GuestAuthException('RECOVERY_NOT_LINKED');
+      }
+
+      final oldToken = await credentials.readRefreshToken();
+      final oldBindingRaw = await credentials.readIdentityBinding();
+      final oldRotation = await credentials.readPendingRotationId();
+      final oldPendingLink = await credentials.readPendingLinkProvider();
+
+      final generation = ++_credentialGeneration;
+      _pending = null;
+      _breadcrumb(LogCode.authRefreshSucceeded, 'guest_explicit_new_started');
+
+      final result = await _post('/v1/auth/guest', const {});
+      if (result.status != 201 && result.status != 200) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_create_failed',
+            httpStatus: result.status, errorCode: 'GUEST_CREATION_UNAVAILABLE');
+        throw const GuestAuthException('GUEST_CREATION_UNAVAILABLE');
+      }
+      if (generation != _credentialGeneration) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_stale',
+            errorCode: 'STALE_CREDENTIAL_RESPONSE');
+        throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+      }
+
+      final accessToken = result.body['accessToken'];
+      final refresh = result.body['refreshToken'];
+      final expiry = result.body['expiresAt'];
+      if (accessToken is! String ||
+          accessToken.isEmpty ||
+          refresh is! String ||
+          refresh.isEmpty ||
+          expiry is! String) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      final expiresAt = DateTime.tryParse(expiry)?.toUtc();
+      if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+      final access = GuestAccess.parse(
+        accessToken: accessToken,
+        expiresAt: expiresAt,
+      );
+      if (!access.isGuest) {
+        throw const GuestAuthException('INVALID_AUTH_RESPONSE');
+      }
+
+      final binding = GuestIdentityBinding(
+        playerId: access.playerId,
+        familyId: access.familyId,
+        accountType: access.accountType,
+      ).encode();
+      try {
+        await _commitVaultJournalled(
+          GuestVaultJournal(
+            nextRefresh: refresh,
+            nextBinding: binding,
+            clearRotation: true,
+            pendingLinkAction: GuestVaultPendingLinkAction.keep,
+          ),
+        );
+      } catch (error) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_vault_failed',
+            errorCode: error is GuestAuthException
+                ? error.code
+                : 'SECURE_STORE_RECOVERY_FAILED');
+        await _rollbackVaultOrMarkUnsafe(
+          token: oldToken,
+          binding: oldBindingRaw,
+          rotation: oldRotation,
+          pendingLink: oldPendingLink,
+        );
+      }
+      if (generation != _credentialGeneration) {
+        _breadcrumb(LogCode.authRefreshFailed, 'guest_explicit_new_stale',
+            errorCode: 'STALE_CREDENTIAL_RESPONSE');
+        throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
+      }
+      _breadcrumb(LogCode.authRefreshSucceeded, 'guest_explicit_new_replaced');
+      return _current = access;
+    });
+  }
+
+  /// Write-ahead journal → apply live keys → clear journal.
+  /// Callers hold `_serializedMutation`. Crash mid-apply leaves journal for
+  /// [reconcilePersistedVault]; try/catch alone is not the durability claim.
+  Future<void> _commitVaultJournalled(GuestVaultJournal journal) async {
+    final encoded = journal.encode();
+    await credentials.writeVaultJournal(encoded);
+    if (await credentials.readVaultJournal() != encoded) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+    await _applyVaultJournalUnlocked();
+  }
+
+  /// Applies a durable journal to live keys, then clears it. Idempotent when
+  /// live keys already match. Callers hold `_serializedMutation`.
+  Future<void> _applyVaultJournalUnlocked() async {
+    final raw = await credentials.readVaultJournal();
+    if (raw == null || raw.isEmpty) return;
+    final journal = GuestVaultJournal.tryParse(raw);
+    if (journal == null) {
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
+    await persistVerifiedGuestCredential(credentials, journal.nextRefresh);
+    await credentials.writeIdentityBinding(journal.nextBinding);
+    if (await credentials.readIdentityBinding() != journal.nextBinding) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+    if (journal.clearRotation) {
+      await credentials.clearPendingRotationId();
+      if (await credentials.readPendingRotationId() != null) {
+        throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+      }
+    } else if (journal.nextRotation != null && journal.nextRotation!.isNotEmpty) {
+      await credentials.writePendingRotationId(journal.nextRotation!);
+      if (await credentials.readPendingRotationId() != journal.nextRotation) {
+        throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+      }
+    }
+    switch (journal.pendingLinkAction) {
+      case GuestVaultPendingLinkAction.keep:
+        break;
+      case GuestVaultPendingLinkAction.clear:
+        await credentials.clearPendingLinkProvider();
+        if (await credentials.readPendingLinkProvider() != null) {
+          throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+        }
+        break;
+      case GuestVaultPendingLinkAction.set:
+        final next = journal.nextPendingLink;
+        if (next == null || next.isEmpty) {
+          throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+        }
+        await credentials.writePendingLinkProvider(next);
+        if (await credentials.readPendingLinkProvider() != next) {
+          throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+        }
+        break;
+    }
+    await credentials.clearVaultJournal();
+    if (await credentials.readVaultJournal() != null) {
+      throw const GuestAuthException('SECURE_STORE_VERIFY_FAILED');
+    }
+  }
+
+  /// Restores a prior vault snapshot after a failed replacement. Skips writes
+  /// that already match the snapshot (partial-commit / first-step failure).
+  ///
+  /// Clears the durable journal **only** after the restored live keys verify.
+  /// Never clears the journal in a failure path — restart reconcile needs it.
+  Future<void> _restoreVaultSnapshot({
+    required String? token,
+    required String? binding,
+    required String? rotation,
+    required String? pendingLink,
+  }) async {
+    try {
+      if (token != null && token.isNotEmpty) {
+        if (await credentials.readRefreshToken() != token) {
+          await persistVerifiedGuestCredential(credentials, token);
+        }
+      }
+      final currentBinding = await credentials.readIdentityBinding();
+      if (binding != null && binding.isNotEmpty) {
+        if (currentBinding != binding) {
+          await credentials.writeIdentityBinding(binding);
+          if (await credentials.readIdentityBinding() != binding) {
+            throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+          }
+        }
+      } else if (currentBinding != null) {
+        await credentials.clearIdentityBinding();
+        if (await credentials.readIdentityBinding() != null) {
+          throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+        }
+      }
+      final currentRotation = await credentials.readPendingRotationId();
+      if (rotation != null && rotation.isNotEmpty) {
+        if (currentRotation != rotation) {
+          await credentials.writePendingRotationId(rotation);
+          if (await credentials.readPendingRotationId() != rotation) {
+            throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+          }
+        }
+      } else if (currentRotation != null) {
+        await credentials.clearPendingRotationId();
+        if (await credentials.readPendingRotationId() != null) {
+          throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+        }
+      }
+      final currentPending = await credentials.readPendingLinkProvider();
+      if (pendingLink != null && pendingLink.isNotEmpty) {
+        if (currentPending != pendingLink) {
+          await credentials.writePendingLinkProvider(pendingLink);
+          if (await credentials.readPendingLinkProvider() != pendingLink) {
+            throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+          }
+        }
+      } else if (currentPending != null) {
+        await credentials.clearPendingLinkProvider();
+        if (await credentials.readPendingLinkProvider() != null) {
+          throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+        }
+      }
+      await credentials.clearVaultJournal();
+      if (await credentials.readVaultJournal() != null) {
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+      }
+    } on GuestAuthException {
+      rethrow;
+    } catch (_) {
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
+  }
+
+  /// In-process rollback after a failed journalled commit. On rollback failure
+  /// keeps the journal, marks the vault unsafe, and fails closed.
+  Future<void> _rollbackVaultOrMarkUnsafe({
+    required String? token,
+    required String? binding,
+    required String? rotation,
+    required String? pendingLink,
+  }) async {
+    try {
+      await _restoreVaultSnapshot(
+        token: token,
+        binding: binding,
+        rotation: rotation,
+        pendingLink: pendingLink,
+      );
+      _invalidateVaultSession(unsafe: false);
+    } catch (_) {
+      _invalidateVaultSession(unsafe: true);
+      throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
+    }
+    throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
   }
 
   Future<void> markPendingLink({
@@ -410,11 +846,12 @@ final class GuestAuthClient {
     final raw = await credentials.readPendingLinkProvider();
     final parsed = PendingLinkRecovery.tryParse(raw);
     if (parsed != null) {
-      return 'PROVIDER_LINK_RECOVERY_${parsed.provider}';
+      // Uppercase provider so LogEvent errorCode allowlist accepts the code.
+      return 'PROVIDER_LINK_RECOVERY_${parsed.provider.toUpperCase()}';
     }
     final legacy = PendingLinkRecovery.legacyProviderOnly(raw);
     if (legacy != null) {
-      return 'PROVIDER_LINK_RECOVERY_$legacy';
+      return 'PROVIDER_LINK_RECOVERY_${legacy.toUpperCase()}';
     }
     return null;
   }
@@ -424,6 +861,9 @@ final class GuestAuthClient {
       _credentialGeneration++;
       _pending = null;
       _current = null;
+      _vaultCorrupt = false;
+      _vaultReconciled = true;
+      await credentials.clearVaultJournal();
       await credentials.clearRefreshToken();
       await credentials.clearPendingRotationId();
       // Keep pending link marker so restart can recover via provider login.
@@ -531,17 +971,26 @@ final class GuestAuthClient {
       );
       _breadcrumb(
           LogCode.authRefreshSucceeded, 'guest_refresh_vault_write_started');
+      final binding = GuestIdentityBinding(
+        playerId: access.playerId,
+        familyId: access.familyId,
+        accountType: access.accountType,
+      ).encode();
       try {
-        await persistVerifiedGuestCredential(credentials, refresh);
-        await credentials.writeIdentityBinding(GuestIdentityBinding(
-          playerId: access.playerId,
-          familyId: access.familyId,
-          accountType: access.accountType,
-        ).encode());
+        await _commitVaultJournalled(
+          GuestVaultJournal(
+            nextRefresh: refresh,
+            nextBinding: binding,
+            clearRotation: clearRotation,
+            pendingLinkAction: GuestVaultPendingLinkAction.keep,
+          ),
+        );
       } catch (_) {
+        // Journal may remain for reconcile; never serve cached access meanwhile.
+        _invalidateVaultSession(unsafe: true);
         _breadcrumb(LogCode.authRefreshFailed, 'guest_refresh_vault_write_failed',
-            errorCode: 'SECURE_STORE_UNAVAILABLE');
-        throw const GuestAuthException('SECURE_STORE_UNAVAILABLE');
+            errorCode: 'SECURE_STORE_RECOVERY_FAILED');
+        throw const GuestAuthException('SECURE_STORE_RECOVERY_FAILED');
       }
       if (generation != _credentialGeneration) {
         // Newer commit owns the vault; discard this response without inventing
@@ -551,7 +1000,6 @@ final class GuestAuthClient {
         throw const GuestAuthException('STALE_CREDENTIAL_RESPONSE');
       }
       if (clearRotation) {
-        await credentials.clearPendingRotationId();
         _breadcrumb(
             LogCode.authRefreshSucceeded, 'guest_rotation_intent_cleared');
       }
