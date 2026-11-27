@@ -112,6 +112,9 @@ Future<TournamentController> _controller({
     sessionAuth: session,
   );
   await controller.beginLocal();
+  // Dispose before temp-dir tearDown so async personal-records work cannot
+  // list a deleted directory on Linux CI.
+  addTearDown(controller.dispose);
   return controller;
 }
 
@@ -123,7 +126,7 @@ void main() {
       'A01 logout clears completed tournament personal presentation',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a01');
-        addTearDown(() => dir.delete(recursive: true));
+        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -153,7 +156,6 @@ void main() {
         expect(controller.tournamentNoticeCode, isNull);
         expect(controller.route.place, TournamentPlace.home);
         expect(controller.homeSnapshot, isNull);
-        controller.dispose();
       },
     );
 
@@ -161,7 +163,7 @@ void main() {
       'A02 stale successful loadDay after logout does not restore day',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a02');
-        addTearDown(() => dir.delete(recursive: true));
+        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
         final gate = Completer<void>();
         var loadCalls = 0;
         final api = ScriptedUatApi((method, path, body) async {
@@ -202,13 +204,12 @@ void main() {
         expect(controller.results, isEmpty);
         expect(controller.rankedAuthRequired, isTrue);
         expect(loadCalls, greaterThanOrEqualTo(1));
-        controller.dispose();
       },
     );
 
     test('A03 stale failed loadDay after logout does not set notice', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a03');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       final gate = Completer<void>();
       final api = ScriptedUatApi((method, path, body) async {
         if (method == 'POST' && path.contains('/claims/daily')) {
@@ -230,14 +231,13 @@ void main() {
       await pending;
       expect(controller.tournamentNoticeCode, isNull);
       expect(controller.appFeedback, isNull);
-      controller.dispose();
     });
 
     test(
       'A04/A05 account transition clears previous snapshot before hydrate',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a04');
-        addTearDown(() => dir.delete(recursive: true));
+        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -250,7 +250,6 @@ void main() {
         );
         expect(controller.day, isNull);
         expect(controller.results, isEmpty);
-        controller.dispose();
       },
     );
 
@@ -258,7 +257,7 @@ void main() {
       'A06/A07 stale finally cannot clear newer account in-flight state',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a07');
-        addTearDown(() => dir.delete(recursive: true));
+        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
         final controller = await _controller(
           dir: dir,
           playerId: '22222222-2222-2222-2222-222222222222',
@@ -273,7 +272,6 @@ void main() {
         // Old clear must not have left us with prior personal data.
         expect(controller.day, isNull);
         expect(controller.accountStateEpoch, epochBefore);
-        controller.dispose();
       },
     );
 
@@ -281,7 +279,7 @@ void main() {
       'A08 guest cannot hydrate previous account disk snapshot as day',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a08');
-        addTearDown(() => dir.delete(recursive: true));
+        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -293,13 +291,12 @@ void main() {
         expect(controller.day, isNull);
         expect(controller.homeSnapshot, isNull);
         expect(controller.homeSnapshotStale, isFalse);
-        controller.dispose();
       },
     );
 
     test('A10 guest Practice scope remains after logout', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a10');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -309,12 +306,11 @@ void main() {
       controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
       expect(controller.identity.activeScope.kind, PracticeIdentityKind.guest);
       expect(controller.practiceStore().scope.kind, PracticeIdentityKind.guest);
-      controller.dispose();
     });
 
     test('A11 guest gate does not claim tournament', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a11');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       var claims = 0;
       final api = ScriptedUatApi((method, path, body) async {
         if (method == 'POST' && path.contains('/claims/daily')) {
@@ -333,12 +329,11 @@ void main() {
       expect(controller.rankedAuthRequired, isTrue);
       expect(claims, 0);
       expect(controller.day, isNull);
-      controller.dispose();
     });
 
     test('A15 logout feedback uses Top Banner channel only', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a15');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -354,12 +349,11 @@ void main() {
       expect(controller.appFeedback?.kind, AppFeedbackKind.info);
       expect(controller.appFeedback?.semanticsKey, 'auth-logout-success');
       expect(controller.tournamentNoticeCode, isNull);
-      controller.dispose();
     });
 
     test('A16 logout clears authenticated navigation resume state', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a16');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -369,12 +363,11 @@ void main() {
       controller.day = _completedDay();
       controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
       expect(controller.route.place, TournamentPlace.home);
-      controller.dispose();
     });
 
     test('stale app feedback clear is generation-fenced', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-fb');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -395,7 +388,6 @@ void main() {
       expect(controller.appFeedback?.semanticsKey, 'second');
       controller.dismissAppFeedback(reason: 'gesture');
       expect(controller.appFeedback, isNull);
-      controller.dispose();
     });
   });
 }
