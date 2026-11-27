@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -59,8 +60,9 @@ void main() {
   testWidgets('personal records segment control switches without refetch', (
     tester,
   ) async {
-    final directory =
-        Directory.systemTemp.createTempSync('pzd53-profile-segment');
+    final directory = Directory.systemTemp.createTempSync(
+      'pzd53-profile-segment',
+    );
     await _pumpHome(tester, _api(), directory);
     await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
@@ -224,14 +226,8 @@ void main() {
     await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
     expect(find.text('Profil'), findsWidgets);
-    expect(
-      find.text('2 kez kazanıldı', skipOffstage: false),
-      findsOneWidget,
-    );
-    expect(
-      find.text('Henüz rekorun yok.', skipOffstage: false),
-      findsWidgets,
-    );
+    expect(find.text('2 kez kazanıldı', skipOffstage: false), findsOneWidget);
+    expect(find.text('Henüz rekorun yok.', skipOffstage: false), findsWidgets);
   });
 
   testWidgets('large text keeps profile cards reachable', (tester) async {
@@ -258,6 +254,103 @@ void main() {
     );
     expect(find.byKey(const Key('badge-grid')), findsOneWidget);
   });
+
+  testWidgets(
+    'local Practice records render before blocked remote personal-records',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'pzd53-local-first',
+      );
+      const playerId = '11111111-1111-4111-8111-111111111111';
+      final identity = PracticeIdentityStore(directory);
+      await identity.load();
+      await identity.bindAuthenticatedPlayer(playerId);
+      await PracticeStore(
+        directory: directory,
+        scope: identity.activeScope,
+        identity: identity,
+      ).append(
+        PracticeRecord(
+          sessionId: 'local-first',
+          difficulty: 'easy',
+          rulesVersion: 'core-001.v2',
+          generatorVersion: 'gen-001.v1',
+          seed: 1,
+          score: 77,
+          terminalReason: 'move_limit_reached',
+          completedAt: '2026-11-27T10:00:00.000Z',
+          moveCount: 12,
+        ),
+      );
+
+      final releasePersonalRecords = Completer<UatHttpResult>();
+      final personalRecordsStarted = Completer<void>();
+      final api = ScriptedUatApi((method, path, body) async {
+        if (path == '/v1/tournament/session' && method == 'POST') {
+          return const UatHttpResult(201, {
+            'playerId': '11111111-1111-4111-8111-111111111111',
+            'sessionSecret': 'secret',
+            'sessionId': 's1',
+          });
+        }
+        if (path == '/v1/tournament/claims/daily' && method == 'POST') {
+          return const UatHttpResult(200, {
+            'seriesId': '11111111-1111-4111-8111-111111111111',
+            'originalUtcDate': '2026-11-19',
+            'status': 'ACTIVE',
+            'original': false,
+            'writerGeneration': 1,
+          });
+        }
+        if (path.startsWith('/v1/tournament/series/') && method == 'GET') {
+          return const UatHttpResult(200, {
+            'seriesId': '11111111-1111-4111-8111-111111111111',
+            'status': 'ACTIVE',
+            'boardRevision': 1,
+          });
+        }
+        if (path == '/v1/tournament/me/badges' ||
+            path == '/v1/profile/me/badges') {
+          return const UatHttpResult(200, {
+            'playerScoped': true,
+            'catalogVersion': 1,
+            'badges': <Object>[],
+          });
+        }
+        if (path == '/v1/profile/me/personal-records' && method == 'GET') {
+          if (!personalRecordsStarted.isCompleted) {
+            personalRecordsStarted.complete();
+          }
+          return releasePersonalRecords.future;
+        }
+        if (path.endsWith('/personal-records/practice/sync') &&
+            method == 'POST') {
+          return releasePersonalRecords.future;
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+
+      await _pumpHome(tester, api, directory);
+      await tester.tap(find.byKey(const Key('profile')));
+      // Local paint must win before the blocked remote resolves.
+      var sawLocal = false;
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.textContaining('77').evaluate().isNotEmpty) {
+          sawLocal = true;
+          break;
+        }
+      }
+      expect(sawLocal, isTrue);
+      expect(releasePersonalRecords.isCompleted, isFalse);
+
+      releasePersonalRecords.complete(
+        const UatHttpResult(200, {'records': <Object>[], 'schemaReady': true}),
+      );
+      await _pumpProfile(tester);
+      expect(find.textContaining('77'), findsWidgets);
+    },
+  );
 }
 
 ScriptedUatApi _api() {
@@ -285,8 +378,7 @@ ScriptedUatApi _api() {
         'boardRevision': 1,
       });
     }
-    if (path == '/v1/tournament/me/badges' ||
-        path == '/v1/profile/me/badges') {
+    if (path == '/v1/tournament/me/badges' || path == '/v1/profile/me/badges') {
       return const UatHttpResult(200, {
         'playerScoped': true,
         'catalogVersion': 1,
