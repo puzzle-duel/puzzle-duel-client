@@ -102,12 +102,14 @@ void main() {
   PersonalRecordsRepository repo({
     required GuestAuthClient session,
     required UatApi api,
+    Future<void> Function(Duration duration)? sleeper,
   }) {
     return PersonalRecordsRepository(
       kv: kv,
       api: api,
       sessionAuth: session,
       practiceStore: practiceStore,
+      sleeper: sleeper ?? (_) async {},
     );
   }
 
@@ -566,6 +568,7 @@ void main() {
       api: api,
       sessionAuth: session,
       practiceStore: practiceStore,
+      sleeper: (_) async {},
     );
     final scopeA = PersonalRecordsRepository.accountScopeKey(
       apiOrigin: origin,
@@ -605,4 +608,451 @@ void main() {
     final viewA = await repository.loadViewModel();
     expect(viewA.practice['hard']?.score, 70);
   });
+
+  test('persistent 503 does not storm scheduleSyncIfNeeded', () async {
+    final session = verifiedSession(playerA);
+    var posts = 0;
+    final api = _OriginScriptedApi((method, path, body) async {
+      if (method == 'POST') {
+        posts += 1;
+        return const UatHttpResult(503, {'error': 'SCHEMA_NOT_READY'});
+      }
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
+      });
+    });
+    final repository = repo(session: session, api: api);
+    final scopeKey = PersonalRecordsRepository.accountScopeKey(
+      apiOrigin: origin,
+      sessionAuth: session,
+    )!;
+    await repository.notifyLocalPracticeBest(
+      record: practiceRecord(sessionId: 's503', score: 11),
+      improved: true,
+    );
+    await repository.scheduleSyncIfNeeded();
+    await repository.scheduleSyncIfNeeded();
+    await repository.scheduleSyncIfNeeded();
+    expect(posts, 1);
+    expect(
+      repository.debugLastSyncOutcome,
+      PersonalRecordsSyncOutcome.schemaNotReady,
+    );
+    expect(await repository.debugPendingScores(scopeKey), {'easy': 11});
+  });
+
+  test('persistent 401/403 does not immediately retry-loop', () async {
+    final session = verifiedSession(playerA);
+    var posts = 0;
+    final api = _OriginScriptedApi((method, path, body) async {
+      if (method == 'POST') {
+        posts += 1;
+        return const UatHttpResult(401, {'error': 'UNAUTHORIZED'});
+      }
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
+      });
+    });
+    final repository = repo(session: session, api: api);
+    final scopeKey = PersonalRecordsRepository.accountScopeKey(
+      apiOrigin: origin,
+      sessionAuth: session,
+    )!;
+    await repository.notifyLocalPracticeBest(
+      record: practiceRecord(sessionId: 's401', score: 22),
+      improved: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await repository.scheduleSyncIfNeeded();
+    await repository.scheduleSyncIfNeeded();
+    expect(posts, 1);
+    expect(
+      repository.debugLastSyncOutcome,
+      PersonalRecordsSyncOutcome.unauthorized,
+    );
+    expect(await repository.debugPendingScores(scopeKey), {'easy': 22});
+
+    posts = 0;
+    final forbiddenApi = _OriginScriptedApi((method, path, body) async {
+      if (method == 'POST') {
+        posts += 1;
+        return const UatHttpResult(403, {'error': 'FORBIDDEN'});
+      }
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
+      });
+    });
+    final forbiddenRepo = repo(session: session, api: forbiddenApi);
+    await forbiddenRepo.notifyLocalPracticeBest(
+      record: practiceRecord(sessionId: 's403', score: 23),
+      improved: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await forbiddenRepo.scheduleSyncIfNeeded();
+    expect(posts, 1);
+    expect(
+      forbiddenRepo.debugLastSyncOutcome,
+      PersonalRecordsSyncOutcome.unauthorized,
+    );
+  });
+
+  test('persistent offline/500 exhausts bounded retry budget', () async {
+    final session = verifiedSession(playerA);
+    var posts = 0;
+    final api = _OriginScriptedApi((method, path, body) async {
+      if (method == 'POST') {
+        posts += 1;
+        return posts.isOdd
+            ? const UatHttpResult(0, {'error': 'OFFLINE'})
+            : const UatHttpResult(500, {'error': 'SERVER'});
+      }
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
+      });
+    });
+    final repository = repo(session: session, api: api);
+    final scopeKey = PersonalRecordsRepository.accountScopeKey(
+      apiOrigin: origin,
+      sessionAuth: session,
+    )!;
+    await repository.notifyLocalPracticeBest(
+      record: practiceRecord(sessionId: 'sbudget', score: 33),
+      improved: true,
+    );
+    await repository.scheduleSyncIfNeeded();
+    await repository.scheduleSyncIfNeeded();
+    expect(posts, 4);
+    expect(
+      repository.debugLastSyncOutcome,
+      PersonalRecordsSyncOutcome.retryExhausted,
+    );
+    expect(await repository.debugPendingScores(scopeKey), {'easy': 33});
+  });
+
+  test(
+    'successful response without acknowledgement progress does not loop',
+    () async {
+      final session = verifiedSession(playerA);
+      var posts = 0;
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'POST') {
+          posts += 1;
+          return const UatHttpResult(200, {
+            'schemaReady': true,
+            'records': <Object>[],
+            'acknowledgements': <Object>[],
+          });
+        }
+        return const UatHttpResult(200, {
+          'records': <Object>[],
+          'schemaReady': true,
+        });
+      });
+      final repository = repo(session: session, api: api);
+      final scopeKey = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'noprogress', score: 44),
+        improved: true,
+      );
+      await repository.scheduleSyncIfNeeded();
+      await repository.scheduleSyncIfNeeded();
+      expect(posts, 1);
+      expect(
+        repository.debugLastSyncOutcome,
+        PersonalRecordsSyncOutcome.noProgress,
+      );
+      expect(await repository.debugPendingScores(scopeKey), {'easy': 44});
+    },
+  );
+
+  test(
+    'PB 150 arriving during successful PB 100 sync automatically uploads',
+    () async {
+      final session = verifiedSession(playerA);
+      final firstPostStarted = Completer<void>();
+      final releaseFirstPost = Completer<UatHttpResult>();
+      final postedScores = <int>[];
+      var postCount = 0;
+
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET') {
+          return const UatHttpResult(200, {
+            'records': <Object>[],
+            'schemaReady': true,
+          });
+        }
+        if (method == 'POST') {
+          postCount += 1;
+          final record = ((body as Map)['records'] as List).first as Map;
+          final score = (record['score'] as num).toInt();
+          postedScores.add(score);
+          if (postCount == 1) {
+            firstPostStarted.complete();
+            return releaseFirstPost.future;
+          }
+          return UatHttpResult(200, {
+            'schemaReady': true,
+            'records': [
+              {
+                'difficulty': 'easy',
+                'source': 'practice',
+                'score': score,
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'achievedAt': '2026-11-20T00:00:00.000Z',
+              },
+            ],
+            'acknowledgements': [
+              {
+                'difficulty': 'easy',
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'completionId': record['completionId'],
+                'localRevision': record['localRevision'],
+                'acceptedScore': score,
+                'remoteScore': score,
+                'improved': true,
+              },
+            ],
+          });
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+
+      final repository = repo(session: session, api: api);
+      final scopeKey = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'p-100b', score: 100),
+        improved: true,
+      );
+      await firstPostStarted.future.timeout(const Duration(seconds: 2));
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'p-150b', score: 150),
+        improved: true,
+      );
+
+      final firstRecordScore = postedScores.first;
+      expect(firstRecordScore, 100);
+      releaseFirstPost.complete(
+        UatHttpResult(200, {
+          'schemaReady': true,
+          'records': [
+            {
+              'difficulty': 'easy',
+              'source': 'practice',
+              'score': 100,
+              'rulesVersion': personalRecordsPracticeRules,
+              'generatorVersion': personalRecordsPracticeGenerator,
+              'achievedAt': '2026-11-20T00:00:00.000Z',
+            },
+          ],
+          'acknowledgements': [
+            {
+              'difficulty': 'easy',
+              'rulesVersion': personalRecordsPracticeRules,
+              'generatorVersion': personalRecordsPracticeGenerator,
+              'completionId': 'p-100b',
+              'localRevision': 1,
+              'acceptedScore': 100,
+              'remoteScore': 100,
+              'improved': true,
+            },
+          ],
+        }),
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(postedScores, containsAll([100, 150]));
+      expect(await repository.debugPendingScores(scopeKey), isEmpty);
+    },
+  );
+
+  test(
+    'connectivity restored eventually synchronizes durable pending',
+    () async {
+      final session = verifiedSession(playerA);
+      var online = false;
+      var posts = 0;
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'POST') {
+          posts += 1;
+          if (!online) {
+            return const UatHttpResult(0, {'error': 'OFFLINE'});
+          }
+          final record = ((body as Map)['records'] as List).first as Map;
+          return UatHttpResult(200, {
+            'schemaReady': true,
+            'records': [
+              {
+                'difficulty': 'easy',
+                'source': 'practice',
+                'score': record['score'],
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'achievedAt': '2026-11-20T00:00:00.000Z',
+              },
+            ],
+            'acknowledgements': [
+              {
+                'difficulty': 'easy',
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'completionId': record['completionId'],
+                'localRevision': record['localRevision'],
+                'acceptedScore': record['score'],
+                'remoteScore': record['score'],
+                'improved': true,
+              },
+            ],
+          });
+        }
+        return const UatHttpResult(200, {
+          'records': <Object>[],
+          'schemaReady': true,
+        });
+      });
+      final repository = repo(session: session, api: api);
+      final scopeKey = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'offline-then-on', score: 55),
+        improved: true,
+      );
+      await repository.scheduleSyncIfNeeded();
+      expect(posts, 4);
+      expect(await repository.debugPendingScores(scopeKey), {'easy': 55});
+
+      online = true;
+      posts = 0;
+      await repository.refreshAndSync(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      expect(posts, 1);
+      expect(await repository.debugPendingScores(scopeKey), isEmpty);
+    },
+  );
+
+  test('logout/account switch stops stale retries', () async {
+    final session = verifiedSession(playerA);
+    var posts = 0;
+    final firstStarted = Completer<void>();
+    final releaseFirst = Completer<UatHttpResult>();
+    final api = _OriginScriptedApi((method, path, body) async {
+      if (method == 'POST') {
+        posts += 1;
+        if (posts == 1) {
+          firstStarted.complete();
+          return releaseFirst.future;
+        }
+        return const UatHttpResult(0, {'error': 'OFFLINE'});
+      }
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
+      });
+    });
+    final repository = repo(session: session, api: api);
+    final scopeA = PersonalRecordsRepository.accountScopeKey(
+      apiOrigin: origin,
+      sessionAuth: session,
+    )!;
+    await repository.notifyLocalPracticeBest(
+      record: practiceRecord(sessionId: 'stale-stop', score: 66),
+      improved: true,
+    );
+    await firstStarted.future.timeout(const Duration(seconds: 2));
+    repository.fenceSync();
+    session.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: verifiedJwt(playerB),
+        expiresAt: DateTime.utc(2030),
+      ),
+    );
+    releaseFirst.complete(const UatHttpResult(0, {'error': 'OFFLINE'}));
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    final postsAfterFence = posts;
+    await repository.scheduleSyncIfNeeded();
+    expect(posts, postsAfterFence);
+    expect(await repository.debugPendingScores(scopeA), {'easy': 66});
+  });
+
+  test(
+    'tournament cards and remote keys respect rules/generator versions',
+    () async {
+      final session = verifiedSession(playerA);
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET') {
+          return const UatHttpResult(200, {
+            'schemaReady': true,
+            'records': [
+              {
+                'difficulty': 'easy',
+                'source': 'tournament',
+                'score': 10,
+                'rulesVersion': 'core-001.v2',
+                'generatorVersion': personalRecordsTournamentGenerator,
+                'achievedAt': '2026-11-20T00:00:00.000Z',
+              },
+              {
+                'difficulty': 'easy',
+                'source': 'tournament',
+                'score': 90,
+                'rulesVersion': personalRecordsTournamentRules,
+                'generatorVersion': personalRecordsTournamentGenerator,
+                'achievedAt': '2026-11-21T00:00:00.000Z',
+              },
+              {
+                'difficulty': 'easy',
+                'source': 'tournament',
+                'score': 999,
+                'rulesVersion': personalRecordsTournamentRules,
+                'generatorVersion': 'gen-other.v9',
+                'achievedAt': '2026-11-22T00:00:00.000Z',
+              },
+            ],
+          });
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+      final repository = repo(session: session, api: api);
+      final scopeA = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+      final scopeB = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: verifiedSession(playerB),
+      )!;
+      expect(scopeA.contains(playerA), isTrue);
+      expect(scopeB.contains(playerB), isTrue);
+      expect(scopeA, isNot(scopeB));
+
+      await repository.refreshRemote(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      final view = await repository.loadViewModel();
+      expect(view.tournament['easy']?.score, 90);
+      expect(
+        view.tournament['easy']?.rulesVersion,
+        personalRecordsTournamentRules,
+      );
+      expect(
+        view.tournament['easy']?.generatorVersion,
+        personalRecordsTournamentGenerator,
+      );
+    },
+  );
 }

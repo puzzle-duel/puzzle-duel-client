@@ -32,6 +32,19 @@ enum PersonalRecordsSyncStatus {
   serverError,
 }
 
+/// Internal sync terminal outcomes used to gate immediate reschedule.
+enum PersonalRecordsSyncOutcome {
+  idle,
+  clearedAll,
+  madeProgressRemaining,
+  noProgress,
+  unauthorized,
+  schemaNotReady,
+  retryExhausted,
+  aborted,
+  failed,
+}
+
 /// One difficulty row for profile display (may combine practice + tournament).
 final class PersonalRecordCardModel {
   const PersonalRecordCardModel({
@@ -197,7 +210,9 @@ final class PersonalRecordsRepository {
     required this.sessionAuth,
     required this.practiceStore,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+    Future<void> Function(Duration duration)? sleeper,
+  }) : _clock = clock ?? DateTime.now,
+       _sleeper = sleeper ?? Future<void>.delayed;
 
   static const _pendingSchema = 1;
   static const _remoteSchema = 1;
@@ -209,11 +224,18 @@ final class PersonalRecordsRepository {
   final GuestAuthClient? sessionAuth;
   final PracticeStore Function() practiceStore;
   final DateTime Function() _clock;
+  final Future<void> Function(Duration duration) _sleeper;
 
   int _accountSyncGeneration = 0;
   Future<void>? _syncInFlight;
   String? _syncInFlightKey;
   int? _syncInFlightGeneration;
+  PersonalRecordsSyncOutcome? _lastSyncOutcome;
+  String? _lastSyncOutcomeKey;
+
+  /// When set, [scheduleSyncIfNeeded] will not start another flight until an
+  /// explicit resume (refresh/auth/connectivity/new local best with force).
+  bool _syncBlockedUntilResume = false;
 
   /// Per-scope serialized pending read-modify-write chain.
   final Map<String, Future<void>> _pendingLocks = {};
@@ -222,6 +244,11 @@ final class PersonalRecordsRepository {
   final Map<String, _ScopedCache> _scopedCaches = {};
 
   int get accountSyncGeneration => _accountSyncGeneration;
+
+  /// Test/inspection hook for the most recent sync terminal outcome.
+  PersonalRecordsSyncOutcome? get debugLastSyncOutcome => _lastSyncOutcome;
+
+  bool get debugSyncBlockedUntilResume => _syncBlockedUntilResume;
 
   _ScopedCache _cacheFor(String? scopeKey) {
     if (scopeKey == null) return _ScopedCache();
@@ -234,6 +261,21 @@ final class PersonalRecordsRepository {
     _syncInFlight = null;
     _syncInFlightKey = null;
     _syncInFlightGeneration = null;
+    _lastSyncOutcome = PersonalRecordsSyncOutcome.aborted;
+    _lastSyncOutcomeKey = null;
+    _syncBlockedUntilResume = true;
+  }
+
+  static bool _blocksImmediateReschedule(PersonalRecordsSyncOutcome outcome) {
+    return outcome == PersonalRecordsSyncOutcome.unauthorized ||
+        outcome == PersonalRecordsSyncOutcome.schemaNotReady ||
+        outcome == PersonalRecordsSyncOutcome.retryExhausted ||
+        outcome == PersonalRecordsSyncOutcome.noProgress ||
+        outcome == PersonalRecordsSyncOutcome.failed;
+  }
+
+  void _allowSyncResume() {
+    _syncBlockedUntilResume = false;
   }
 
   static String? accountScopeKey({
@@ -383,7 +425,8 @@ final class PersonalRecordsRepository {
     if (!_scopeStillActive(scopeKey, generation)) return;
     final cache = _cacheFor(scopeKey);
     cache.syncStatus = PersonalRecordsSyncStatus.pendingUpload;
-    unawaited(scheduleSyncIfNeeded());
+    // New durable work is an explicit resume trigger.
+    unawaited(scheduleSyncIfNeeded(force: true));
   }
 
   static PendingPracticeSyncEntry _maxPending(
@@ -575,11 +618,29 @@ final class PersonalRecordsRepository {
     return out;
   }
 
-  Future<void> scheduleSyncIfNeeded() async {
+  Future<void> scheduleSyncIfNeeded({bool force = false}) async {
     final generation = _accountSyncGeneration;
     final scopeKey = scopeKeyForActiveAccount();
     if (scopeKey == null) return;
     if (!_scopeStillActive(scopeKey, generation)) return;
+    if (force) _allowSyncResume();
+
+    if (_syncInFlight != null &&
+        _syncInFlightKey == scopeKey &&
+        _syncInFlightGeneration == generation) {
+      await _syncInFlight;
+      if (!_scopeStillActive(scopeKey, generation)) return;
+      // Hard-stop outcomes must not restart immediately (no 401/403/503 storms).
+      if (_syncBlockedUntilResume ||
+          (_lastSyncOutcomeKey == scopeKey &&
+              _lastSyncOutcome != null &&
+              _blocksImmediateReschedule(_lastSyncOutcome!))) {
+        return;
+      }
+      // Successful clear + newly arrived pending may fall through below.
+    }
+
+    if (_syncBlockedUntilResume && !force) return;
 
     final pending = await _loadPending(scopeKey);
     if (!_scopeStillActive(scopeKey, generation)) return;
@@ -599,21 +660,31 @@ final class PersonalRecordsRepository {
 
     late final Future<void> operation;
     operation = () async {
+      var outcome = PersonalRecordsSyncOutcome.aborted;
       try {
-        await _syncPendingBody(scopeKey, generation);
+        outcome = await _syncPendingBody(scopeKey, generation);
+      } catch (_) {
+        outcome = PersonalRecordsSyncOutcome.failed;
+        if (_scopeStillActive(scopeKey, generation)) {
+          _cacheFor(scopeKey).syncStatus =
+              PersonalRecordsSyncStatus.serverError;
+        }
       } finally {
+        _lastSyncOutcome = outcome;
+        _lastSyncOutcomeKey = scopeKey;
+        if (_blocksImmediateReschedule(outcome)) {
+          _syncBlockedUntilResume = true;
+        }
         if (identical(_syncInFlight, operation)) {
           _syncInFlight = null;
           _syncInFlightKey = null;
           _syncInFlightGeneration = null;
         }
-        // A newer pending may have arrived while in flight — chain another sync.
-        if (_scopeStillActive(scopeKey, generation)) {
-          final remaining = await _loadPending(scopeKey);
-          if (remaining.isNotEmpty &&
-              (_syncInFlight == null || _syncInFlightKey != scopeKey)) {
-            unawaited(scheduleSyncIfNeeded());
-          }
+        // Immediate chain ONLY after acknowledgement progress with remaining work.
+        if (outcome == PersonalRecordsSyncOutcome.madeProgressRemaining &&
+            _scopeStillActive(scopeKey, generation) &&
+            (_syncInFlight == null || _syncInFlightKey != scopeKey)) {
+          unawaited(scheduleSyncIfNeeded(force: true));
         }
       }
     }();
@@ -626,6 +697,8 @@ final class PersonalRecordsRepository {
   Future<void> refreshAndSync({required int expectedGeneration}) async {
     final scopeKey = scopeKeyForActiveAccount();
     if (scopeKey == null) return;
+    // Auth / connectivity / lifecycle refresh is an explicit resume trigger.
+    _allowSyncResume();
     await refreshRemote(expectedGeneration: expectedGeneration);
     if (!_scopeStillActive(scopeKey, expectedGeneration)) return;
     await seedPendingFromLocalBests(
@@ -633,11 +706,16 @@ final class PersonalRecordsRepository {
       expectedGeneration: expectedGeneration,
     );
     if (!_scopeStillActive(scopeKey, expectedGeneration)) return;
-    await scheduleSyncIfNeeded();
+    await scheduleSyncIfNeeded(force: true);
   }
 
-  Future<void> _syncPendingBody(String scopeKey, int generation) async {
-    if (!_scopeStillActive(scopeKey, generation)) return;
+  Future<PersonalRecordsSyncOutcome> _syncPendingBody(
+    String scopeKey,
+    int generation,
+  ) async {
+    if (!_scopeStillActive(scopeKey, generation)) {
+      return PersonalRecordsSyncOutcome.aborted;
+    }
     final cache = _cacheFor(scopeKey);
     cache.syncStatus = PersonalRecordsSyncStatus.syncing;
     unawaited(
@@ -654,16 +732,18 @@ final class PersonalRecordsRepository {
     while (attempt < _maxSyncAttempts &&
         _scopeStillActive(scopeKey, generation)) {
       final pending = await _loadPending(scopeKey);
-      if (!_scopeStillActive(scopeKey, generation)) return;
+      if (!_scopeStillActive(scopeKey, generation)) {
+        return PersonalRecordsSyncOutcome.aborted;
+      }
       if (pending.isEmpty) {
         cache.syncStatus = PersonalRecordsSyncStatus.upToDate;
-        return;
+        return PersonalRecordsSyncOutcome.clearedAll;
       }
 
       final access = sessionAuth?.cachedAccess;
       if (access == null || !access.isVerified) {
         cache.syncStatus = PersonalRecordsSyncStatus.unauthorized;
-        return;
+        return PersonalRecordsSyncOutcome.unauthorized;
       }
       final expectedPlayer = scopeKey.split('player:').last;
       if (access.playerId.trim().toLowerCase() != expectedPlayer) {
@@ -676,10 +756,13 @@ final class PersonalRecordsRepository {
             ),
           ),
         );
-        return;
+        return PersonalRecordsSyncOutcome.aborted;
       }
 
       final batch = pending.values.toList();
+      final postedSnapshot = <String, PendingPracticeSyncEntry>{
+        for (final entry in batch) entry.difficulty: entry,
+      };
       final body = {
         'records': [
           for (final entry in batch)
@@ -708,7 +791,7 @@ final class PersonalRecordsRepository {
             ),
           ),
         );
-        return;
+        return PersonalRecordsSyncOutcome.aborted;
       }
       if (result.status == 0) {
         cache.syncStatus = PersonalRecordsSyncStatus.offline;
@@ -723,7 +806,9 @@ final class PersonalRecordsRepository {
           ),
         );
         await _backoff(attempt++);
-        if (!_scopeStillActive(scopeKey, generation)) return;
+        if (!_scopeStillActive(scopeKey, generation)) {
+          return PersonalRecordsSyncOutcome.aborted;
+        }
         continue;
       }
       if (result.status == 401 || result.status == 403) {
@@ -739,7 +824,7 @@ final class PersonalRecordsRepository {
             ),
           ),
         );
-        return;
+        return PersonalRecordsSyncOutcome.unauthorized;
       }
       if (result.status == 503) {
         cache.schemaReady = false;
@@ -755,7 +840,7 @@ final class PersonalRecordsRepository {
             ),
           ),
         );
-        return;
+        return PersonalRecordsSyncOutcome.schemaNotReady;
       }
       if (result.status < 200 || result.status >= 300) {
         cache.syncStatus = PersonalRecordsSyncStatus.serverError;
@@ -771,18 +856,22 @@ final class PersonalRecordsRepository {
           ),
         );
         await _backoff(attempt++);
-        if (!_scopeStillActive(scopeKey, generation)) return;
+        if (!_scopeStillActive(scopeKey, generation)) {
+          return PersonalRecordsSyncOutcome.aborted;
+        }
         continue;
       }
       final map = result.map;
       cache.schemaReady = map['schemaReady'] == true;
-      await _applySyncResponse(
+      final clearedAny = await _applySyncResponse(
         scopeKey: scopeKey,
         generation: generation,
         acknowledgements: map['acknowledgements'],
         records: map['records'],
       );
-      if (!_scopeStillActive(scopeKey, generation)) return;
+      if (!_scopeStillActive(scopeKey, generation)) {
+        return PersonalRecordsSyncOutcome.aborted;
+      }
       unawaited(
         DiagnosticRuntime.logger.log(
           LogEvent(
@@ -794,22 +883,44 @@ final class PersonalRecordsRepository {
         ),
       );
       final remaining = await _loadPending(scopeKey);
-      if (!_scopeStillActive(scopeKey, generation)) return;
+      if (!_scopeStillActive(scopeKey, generation)) {
+        return PersonalRecordsSyncOutcome.aborted;
+      }
       cache.syncStatus = remaining.isEmpty
           ? PersonalRecordsSyncStatus.upToDate
           : PersonalRecordsSyncStatus.pendingUpload;
-      return;
+      if (remaining.isEmpty) {
+        return clearedAny
+            ? PersonalRecordsSyncOutcome.clearedAll
+            : PersonalRecordsSyncOutcome.noProgress;
+      }
+      // Follow-up when acks cleared work, or pending was superseded in-flight
+      // (e.g. higher PB arrived while the POST was outstanding).
+      final superseded = remaining.values.any((entry) {
+        final posted = postedSnapshot[entry.difficulty];
+        if (posted == null) return true;
+        return posted.score != entry.score ||
+            posted.localRevision != entry.localRevision ||
+            posted.completionId != entry.completionId;
+      });
+      if (clearedAny || superseded) {
+        return PersonalRecordsSyncOutcome.madeProgressRemaining;
+      }
+      return PersonalRecordsSyncOutcome.noProgress;
     }
+    return PersonalRecordsSyncOutcome.retryExhausted;
   }
 
   /// Reloads durable pending before applying acks so an in-flight higher PB
   /// written while the request was outstanding cannot be overwritten.
-  Future<void> _applySyncResponse({
+  /// Returns true when at least one durable pending entry was cleared.
+  Future<bool> _applySyncResponse({
     required String scopeKey,
     required int generation,
     required Object? acknowledgements,
     required Object? records,
   }) async {
+    var clearedAny = false;
     await _withPendingLock(scopeKey, () async {
       if (!_scopeStillActive(scopeKey, generation)) return;
       final pending = Map<String, PendingPracticeSyncEntry>.of(
@@ -845,8 +956,10 @@ final class PersonalRecordsRepository {
           // Clear only when the ack covers this exact pending score/revision.
           if (remoteScore >= entry.score && acceptedScore <= entry.score) {
             pending.remove(difficulty);
+            clearedAny = true;
           } else if (remoteScore >= entry.score) {
             pending.remove(difficulty);
+            clearedAny = true;
           }
         }
       }
@@ -859,11 +972,12 @@ final class PersonalRecordsRepository {
         await _saveRemoteCache(scopeKey, cache.remoteByKey);
       }
     });
+    return clearedAny;
   }
 
   Future<void> _backoff(int attempt) async {
     final ms = _baseBackoffMs * (1 << attempt.clamp(0, 4));
-    await Future<void>.delayed(Duration(milliseconds: ms));
+    await _sleeper(Duration(milliseconds: ms));
   }
 
   Future<void> hydrateRemoteCacheForScope(
