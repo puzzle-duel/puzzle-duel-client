@@ -15,6 +15,7 @@ import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
@@ -184,6 +185,13 @@ final class TournamentController extends ChangeNotifier {
     identity: identity,
   );
 
+  late final PersonalRecordsRepository personalRecords = PersonalRecordsRepository(
+    kv: _kv,
+    api: api,
+    sessionAuth: sessionAuth,
+    practiceStore: practiceStore,
+  );
+
   TournamentRoute route = const TournamentRoute();
   TournamentDay? day;
   Map<String, Object?> board = const {};
@@ -298,7 +306,13 @@ final class TournamentController extends ChangeNotifier {
       code: LogCode.screenOpened,
       operation: 'profile_account_state_updated',
     )));
+    _kickPersonalRecordsSync();
     notifyListeners();
+  }
+
+  void _kickPersonalRecordsSync() {
+    final generation = personalRecords.accountSyncGeneration;
+    unawaited(personalRecords.refreshAndSync(expectedGeneration: generation));
   }
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
@@ -661,6 +675,7 @@ final class TournamentController extends ChangeNotifier {
       code: LogCode.sessionRestored,
       operation: 'auth_account_scope_cleared',
     )));
+    personalRecords.fenceSync();
     markAccountStateUpdated();
   }
 
@@ -1080,6 +1095,7 @@ final class TournamentController extends ChangeNotifier {
     _sessionRenewalTimer?.cancel();
     if (foreground) {
       unawaited(_renewActiveSession());
+      _kickPersonalRecordsSync();
     }
   }
 

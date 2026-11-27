@@ -141,19 +141,28 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     _recorded = true;
     _finished = state;
     final when = DateTime.now().toUtc().toIso8601String();
-    await _store.append(
-      PracticeRecord(
-        sessionId: 'practice-$seed-$when',
-        difficulty: profile.wire,
-        rulesVersion: state.rulesVersion.id,
-        generatorVersion: GeneratorVersion.gen001V1.id,
-        seed: seed,
-        score: state.score,
-        terminalReason: state.terminalReason?.wire ?? 'ended',
-        completedAt: when,
-        moveCount: state.turnsUsed,
-      ),
+    final priorBest = await _store.bestScore(
+      profile.wire,
+      rulesVersion: state.rulesVersion.id,
+      generatorVersion: GeneratorVersion.gen001V1.id,
     );
+    final record = PracticeRecord(
+      sessionId: 'practice-$seed-$when',
+      difficulty: profile.wire,
+      rulesVersion: state.rulesVersion.id,
+      generatorVersion: GeneratorVersion.gen001V1.id,
+      seed: seed,
+      score: state.score,
+      terminalReason: state.terminalReason?.wire ?? 'ended',
+      completedAt: when,
+      moveCount: state.turnsUsed,
+    );
+    await _store.append(record);
+    final improved = priorBest == null || state.score > priorBest;
+    unawaited(widget.controller.personalRecords.notifyLocalPracticeBest(
+      record: record,
+      improved: improved,
+    ));
     final best = await _store.bestScore(
       profile.wire,
       rulesVersion: state.rulesVersion.id,

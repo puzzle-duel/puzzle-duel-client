@@ -7,6 +7,7 @@ import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
+import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
@@ -24,18 +25,12 @@ final class PlayerProfileScreen extends StatefulWidget {
 }
 
 final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
-  static const _practiceRules = 'core-001.v2';
-  static const _practiceGenerator = 'gen-001.v1';
-
   PracticeStats _stats = const PracticeStats(
     completedCount: 0,
     difficultyCounts: {},
   );
-  Map<String, PracticeBest?> _bests = const {
-    'easy': null,
-    'medium': null,
-    'hard': null,
-  };
+  PersonalRecordsViewModel? _recordsViewModel;
+  PersonalRecordSegment _recordsSegment = PersonalRecordSegment.all;
   BadgeCollectionSnapshot _badges = BadgeCollectionSnapshot.lockedCatalog(
     status: BadgeCollectionStatus.loading,
   );
@@ -101,11 +96,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       completedCount: 0,
       difficultyCounts: {},
     );
-    _bests = const {
-      'easy': null,
-      'medium': null,
-      'hard': null,
-    };
+    _recordsViewModel = null;
     _loadingBadges = true;
     _activeBadgeCacheKey = _verifiedPlayerCacheKey;
     final cached = _activeBadgeCacheKey == null
@@ -152,28 +143,35 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   Future<void> _reloadLocal({
     required int expectedEpoch,
     required int generation,
+    bool remote = false,
   }) async {
-    // Capture a stable account-scoped store for this generation.
-    final store = widget.controller.practiceStore();
-    final stats = await store.stats();
-    final bests = <String, PracticeBest?>{};
-    for (final difficulty in const ['easy', 'medium', 'hard']) {
-      bests[difficulty] = await store.personalBestForDifficulty(
-        difficulty,
-        rulesVersion: _practiceRules,
-        preferredGeneratorVersion: _practiceGenerator,
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'profile_personal_records_requested',
+    )));
+    final repo = widget.controller.personalRecords;
+    if (remote && _isVerifiedAccount) {
+      await repo.refreshAndSync(
+        expectedGeneration: repo.accountSyncGeneration,
       );
     }
+    final view = await repo.loadViewModel();
     if (_isStaleLoad(
       expectedEpoch: expectedEpoch,
       generation: generation,
       currentGeneration: _localLoadGeneration,
     )) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.screenOpened,
+        operation: 'profile_personal_records_stale_discarded',
+      )));
       return;
     }
     setState(() {
-      _stats = stats;
-      _bests = bests;
+      _stats = view.practiceStats;
+      _recordsViewModel = view;
     });
   }
 
@@ -346,9 +344,30 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     final localGeneration = ++_localLoadGeneration;
     final badgeGeneration = ++_badgeLoadGeneration;
     await Future.wait([
-      _reloadLocal(expectedEpoch: epoch, generation: localGeneration),
+      _reloadLocal(
+        expectedEpoch: epoch,
+        generation: localGeneration,
+        remote: true,
+      ),
       _loadBadges(expectedEpoch: epoch, generation: badgeGeneration),
     ]);
+  }
+
+  Map<String, PersonalRecordCardModel?> get _visibleRecords {
+    final view = _recordsViewModel;
+    if (view == null) {
+      return const {'easy': null, 'medium': null, 'hard': null};
+    }
+    return view.forSegment(_recordsSegment);
+  }
+
+  String? get _recordsSyncCaption {
+    if (!_isVerifiedAccount) return null;
+    final status = _recordsViewModel?.syncStatus ??
+        PersonalRecordsSyncStatus.idle;
+    final text = TournamentCopy.of(context)
+        .personalRecordsSyncStatus(status);
+    return text.isEmpty ? null : text;
   }
 
   @override
@@ -421,12 +440,31 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  copy.practiceLocal,
+                  copy.personalRecordsBlurb,
                   style: const TextStyle(
                     color: GameTokens.textSecondary,
                     height: 1.35,
                   ),
                 ),
+                const SizedBox(height: 12),
+                _PersonalRecordsSegmentedControl(
+                  segment: _recordsSegment,
+                  copy: copy,
+                  onChanged: (segment) =>
+                      setState(() => _recordsSegment = segment),
+                ),
+                if (_recordsSyncCaption != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _recordsSyncCaption!,
+                    key: const Key('profile-records-sync'),
+                    style: const TextStyle(
+                      color: GameTokens.textMuted,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _PersonalBestCard(
                   key: const Key('profile-best-easy'),
@@ -434,9 +472,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   boardLabel: '5×5',
                   accent: GameTokens.easyAccent,
                   cardColor: GameTokens.easyCard,
-                  best: _bests['easy'],
+                  record: _visibleRecords['easy'],
                   copy: copy,
-                  rulesVersion: _practiceRules,
                 ),
                 const SizedBox(height: 10),
                 _PersonalBestCard(
@@ -445,9 +482,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   boardLabel: '6×6',
                   accent: GameTokens.mediumAccent,
                   cardColor: GameTokens.mediumCard,
-                  best: _bests['medium'],
+                  record: _visibleRecords['medium'],
                   copy: copy,
-                  rulesVersion: _practiceRules,
                 ),
                 const SizedBox(height: 10),
                 _PersonalBestCard(
@@ -456,9 +492,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   boardLabel: '7×7',
                   accent: GameTokens.hardAccent,
                   cardColor: GameTokens.hardCard,
-                  best: _bests['hard'],
+                  record: _visibleRecords['hard'],
                   copy: copy,
-                  rulesVersion: _practiceRules,
                 ),
                 const SizedBox(height: 24),
                 Text(
@@ -802,6 +837,49 @@ final class _ProfileHeader extends StatelessWidget {
   }
 }
 
+final class _PersonalRecordsSegmentedControl extends StatelessWidget {
+  const _PersonalRecordsSegmentedControl({
+    required this.segment,
+    required this.copy,
+    required this.onChanged,
+  });
+
+  final PersonalRecordSegment segment;
+  final TournamentCopy copy;
+  final ValueChanged<PersonalRecordSegment> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: copy.personalRecordsTitle,
+      child: SegmentedButton<PersonalRecordSegment>(
+        key: const Key('profile-records-segment'),
+        showSelectedIcon: false,
+        segments: [
+          ButtonSegment(
+            value: PersonalRecordSegment.all,
+            label: Text(copy.personalRecordsSegmentAll),
+          ),
+          ButtonSegment(
+            value: PersonalRecordSegment.practice,
+            label: Text(copy.personalRecordsSegmentPractice),
+          ),
+          ButtonSegment(
+            value: PersonalRecordSegment.tournament,
+            label: Text(copy.personalRecordsSegmentTournament),
+          ),
+        ],
+        selected: {segment},
+        onSelectionChanged: (selected) {
+          if (selected.isEmpty) return;
+          onChanged(selected.first);
+        },
+      ),
+    );
+  }
+}
+
 final class _PersonalBestCard extends StatelessWidget {
   const _PersonalBestCard({
     super.key,
@@ -809,26 +887,24 @@ final class _PersonalBestCard extends StatelessWidget {
     required this.boardLabel,
     required this.accent,
     required this.cardColor,
-    required this.best,
+    required this.record,
     required this.copy,
-    required this.rulesVersion,
   });
 
   final String title;
   final String boardLabel;
   final Color accent;
   final Color cardColor;
-  final PracticeBest? best;
+  final PersonalRecordCardModel? record;
   final TournamentCopy copy;
-  final String rulesVersion;
 
   @override
   Widget build(BuildContext context) {
-    final empty = best == null;
+    final empty = record == null;
     return Semantics(
       label: empty
           ? '$title $boardLabel, ${copy.noPersonalBest}'
-          : '$title $boardLabel, ${copy.groupedScore(best!.score)}',
+          : '$title $boardLabel, ${copy.groupedScore(record!.score)}',
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(GameTokens.spaceMd),
@@ -849,13 +925,24 @@ final class _PersonalBestCard extends StatelessWidget {
                         ?.copyWith(color: accent, fontWeight: FontWeight.w700),
                   ),
                 ),
-                Text(
-                  copy.unverifiedLocal,
-                  style: const TextStyle(
-                    color: GameTokens.textMuted,
-                    fontSize: 11,
+                if (!empty && record!.displaySource != null)
+                  Text(
+                    record!.displaySource == PersonalRecordDisplaySource.tournament
+                        ? copy.personalRecordsSourceTournament
+                        : copy.personalRecordsSourcePractice,
+                    style: const TextStyle(
+                      color: GameTokens.textMuted,
+                      fontSize: 11,
+                    ),
+                  )
+                else if (empty || record!.localOnly)
+                  Text(
+                    copy.unverifiedLocal,
+                    style: const TextStyle(
+                      color: GameTokens.textMuted,
+                      fontSize: 11,
+                    ),
                   ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -866,7 +953,7 @@ final class _PersonalBestCard extends StatelessWidget {
               )
             else ...[
               Text(
-                copy.groupedScore(best!.score),
+                copy.groupedScore(record!.score),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: GameTokens.textPrimary,
@@ -875,9 +962,9 @@ final class _PersonalBestCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 copy.recordMeta(
-                  completedAt: best!.completedAt,
-                  rulesVersion: rulesVersion,
-                  moveCount: best!.moveCount,
+                  completedAt: record!.achievedAt ?? '',
+                  rulesVersion: record!.rulesVersion,
+                  moveCount: record!.moveCount,
                 ),
                 style: const TextStyle(
                   color: GameTokens.textSecondary,
