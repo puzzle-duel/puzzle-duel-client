@@ -34,6 +34,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   BadgeCollectionSnapshot _badges = BadgeCollectionSnapshot.lockedCatalog(
     status: BadgeCollectionStatus.loading,
   );
+
   /// Last successful badge snapshot keyed by verified player id (never guest).
   final Map<String, BadgeCollectionSnapshot> _badgeCacheByPlayer = {};
   var _loadingBadges = true;
@@ -92,17 +93,15 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   }
 
   void _clearAccountScopedUi() {
-    _stats = const PracticeStats(
-      completedCount: 0,
-      difficultyCounts: {},
-    );
+    _stats = const PracticeStats(completedCount: 0, difficultyCounts: {});
     _recordsViewModel = null;
     _loadingBadges = true;
     _activeBadgeCacheKey = _verifiedPlayerCacheKey;
     final cached = _activeBadgeCacheKey == null
         ? null
         : _badgeCacheByPlayer[_activeBadgeCacheKey!];
-    _badges = cached ??
+    _badges =
+        cached ??
         BadgeCollectionSnapshot.lockedCatalog(
           status: BadgeCollectionStatus.loading,
         );
@@ -119,14 +118,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       _clearAccountScopedUi();
     }
     setState(() {});
-    unawaited(_reloadLocal(
-      expectedEpoch: epoch,
-      generation: localGeneration,
-    ));
-    unawaited(_loadBadges(
-      expectedEpoch: epoch,
-      generation: badgeGeneration,
-    ));
+    unawaited(_reloadLocal(expectedEpoch: epoch, generation: localGeneration));
+    unawaited(_loadBadges(expectedEpoch: epoch, generation: badgeGeneration));
   }
 
   bool _isStaleLoad({
@@ -145,33 +138,73 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     required int generation,
     bool remote = false,
   }) async {
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'profile_personal_records_requested',
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'profile_personal_records_requested',
+        ),
+      ),
+    );
     final repo = widget.controller.personalRecords;
-    if (remote && _isVerifiedAccount) {
-      await repo.refreshAndSync(
-        expectedGeneration: repo.accountSyncGeneration,
-      );
-    }
-    final view = await repo.loadViewModel();
+    // Always paint local/cached Practice records first — never block on remote.
+    final localView = await repo.loadViewModel();
     if (_isStaleLoad(
       expectedEpoch: expectedEpoch,
       generation: generation,
       currentGeneration: _localLoadGeneration,
     )) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info,
-        code: LogCode.screenOpened,
-        operation: 'profile_personal_records_stale_discarded',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'profile_personal_records_stale_discarded',
+          ),
+        ),
+      );
       return;
     }
     setState(() {
-      _stats = view.practiceStats;
-      _recordsViewModel = view;
+      _stats = localView.practiceStats;
+      _recordsViewModel = localView;
+    });
+
+    if (!remote || !_isVerifiedAccount) return;
+
+    final syncGeneration = repo.accountSyncGeneration;
+    await repo.refreshAndSync(expectedGeneration: syncGeneration);
+    if (_isStaleLoad(
+      expectedEpoch: expectedEpoch,
+      generation: generation,
+      currentGeneration: _localLoadGeneration,
+    )) {
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'profile_personal_records_stale_discarded',
+          ),
+        ),
+      );
+      return;
+    }
+    // Discard remote outcome writes if account generation changed mid-flight.
+    if (syncGeneration != repo.accountSyncGeneration) return;
+
+    final remoteView = await repo.loadViewModel();
+    if (_isStaleLoad(
+      expectedEpoch: expectedEpoch,
+      generation: generation,
+      currentGeneration: _localLoadGeneration,
+    )) {
+      return;
+    }
+    setState(() {
+      _stats = remoteView.practiceStats;
+      _recordsViewModel = remoteView;
     });
   }
 
@@ -181,21 +214,25 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   }) async {
     final cacheKey = _verifiedPlayerCacheKey;
     _activeBadgeCacheKey = cacheKey;
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'profile_badges_requested',
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'profile_badges_requested',
+        ),
+      ),
+    );
     if (!_isStaleLoad(
       expectedEpoch: expectedEpoch,
       generation: generation,
       currentGeneration: _badgeLoadGeneration,
     )) {
-      final cached =
-          cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
+      final cached = cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
       setState(() {
         _loadingBadges = true;
-        _badges = cached ??
+        _badges =
+            cached ??
             BadgeCollectionSnapshot.lockedCatalog(
               status: BadgeCollectionStatus.loading,
             );
@@ -212,16 +249,19 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         generation: generation,
         currentGeneration: _badgeLoadGeneration,
       )) {
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.info,
-          code: LogCode.screenOpened,
-          operation: 'profile_badges_stale_response_discarded',
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.info,
+              code: LogCode.screenOpened,
+              operation: 'profile_badges_stale_response_discarded',
+            ),
+          ),
+        );
         return;
       }
       if (result.status == 0) {
-        final cached =
-            cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
+        final cached = cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
         setState(() {
           _loadingBadges = false;
           if (cached != null) {
@@ -230,11 +270,15 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
               status: BadgeCollectionStatus.stale,
               errorCode: result.error,
             );
-            unawaited(DiagnosticRuntime.logger.log(LogEvent(
-              level: LogLevel.info,
-              code: LogCode.screenOpened,
-              operation: 'profile_badges_cache_used',
-            )));
+            unawaited(
+              DiagnosticRuntime.logger.log(
+                LogEvent(
+                  level: LogLevel.info,
+                  code: LogCode.screenOpened,
+                  operation: 'profile_badges_cache_used',
+                ),
+              ),
+            );
           } else {
             _badges = BadgeCollectionSnapshot.lockedCatalog(
               status: result.error == 'TIMEOUT'
@@ -244,12 +288,16 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
             );
           }
         });
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.httpFailed,
-          operation: 'profile_badges_failed',
-          errorCode: result.error,
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.httpFailed,
+              operation: 'profile_badges_failed',
+              errorCode: result.error,
+            ),
+          ),
+        );
         return;
       }
       if (result.status == 401 || result.status == 403) {
@@ -262,18 +310,21 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
             errorCode: result.error,
           );
         });
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.authExpired,
-          operation: 'profile_badges_failed',
-          httpStatus: result.status,
-          errorCode: result.error,
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.authExpired,
+              operation: 'profile_badges_failed',
+              httpStatus: result.status,
+              errorCode: result.error,
+            ),
+          ),
+        );
         return;
       }
       if (result.status < 200 || result.status >= 300) {
-        final cached =
-            cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
+        final cached = cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
         setState(() {
           _loadingBadges = false;
           if (cached != null) {
@@ -290,13 +341,17 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
             );
           }
         });
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.httpFailed,
-          operation: 'profile_badges_failed',
-          httpStatus: result.status,
-          errorCode: result.error,
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.httpFailed,
+              operation: 'profile_badges_failed',
+              httpStatus: result.status,
+              errorCode: result.error,
+            ),
+          ),
+        );
         return;
       }
       final snapshot = BadgeCollectionSnapshot.fromServerPayload(result.map);
@@ -307,12 +362,16 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         _loadingBadges = false;
         _badges = snapshot;
       });
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info,
-        code: LogCode.httpCompleted,
-        operation: 'profile_badges_completed',
-        httpStatus: result.status,
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.httpCompleted,
+            operation: 'profile_badges_completed',
+            httpStatus: result.status,
+          ),
+        ),
+      );
     } catch (_) {
       if (_isStaleLoad(
         expectedEpoch: expectedEpoch,
@@ -321,8 +380,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       )) {
         return;
       }
-      final cached =
-          cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
+      final cached = cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
       setState(() {
         _loadingBadges = false;
         _badges = cached != null
@@ -363,10 +421,9 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
 
   String? get _recordsSyncCaption {
     if (!_isVerifiedAccount) return null;
-    final status = _recordsViewModel?.syncStatus ??
-        PersonalRecordsSyncStatus.idle;
-    final text = TournamentCopy.of(context)
-        .personalRecordsSyncStatus(status);
+    final status =
+        _recordsViewModel?.syncStatus ?? PersonalRecordsSyncStatus.idle;
+    final text = TournamentCopy.of(context).personalRecordsSyncStatus(status);
     return text.isEmpty ? null : text;
   }
 
@@ -374,8 +431,9 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
     final verified = _isVerifiedAccount;
-    final accountLabel =
-        verified ? copy.accountStatusVerified : copy.accountStatusGuest;
+    final accountLabel = verified
+        ? copy.accountStatusVerified
+        : copy.accountStatusGuest;
     return Scaffold(
       backgroundColor: GameTokens.bgDeep,
       body: ArcadeBackdrop(
@@ -416,18 +474,24 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   verified: verified,
                   busy: widget.controller.authUiBusy,
                   copy: copy,
-                  onSignIn: widget.controller.onRequestRankedAuth == null ||
+                  onSignIn:
+                      widget.controller.onRequestRankedAuth == null ||
                           widget.controller.authUiBusy
                       ? null
                       : () {
-                          unawaited(DiagnosticRuntime.logger.log(LogEvent(
-                            level: LogLevel.info,
-                            code: LogCode.screenOpened,
-                            operation: 'profile_signin_tapped',
-                          )));
+                          unawaited(
+                            DiagnosticRuntime.logger.log(
+                              LogEvent(
+                                level: LogLevel.info,
+                                code: LogCode.screenOpened,
+                                operation: 'profile_signin_tapped',
+                              ),
+                            ),
+                          );
                           widget.controller.onRequestRankedAuth!();
                         },
-                  onSignOut: widget.controller.onRequestSignOut == null ||
+                  onSignOut:
+                      widget.controller.onRequestSignOut == null ||
                           widget.controller.authUiBusy
                       ? null
                       : widget.controller.onRequestSignOut,
@@ -518,10 +582,9 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                     final epoch = widget.controller.accountStateEpoch;
                     _accountStateEpoch = epoch;
                     final generation = ++_badgeLoadGeneration;
-                    unawaited(_loadBadges(
-                      expectedEpoch: epoch,
-                      generation: generation,
-                    ));
+                    unawaited(
+                      _loadBadges(expectedEpoch: epoch, generation: generation),
+                    );
                   },
                 ),
                 const SizedBox(height: 12),
@@ -542,14 +605,24 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Force test crash?'),
-                          content: const Text('This will close the staging app. Relaunch it to upload the crash report.'),
+                          content: const Text(
+                            'This will close the staging app. Relaunch it to upload the crash report.',
+                          ),
                           actions: [
-                            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Crash')),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Crash'),
+                            ),
                           ],
                         ),
                       );
-                      if (confirmed == true) await FirebaseDiagnostics.forceTestCrash();
+                      if (confirmed == true) {
+                        await FirebaseDiagnostics.forceTestCrash();
+                      }
                     },
                     child: const Text('Force Test Crash'),
                   ),
@@ -676,8 +749,9 @@ final class _AccountStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel =
-        verified ? copy.accountStatusVerified : copy.accountStatusGuest;
+    final statusLabel = verified
+        ? copy.accountStatusVerified
+        : copy.accountStatusGuest;
     return Semantics(
       container: true,
       label: statusLabel,
@@ -695,9 +769,7 @@ final class _AccountStatusCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  verified
-                      ? Icons.verified_user_rounded
-                      : Icons.person_outline,
+                  verified ? Icons.verified_user_rounded : Icons.person_outline,
                   color: verified
                       ? GameTokens.success
                       : GameTokens.textSecondary,
@@ -793,9 +865,7 @@ final class _ProfileHeader extends StatelessWidget {
               radius: 28,
               backgroundColor: GameTokens.surfaceHigh,
               child: Icon(
-                verified
-                    ? Icons.verified_user_rounded
-                    : Icons.person_rounded,
+                verified ? Icons.verified_user_rounded : Icons.person_rounded,
                 color: verified ? GameTokens.success : GameTokens.accent,
                 size: 28,
               ),
@@ -927,7 +997,8 @@ final class _PersonalBestCard extends StatelessWidget {
                 ),
                 if (!empty && record!.displaySource != null)
                   Text(
-                    record!.displaySource == PersonalRecordDisplaySource.tournament
+                    record!.displaySource ==
+                            PersonalRecordDisplaySource.tournament
                         ? copy.personalRecordsSourceTournament
                         : copy.personalRecordsSourcePractice,
                     style: const TextStyle(

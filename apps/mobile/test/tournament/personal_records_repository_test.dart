@@ -187,10 +187,15 @@ void main() {
     'pending ack clears only when remote meets score and revision matches',
     () async {
       final session = verifiedSession(playerA);
-      final api = _OriginScriptedApi(
-        (method, path, body) async =>
-            const UatHttpResult(404, {'error': 'NOT_FOUND'}),
-      );
+      // Hold POSTs so notify does not settle into a terminal failure status.
+      final releasePost = Completer<UatHttpResult>();
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'POST') return releasePost.future;
+        return const UatHttpResult(200, {
+          'records': <Object>[],
+          'schemaReady': true,
+        });
+      });
       final repository = repo(session: session, api: api);
       final scopeKey = PersonalRecordsRepository.accountScopeKey(
         apiOrigin: origin,
@@ -206,8 +211,7 @@ void main() {
         localRevision: 1,
         remoteScore: 50,
       );
-      var pending = await repository.loadViewModel();
-      expect(pending.syncStatus, PersonalRecordsSyncStatus.pendingUpload);
+      expect(await repository.debugPendingScores(scopeKey), {'easy': 88});
 
       await repository.debugApplyAcknowledgement(
         scopeKey: scopeKey,
@@ -215,11 +219,8 @@ void main() {
         localRevision: 1,
         remoteScore: 88,
       );
-      pending = await repository.loadViewModel();
-      expect(
-        pending.syncStatus,
-        isNot(PersonalRecordsSyncStatus.pendingUpload),
-      );
+      expect(await repository.debugPendingScores(scopeKey), isEmpty);
+      releasePost.complete(const UatHttpResult(0, {'error': 'ABANDONED'}));
     },
   );
 
@@ -1052,6 +1053,93 @@ void main() {
       expect(
         view.tournament['easy']?.generatorVersion,
         personalRecordsTournamentGenerator,
+      );
+    },
+  );
+
+  test(
+    'HTTP 404 GET is non-retryable and does not chain Practice sync',
+    () async {
+      final session = verifiedSession(playerA);
+      var gets = 0;
+      var posts = 0;
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET' && path.endsWith('/personal-records')) {
+          gets += 1;
+          return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+        }
+        if (method == 'POST') {
+          posts += 1;
+          return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+      final repository = repo(session: session, api: api);
+      final scopeKey = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+      await practiceStore().append(
+        practiceRecord(sessionId: 'local-visible', score: 88),
+      );
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'local-visible', score: 88),
+        improved: true,
+      );
+      // notify may attempt sync (POST 404 once) then block.
+      await Future<void>.delayed(Duration.zero);
+      final postsAfterNotify = posts;
+
+      await repository.refreshAndSync(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      await repository.refreshAndSync(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      expect(gets, greaterThanOrEqualTo(1));
+      // GET 404 must not chain Practice sync retries.
+      expect(posts, postsAfterNotify);
+      expect(
+        repository.debugLastSyncOutcome,
+        PersonalRecordsSyncOutcome.routeNotFound,
+      );
+      final view = await repository.loadViewModel();
+      expect(view.practice['easy']?.score, 88);
+      expect(view.syncStatus, PersonalRecordsSyncStatus.serverError);
+      expect(view.syncStatus, isNot(PersonalRecordsSyncStatus.upToDate));
+      expect(await repository.debugPendingScores(scopeKey), {'easy': 88});
+    },
+  );
+
+  test(
+    'HTTP 404 Practice sync is non-retryable within attempt budget',
+    () async {
+      final session = verifiedSession(playerA);
+      var posts = 0;
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET') {
+          return const UatHttpResult(200, {
+            'records': <Object>[],
+            'schemaReady': true,
+          });
+        }
+        if (method == 'POST') {
+          posts += 1;
+          return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+      final repository = repo(session: session, api: api);
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'sync404', score: 42),
+        improved: true,
+      );
+      await repository.scheduleSyncIfNeeded();
+      await repository.scheduleSyncIfNeeded();
+      expect(posts, 1);
+      expect(
+        repository.debugLastSyncOutcome,
+        PersonalRecordsSyncOutcome.routeNotFound,
       );
     },
   );

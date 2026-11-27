@@ -40,6 +40,9 @@ enum PersonalRecordsSyncOutcome {
   noProgress,
   unauthorized,
   schemaNotReady,
+
+  /// HTTP 404 — non-retryable ingress/config failure (not transport flake).
+  routeNotFound,
   retryExhausted,
   aborted,
   failed,
@@ -269,6 +272,7 @@ final class PersonalRecordsRepository {
   static bool _blocksImmediateReschedule(PersonalRecordsSyncOutcome outcome) {
     return outcome == PersonalRecordsSyncOutcome.unauthorized ||
         outcome == PersonalRecordsSyncOutcome.schemaNotReady ||
+        outcome == PersonalRecordsSyncOutcome.routeNotFound ||
         outcome == PersonalRecordsSyncOutcome.retryExhausted ||
         outcome == PersonalRecordsSyncOutcome.noProgress ||
         outcome == PersonalRecordsSyncOutcome.failed;
@@ -386,6 +390,13 @@ final class PersonalRecordsRepository {
     }
     if (cache.syncStatus == PersonalRecordsSyncStatus.syncing) {
       return PersonalRecordsSyncStatus.syncing;
+    }
+    // Prefer explicit failure states over pendingUpload so a failed sync is
+    // never presented as healthy progress (durable pending still retained).
+    if (cache.syncStatus == PersonalRecordsSyncStatus.unauthorized ||
+        cache.syncStatus == PersonalRecordsSyncStatus.offline ||
+        cache.syncStatus == PersonalRecordsSyncStatus.serverError) {
+      return cache.syncStatus;
     }
     if (pending.isNotEmpty) return PersonalRecordsSyncStatus.pendingUpload;
     return cache.syncStatus;
@@ -563,6 +574,25 @@ final class PersonalRecordsRepository {
       );
       return;
     }
+    if (result.status == 404) {
+      // Ingress/config miss — never retry as transport flake; keep local rows.
+      cache.syncStatus = PersonalRecordsSyncStatus.serverError;
+      _lastSyncOutcome = PersonalRecordsSyncOutcome.routeNotFound;
+      _lastSyncOutcomeKey = scopeKey;
+      _syncBlockedUntilResume = true;
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.httpFailed,
+            operation: 'fetchPersonalRecords',
+            httpStatus: result.status,
+            errorCode: 'NOT_FOUND',
+          ),
+        ),
+      );
+      return;
+    }
     if (result.status < 200 || result.status >= 300) {
       cache.syncStatus = PersonalRecordsSyncStatus.serverError;
       unawaited(
@@ -701,6 +731,11 @@ final class PersonalRecordsRepository {
     _allowSyncResume();
     await refreshRemote(expectedGeneration: expectedGeneration);
     if (!_scopeStillActive(scopeKey, expectedGeneration)) return;
+    // 404 is a configuration/route miss — do not chain Practice sync retries.
+    if (_lastSyncOutcome == PersonalRecordsSyncOutcome.routeNotFound &&
+        _lastSyncOutcomeKey == scopeKey) {
+      return;
+    }
     await seedPendingFromLocalBests(
       scopeKey: scopeKey,
       expectedGeneration: expectedGeneration,
@@ -841,6 +876,21 @@ final class PersonalRecordsRepository {
           ),
         );
         return PersonalRecordsSyncOutcome.schemaNotReady;
+      }
+      if (result.status == 404) {
+        cache.syncStatus = PersonalRecordsSyncStatus.serverError;
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.httpFailed,
+              operation: 'syncPracticeRecords',
+              httpStatus: result.status,
+              errorCode: 'NOT_FOUND',
+            ),
+          ),
+        );
+        return PersonalRecordsSyncOutcome.routeNotFound;
       }
       if (result.status < 200 || result.status >= 300) {
         cache.syncStatus = PersonalRecordsSyncStatus.serverError;
