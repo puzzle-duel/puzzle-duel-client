@@ -232,6 +232,9 @@ final class TournamentController extends ChangeNotifier {
   bool _renewingWriter = false;
   Timer? _sessionRenewalTimer;
   Future<bool>? _sessionRenewalInFlight;
+  /// Bumped on gameplay-session invalidation so delayed renewals cannot apply
+  /// or clear a newer in-flight renewal via [Future.whenComplete].
+  int _sessionRenewalGeneration = 0;
   bool _appForeground = true;
   bool _disposed = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
@@ -836,6 +839,7 @@ final class TournamentController extends ChangeNotifier {
   }) async {
     _sessionRenewalTimer?.cancel();
     _sessionRenewalTimer = null;
+    _sessionRenewalGeneration++;
     _sessionRenewalInFlight = null;
     api.sessionSecret = null;
     _verifiedSessionId = null;
@@ -1101,13 +1105,28 @@ final class TournamentController extends ChangeNotifier {
 
   Future<bool> _renewActiveSession() {
     if (_sessionRenewalInFlight != null) return _sessionRenewalInFlight!;
-    final operation = _renewActiveSessionBody();
+    final generation = _sessionRenewalGeneration;
+    final operation = _renewActiveSessionBody(generation);
     _sessionRenewalInFlight = operation;
-    return operation.whenComplete(() => _sessionRenewalInFlight = null);
+    // Only clear the slot if this Future is still the current in-flight work.
+    // A bare `= null` in whenComplete would wipe a newer renewal started after
+    // invalidateTournamentGameplaySession nullled the previous pointer.
+    operation.whenComplete(() {
+      if (identical(_sessionRenewalInFlight, operation) &&
+          generation == _sessionRenewalGeneration) {
+        _sessionRenewalInFlight = null;
+      }
+    });
+    return operation;
   }
 
-  Future<bool> _renewActiveSessionBody() async {
-    if (_disposed || !_appForeground || api.sessionSecret == null) return false;
+  Future<bool> _renewActiveSessionBody(int generation) async {
+    if (_disposed ||
+        generation != _sessionRenewalGeneration ||
+        !_appForeground ||
+        api.sessionSecret == null) {
+      return false;
+    }
     if (_refreshInFlight != null || moveInFlight || _renewingWriter) {
       _sessionRenewalTimer?.cancel();
       _sessionRenewalTimer = Timer(const Duration(milliseconds: 500), () {
@@ -1121,8 +1140,17 @@ final class TournamentController extends ChangeNotifier {
     if (originalSessionId == null || originalPlayerId == null) return false;
     InteractionPerf.mark('tournament.session.renew.proactive');
     final response = await api.patch('/v1/tournament/session');
-    if (_disposed || originalSecret != api.sessionSecret ||
-        originalSessionId != _verifiedSessionId) {
+    if (_disposed ||
+        generation != _sessionRenewalGeneration ||
+        originalSecret != api.sessionSecret ||
+        originalSessionId != _verifiedSessionId ||
+        originalPlayerId != _verifiedSessionPlayerId) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.sessionRestoreFailed,
+        operation: 'tournament_session_stale_response_discarded',
+        errorCode: 'STALE_RENEWAL',
+      )));
       return false;
     }
     if (response.status == 200 &&
@@ -1145,7 +1173,9 @@ final class TournamentController extends ChangeNotifier {
       _sessionExpiresAtMs = DateTime.now().toUtc().millisecondsSinceEpoch - 1;
     }
     _sessionRenewalTimer?.cancel();
-    if (response.status != 401 && _appForeground) {
+    if (response.status != 401 &&
+        _appForeground &&
+        generation == _sessionRenewalGeneration) {
       _sessionRenewalTimer = Timer(const Duration(seconds: 2), () {
         unawaited(_renewActiveSession());
       });
