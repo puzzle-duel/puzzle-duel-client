@@ -11,6 +11,7 @@ import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
@@ -297,6 +298,10 @@ final class TournamentController extends ChangeNotifier {
   /// Bumps when account type / player scope changes so Profile can refresh.
   int accountStateEpoch = 0;
 
+  /// Centralized Top Banner feedback (exclusive transient notification channel).
+  AppFeedbackNotice? appFeedback;
+  int _appFeedbackGeneration = 0;
+
   void setAuthUiBusy(bool value) {
     if (authUiBusy == value) return;
     authUiBusy = value;
@@ -305,6 +310,12 @@ final class TournamentController extends ChangeNotifier {
 
   void markAccountStateUpdated() {
     accountStateEpoch++;
+    // Drop feedback tied to the previous account scope.
+    final pendingFeedback = appFeedback;
+    if (pendingFeedback != null &&
+        pendingFeedback.accountEpoch < accountStateEpoch) {
+      appFeedback = null;
+    }
     // Fence before kick so in-flight work from the previous account cannot
     // mutate the newly published scope.
     personalRecords.fenceSync();
@@ -319,6 +330,138 @@ final class TournamentController extends ChangeNotifier {
     );
     _kickPersonalRecordsSync();
     notifyListeners();
+  }
+
+  /// Presents one transient Top Banner. Replaces any visible feedback.
+  void presentAppFeedback({
+    required AppFeedbackKind kind,
+    required String message,
+    String? semanticsKey,
+  }) {
+    final generation = ++_appFeedbackGeneration;
+    appFeedback = AppFeedbackNotice(
+      generation: generation,
+      accountEpoch: accountStateEpoch,
+      kind: kind,
+      message: message,
+      semanticsKey: semanticsKey,
+    );
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'app_feedback_presented',
+          errorCode: switch (kind) {
+            AppFeedbackKind.info => 'INFO',
+            AppFeedbackKind.warning => 'WARNING',
+            AppFeedbackKind.success => 'SUCCESS',
+          },
+        ),
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// Clears feedback only when [generation] still owns the active notice.
+  void clearAppFeedback(int generation) {
+    if (appFeedback?.generation != generation) return;
+    appFeedback = null;
+    notifyListeners();
+  }
+
+  /// User/gesture dismiss of the active Top Banner.
+  void dismissAppFeedback({required String reason}) {
+    final current = appFeedback;
+    if (current == null) return;
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: reason == 'gesture'
+              ? 'app_feedback_dismissed_gesture'
+              : 'app_feedback_dismissed_auto',
+          errorCode: switch (current.kind) {
+            AppFeedbackKind.info => 'INFO',
+            AppFeedbackKind.warning => 'WARNING',
+            AppFeedbackKind.success => 'SUCCESS',
+          },
+        ),
+      ),
+    );
+    clearAppFeedback(current.generation);
+  }
+
+  void _clearPersonalTournamentFields({bool resetWriterLock = false}) {
+    _cancelPendingResolutionNav();
+    _resolutionHold?.cancel();
+    _resolutionHold = null;
+    day = null;
+    board = const {};
+    results = const {};
+    leaderboard = const {};
+    nextCursor = null;
+    seriesId = null;
+    category = 'ALL';
+    weekStart = null;
+    weeks = const [];
+    weeklyFinal = false;
+    homeSnapshot = null;
+    homeSnapshotStale = false;
+    resultsError = null;
+    errorCode = null;
+    noticeCode = null;
+    tournamentNoticeCode = null;
+    scoreDelta = null;
+    deadlineMs = null;
+    serverNowMs = null;
+    syncedAt = null;
+    _claim = null;
+    _pending = null;
+    _pendingKey = null;
+    _pendingPreState = null;
+    _pendingOfferIndex = null;
+    _pendingTap = null;
+    if (resetWriterLock) {
+      rankedWriterLocked = false;
+    }
+    busy = false;
+    moveInFlight = false;
+  }
+
+  /// Guest / unverified gate: clear personal fields, no auto auth warning banner.
+  /// Preserves [rankedWriterLocked] so recovery gates remain authoritative.
+  void _applyRankedAuthRequiredGate({required bool presentHome}) {
+    _tournamentEpoch++;
+    _clearPersonalTournamentFields();
+    rankedAuthRequired = true;
+    booting = false;
+    tournamentSync = TournamentSyncState.degraded;
+    if (presentHome) route = const TournamentRoute();
+    notifyListeners();
+  }
+
+  /// Clears in-memory account-scoped tournament presentation and fences async
+  /// completions. Does not wipe Practice, device settings, or server history.
+  void invalidateAccountScopedPresentation({required String reason}) {
+    _tournamentEpoch++;
+    _clearPersonalTournamentFields(resetWriterLock: true);
+    tournamentSync = TournamentSyncState.idle;
+    // Authenticated-only routes must not linger under the next account scope.
+    if (route.place != TournamentPlace.home) {
+      route = const TournamentRoute();
+    }
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'account_scoped_state_invalidated',
+          errorCode: reason.toUpperCase(),
+        ),
+      ),
+    );
   }
 
   void _kickPersonalRecordsSync() {
@@ -471,14 +614,7 @@ final class TournamentController extends ChangeNotifier {
               ),
             ),
           );
-          rankedAuthRequired = true;
-          busy = false;
-          booting = false;
-          errorCode = null;
-          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
-          tournamentSync = TournamentSyncState.degraded;
-          if (presentHome) route = const TournamentRoute();
-          notifyListeners();
+          _applyRankedAuthRequiredGate(presentHome: presentHome);
           return;
         }
         rankedAuthRequired = false;
@@ -508,14 +644,7 @@ final class TournamentController extends ChangeNotifier {
           ),
         ),
       );
-      rankedAuthRequired = true;
-      busy = false;
-      booting = false;
-      errorCode = null;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
-      tournamentSync = TournamentSyncState.degraded;
-      if (presentHome) route = const TournamentRoute();
-      notifyListeners();
+      _applyRankedAuthRequiredGate(presentHome: presentHome);
       return;
     }
     if (!_accepted(claim, const {200, 201}, degradedOnFailure: true)) return;
@@ -673,7 +802,10 @@ final class TournamentController extends ChangeNotifier {
     if (!access.isVerified) {
       _pendingRankedEntryOnce = true;
       rankedAuthRequired = true;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      // Sheet presentation is the feedback; avoid a redundant Top Banner.
+      if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
+        tournamentNoticeCode = null;
+      }
       notifyListeners();
       onRequestRankedAuth?.call();
       return;
@@ -683,15 +815,16 @@ final class TournamentController extends ChangeNotifier {
   }
 
   /// Applies post-logout guest credentials without starting a claim.
+  ///
+  /// Guest mode after logout is expected — do not emit a RANKED_AUTH_REQUIRED
+  /// Top Banner; the Home CTA already explains verification is required.
   void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
+    invalidateAccountScopedPresentation(reason: 'logout');
     this.rankedAuthRequired = rankedAuthRequired;
     activeSessionRecovery = null;
     sessionRecoveryRequired = false;
     unawaited(invalidateTournamentGameplaySession(reason: 'logout'));
-    homeSnapshot = null;
-    homeSnapshotStale = false;
     if (rankedAuthRequired) {
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
     unawaited(
@@ -700,6 +833,15 @@ final class TournamentController extends ChangeNotifier {
           level: LogLevel.info,
           code: LogCode.sessionRestored,
           operation: 'auth_account_scope_cleared',
+        ),
+      ),
+    );
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'guest_home_state_initialized',
         ),
       ),
     );
@@ -768,9 +910,12 @@ final class TournamentController extends ChangeNotifier {
       tournamentNoticeCode = null;
     } else if (resolved != null) {
       rankedAuthRequired = true;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      // Guest after recovery: CTA only — no automatic auth warning banner.
+      if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
+        tournamentNoticeCode = null;
+      }
       tournamentSync = TournamentSyncState.degraded;
-    } else if (tournamentNoticeCode != 'RANKED_AUTH_REQUIRED') {
+    } else if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
       tournamentNoticeCode = null;
     }
     unawaited(
@@ -829,10 +974,11 @@ final class TournamentController extends ChangeNotifier {
         final access = await sessionAuth!.authenticate();
         // Invalidate previous tournament session before publishing account.
         await invalidateTournamentGameplaySession(reason: 'account_transition');
+        // Never flash previous account personal data under the new identity.
+        invalidateAccountScopedPresentation(reason: 'account_transition');
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           rankedAuthRequired = true;
-          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
           await clearAuthenticatedPracticeScope();
           markAccountStateUpdated();
           unawaited(
@@ -1438,6 +1584,7 @@ final class TournamentController extends ChangeNotifier {
         session.showServerRejection('WRITER_NOT_AUTHORIZED');
         rankedWriterLocked = true;
         noticeCode = 'WRITER_NOT_AUTHORIZED';
+        tournamentNoticeCode = 'WRITER_NOT_AUTHORIZED';
         errorCode = null;
         // Once only: ask the server to restore/verify this session and the
         // writer binding, then explicitly re-read writerSessionMatches.

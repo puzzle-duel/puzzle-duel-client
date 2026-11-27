@@ -4,10 +4,7 @@ import 'package:puzzle_duel_mobile/application/game_session.dart';
 ///
 /// Never surface raw wire codes (`occupied_tap`, etc.) in the UI.
 abstract final class MoveFeedbackCopy {
-  static String? playerMessage({
-    required MoveFeedbackKind kind,
-    String? code,
-  }) {
+  static String? playerMessage({required MoveFeedbackKind kind, String? code}) {
     if (kind == MoveFeedbackKind.none) return null;
     final mapped = _byCode[code];
     if (mapped != null) return mapped;
@@ -23,8 +20,7 @@ abstract final class MoveFeedbackCopy {
     final lower = text.toLowerCase();
     if (lower.contains('move rejected:')) return true;
     if (lower.contains('could not be applied safely')) return true;
-    if (RegExp(r'\b[a-z]+_[a-z_]+\b').hasMatch(lower) &&
-        !lower.contains(' ')) {
+    if (RegExp(r'\b[a-z]+_[a-z_]+\b').hasMatch(lower) && !lower.contains(' ')) {
       return true;
     }
     for (final code in _byCode.keys) {

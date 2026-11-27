@@ -26,3 +26,10 @@ Do NOT push to main, merge PR, modify organization settings, deploy or publish w
 
 ## Mandatory post-development summary (GOLDEN RULE)
 After every meaningful milestone, implementation, bug fix, refactor, or review remediation, deliver a development summary to the owner **in Turkish** (keep file names and technical identifiers in English) and record the same summary on the corresponding Jira issue. The summary must cover: what changed, why, how it works, files, impact, decisions, executed tests with actual results, GitHub branch/SHA/PR/CI, Jira status/comments, remaining work, next step, and whether owner action is required. Do not treat a milestone as complete until this summary is delivered. Providing a summary does not by itself require stopping for approval unless a real approval gate was reached. All future agents must read and follow this rule before starting development.
+
+## GOLDEN RULES — Account isolation & notifications (PZD-54)
+Binding detail: `docs/architecture/PZD-54-ACCOUNT-ISOLATION-AND-NOTIFICATIONS.md`.
+
+1. **Single Notification Presenter** — All transient user feedback uses `AppTopBannerHost` / `presentAppFeedback` (info/warning/success). No SnackBar/Toast parallel channels.
+2. **Strict Account State Isolation** — Account-scoped tournament presentation and async completions must not cross logout or account-switch boundaries; fence with scope/generation.
+3. **Observability** — Auth transitions, invalidation, stale rejection, and banner lifecycle remain privacy-safe `LogEvent` diagnostics.

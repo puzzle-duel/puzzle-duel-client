@@ -54,6 +54,12 @@ final class TournamentCopy {
   String get resume => pick('Resume tournament', 'Turnuvaya devam et');
   String get readyHeadline =>
       pick('Today’s tournament is open', 'Bugünün turnuvası açık');
+  String get guestTournamentHeadline =>
+      pick("Join today's tournament", 'Günün turnuvasına katıl');
+  String get guestTournamentBody => pick(
+    'Sign in with Apple or Google to enter the tournament.',
+    'Turnuvaya katılmak için Apple veya Google hesabınla oturum aç.',
+  );
   String get progressHeadline =>
       pick('Tournament in progress', 'Turnuva sürüyor');
   String get completedHeadline =>
@@ -74,27 +80,28 @@ final class TournamentCopy {
       pick('Personal records', 'Kişisel rekorlar');
   String get personalRecordsSegmentAll => pick('All', 'Tümü');
   String get personalRecordsSegmentPractice => pick('Practice', 'Pratik');
-  String get personalRecordsSegmentTournament =>
-      pick('Tournament', 'Turnuva');
+  String get personalRecordsSegmentTournament => pick('Tournament', 'Turnuva');
   String get personalRecordsBlurb => pick(
     'Best scores on this device and your verified account. Tournament rows come from official results.',
     'Bu cihaz ve doğrulanmış hesabındaki en iyi skorlar. Turnuva satırları resmi sonuçlardandır.',
   );
-  String get personalRecordsSourcePractice =>
-      pick('Practice', 'Pratik');
-  String get personalRecordsSourceTournament =>
-      pick('Tournament', 'Turnuva');
+  String get personalRecordsSourcePractice => pick('Practice', 'Pratik');
+  String get personalRecordsSourceTournament => pick('Tournament', 'Turnuva');
   String personalRecordsSyncStatus(PersonalRecordsSyncStatus status) =>
       switch (status) {
         PersonalRecordsSyncStatus.idle => '',
-        PersonalRecordsSyncStatus.syncing =>
-          pick('Syncing records…', 'Rekorlar eşitleniyor…'),
+        PersonalRecordsSyncStatus.syncing => pick(
+          'Syncing records…',
+          'Rekorlar eşitleniyor…',
+        ),
         PersonalRecordsSyncStatus.pendingUpload => pick(
           'Upload pending when online.',
           'Çevrimiçi olunca yükleme bekliyor.',
         ),
-        PersonalRecordsSyncStatus.upToDate =>
-          pick('Records up to date.', 'Rekorlar güncel.'),
+        PersonalRecordsSyncStatus.upToDate => pick(
+          'Records up to date.',
+          'Rekorlar güncel.',
+        ),
         PersonalRecordsSyncStatus.offline => pick(
           'Offline. Showing local records.',
           'Çevrimdışı. Yerel rekorlar gösteriliyor.',
@@ -261,18 +268,14 @@ final class TournamentCopy {
     'Unlimited puzzles. Not ranked and not part of today’s tournament.',
     'Sınırsız bulmaca. Sıralamaya girmez ve bugünün turnuvasına yazılmaz.',
   );
-  String get authSheetTitle => pick(
-    'Sign in to Puzzle Duel',
-    'Puzzle Duel\'e giriş yap',
-  );
+  String get authSheetTitle =>
+      pick('Sign in to Puzzle Duel', 'Puzzle Duel\'e giriş yap');
   String get authSheetBody => pick(
     'Continue with Apple or Google. Your local practice progress may require confirmation before switching to an existing linked account.',
     'Apple veya Google ile devam et. Mevcut hesaba geçerken yerel pratik ilerlemen onay isteyebilir.',
   );
-  String get accountSwitchTitle => pick(
-    'Switch to your linked account?',
-    'Mevcut hesabına geçilsin mi?',
-  );
+  String get accountSwitchTitle =>
+      pick('Switch to your linked account?', 'Mevcut hesabına geçilsin mi?');
   String get accountSwitchBody => pick(
     'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress on this device will not be merged automatically.',
     'Bu Apple veya Google hesabı başka bir Puzzle Duel oyuncusuna bağlı. Bu cihazdaki misafir ilerlemen otomatik birleştirilmez.',
@@ -281,14 +284,10 @@ final class TournamentCopy {
       pick('Switch to my account', 'Mevcut hesabıma geç');
   String get accountSwitchKeepGuest =>
       pick('Stay as guest', 'Misafir olarak kal');
-  String get authLinkSectionTitle => pick(
-    'Link this guest account',
-    'Bu misafir hesabını bağla',
-  );
-  String get authLoginSectionTitle => pick(
-    'Sign in to an existing account',
-    'Mevcut hesaba giriş yap',
-  );
+  String get authLinkSectionTitle =>
+      pick('Link this guest account', 'Bu misafir hesabını bağla');
+  String get authLoginSectionTitle =>
+      pick('Sign in to an existing account', 'Mevcut hesaba giriş yap');
   String get authConflictBody => pick(
     'This Apple or Google account is already linked to another Puzzle Duel player. Your guest progress was not changed. Sign into the existing account only if you intend to switch — identities are never merged.',
     'Bu Apple veya Google hesabı başka bir Puzzle Duel oyuncusuna bağlı. Misafir ilerlemen değişmedi. Yalnızca hesap değiştirmek istiyorsan mevcut hesaba giriş yap — kimlikler asla birleştirilmez.',
@@ -297,26 +296,19 @@ final class TournamentCopy {
     'Your account may already be verified, but this device could not finish saving the session. Sign in again with the same Apple or Google account to restore progress. A new guest account will not be created.',
     'Hesabın doğrulanmış olabilir ancak oturum bu cihazda tamamlanamadı. İlerlemeyi geri yüklemek için aynı Apple veya Google hesabıyla yeniden giriş yap. Yeni misafir hesabı oluşturulmaz.',
   );
-  String get continueWithApple => pick('Continue with Apple', 'Apple ile devam et');
+  String get continueWithApple =>
+      pick('Continue with Apple', 'Apple ile devam et');
   String get continueWithGoogle =>
       pick('Continue with Google', 'Google ile devam et');
-  String get signInExistingApple => pick(
-    'Sign in with Apple',
-    'Apple ile giriş yap',
-  );
-  String get signInExistingGoogle => pick(
-    'Sign in with Google',
-    'Google ile giriş yap',
-  );
-  String get keepGuestProgress => pick(
-    'Keep guest progress',
-    'Misafir ilerlemesini koru',
-  );
+  String get signInExistingApple =>
+      pick('Sign in with Apple', 'Apple ile giriş yap');
+  String get signInExistingGoogle =>
+      pick('Sign in with Google', 'Google ile giriş yap');
+  String get keepGuestProgress =>
+      pick('Keep guest progress', 'Misafir ilerlemesini koru');
   String get cancel => pick('Cancel', 'İptal');
-  String get signInToPlay => pick(
-    'Sign in to play tournament',
-    'Turnuva için oturum aç',
-  );
+  String get signInToPlay =>
+      pick('Sign in to play tournament', 'Turnuva için oturum aç');
   String get signOutConfirmTitle => pick('Sign out?', 'Oturum kapatılsın mı?');
   String get signOutConfirmBody => pick(
     'You will return to a guest account on this device. Tournament play will require verification again. Practice stays available.',
@@ -331,10 +323,8 @@ final class TournamentCopy {
     'Sign-out could not be completed. Try again.',
     'Oturum kapatılamadı. Yeniden dene.',
   );
-  String get loginSucceeded => pick(
-    'Signed in successfully.',
-    'Oturum açıldı.',
-  );
+  String get loginSucceeded =>
+      pick('Signed in successfully.', 'Oturum açıldı.');
   String get loginFailed => pick(
     'Sign-in could not be completed. Try again.',
     'Oturum açılamadı. Yeniden dene.',
@@ -360,70 +350,63 @@ final class TournamentCopy {
     'Tournament connection is temporarily unavailable. Practice stays open. Retry when the network returns — a new guest account will not be created.',
     'Turnuva bağlantısı geçici olarak yok. Pratik açık kalır. Ağ gelince yeniden dene — yeni misafir hesap oluşturulmaz.',
   );
-  String get retryConnection => pick('Retry connection', 'Bağlantıyı yeniden dene');
+  String get retryConnection =>
+      pick('Retry connection', 'Bağlantıyı yeniden dene');
   String get recoverMyAccount => pick('Recover my account', 'Hesabımı kurtar');
-  String get startAsNewGuest => pick(
-    'Start as a new guest',
-    'Yeni misafir olarak başla',
-  );
-  String get startAsNewGuestConfirmTitle => pick(
-    'Start as a new guest?',
-    'Yeni misafir olarak başlansın mı?',
-  );
+  String get startAsNewGuest =>
+      pick('Start as a new guest', 'Yeni misafir olarak başla');
+  String get startAsNewGuestConfirmTitle =>
+      pick('Start as a new guest?', 'Yeni misafir olarak başlansın mı?');
   String get startAsNewGuestConfirmBody => pick(
     'If you start with a new guest account, you may lose access to your previous account and progress. Do you want to continue?',
     'Yeni bir misafir hesabıyla başlarsanız önceki hesabınıza ve ilerlemenize erişiminizi kaybedebilirsiniz. Devam etmek istiyor musunuz?',
   );
-  String get sendDiagnosticsRecovery => pick(
-    'Send diagnostics',
-    'Log gönder',
-  );
+  String get sendDiagnosticsRecovery => pick('Send diagnostics', 'Log gönder');
   String get accountStatusGuest => pick('Guest account', 'Misafir hesap');
   String get accountStatusVerified =>
       pick('Verified account', 'Doğrulanmış hesap');
   String get signOut => pick('Sign out', 'Oturumu kapat');
   String authError(String code) => switch (code) {
-        // Conflict/recovery bodies are shown once in the sheet; keep a short
-        // secondary line only when the sheet is not already in that mode.
-        'ACCOUNT_CONFLICT' => pick(
-          'Choose an existing-account sign-in below, or keep guest progress.',
-          'Aşağıdan mevcut hesaba giriş yap veya misafir ilerlemesini koru.',
-        ),
-        'SECURE_STORE_UNAVAILABLE' ||
-        'SECURE_STORE_VERIFY_FAILED' ||
-        'SECURE_STORE_RECOVERY_FAILED' ||
-        'PROVIDER_LINK_RECOVERY_apple' ||
-        'PROVIDER_LINK_RECOVERY_google' ||
-        'PROVIDER_LINK_RECOVERY_APPLE' ||
-        'PROVIDER_LINK_RECOVERY_GOOGLE' ||
-        'STALE_CREDENTIAL_RESPONSE' ||
-        'RECOVERY_IDENTITY_MISMATCH' ||
-        'RECOVERY_PROVIDER_MISMATCH' ||
-        'RECOVERY_MARKER_MISSING' ||
-        'RECOVERY_NOT_LINKED' =>
-          pick(
-            'Use the same Apple or Google account to finish restoring this session.',
-            'Oturumu tamamlamak için aynı Apple veya Google hesabını kullan.',
-          ),
-        'RECOVERY_RETRY_LINK' => pick(
-          'Your guest session is still active. Continue with Apple or Google to finish linking this account.',
-          'Misafir oturumun hâlâ aktif. Bu hesabı bağlamak için Apple veya Google ile devam et.',
-        ),
-        'PROVIDER_SIGN_IN_CANCELLED' => pick(
-          'Sign-in was cancelled.',
-          'Oturum açma iptal edildi.',
-        ),
-        'AUTH_NETWORK_UNAVAILABLE' || 'OFFLINE' => offline,
-        'AUTH_UNAVAILABLE' || 'PROVIDER_CONFIG_MISSING' => pick(
-          'Sign-in is temporarily unavailable. Try again later.',
-          'Oturum açma geçici olarak kullanılamıyor. Daha sonra yeniden dene.',
-        ),
-        'INVALID_PROVIDER_CHALLENGE' || 'INVALID_PROVIDER_ASSERTION' => pick(
-          'Sign-in could not be verified. Try again.',
-          'Oturum doğrulanamadı. Yeniden dene.',
-        ),
-        _ => genericFailure,
-      };
+    // Conflict/recovery bodies are shown once in the sheet; keep a short
+    // secondary line only when the sheet is not already in that mode.
+    'ACCOUNT_CONFLICT' => pick(
+      'Choose an existing-account sign-in below, or keep guest progress.',
+      'Aşağıdan mevcut hesaba giriş yap veya misafir ilerlemesini koru.',
+    ),
+    'SECURE_STORE_UNAVAILABLE' ||
+    'SECURE_STORE_VERIFY_FAILED' ||
+    'SECURE_STORE_RECOVERY_FAILED' ||
+    'PROVIDER_LINK_RECOVERY_apple' ||
+    'PROVIDER_LINK_RECOVERY_google' ||
+    'PROVIDER_LINK_RECOVERY_APPLE' ||
+    'PROVIDER_LINK_RECOVERY_GOOGLE' ||
+    'STALE_CREDENTIAL_RESPONSE' ||
+    'RECOVERY_IDENTITY_MISMATCH' ||
+    'RECOVERY_PROVIDER_MISMATCH' ||
+    'RECOVERY_MARKER_MISSING' ||
+    'RECOVERY_NOT_LINKED' => pick(
+      'Use the same Apple or Google account to finish restoring this session.',
+      'Oturumu tamamlamak için aynı Apple veya Google hesabını kullan.',
+    ),
+    'RECOVERY_RETRY_LINK' => pick(
+      'Your guest session is still active. Continue with Apple or Google to finish linking this account.',
+      'Misafir oturumun hâlâ aktif. Bu hesabı bağlamak için Apple veya Google ile devam et.',
+    ),
+    'PROVIDER_SIGN_IN_CANCELLED' => pick(
+      'Sign-in was cancelled.',
+      'Oturum açma iptal edildi.',
+    ),
+    'AUTH_NETWORK_UNAVAILABLE' || 'OFFLINE' => offline,
+    'AUTH_UNAVAILABLE' || 'PROVIDER_CONFIG_MISSING' => pick(
+      'Sign-in is temporarily unavailable. Try again later.',
+      'Oturum açma geçici olarak kullanılamıyor. Daha sonra yeniden dene.',
+    ),
+    'INVALID_PROVIDER_CHALLENGE' || 'INVALID_PROVIDER_ASSERTION' => pick(
+      'Sign-in could not be verified. Try again.',
+      'Oturum doğrulanamadı. Yeniden dene.',
+    ),
+    _ => genericFailure,
+  };
   String get chooseDifficulty => pick('Choose a difficulty', 'Zorluk seç');
   String get newPuzzle => pick('New Puzzle', 'Yeni bulmaca');
   String get samePuzzle =>
@@ -481,26 +464,18 @@ final class TournamentCopy {
   String get finalLabel => pick('Final', 'Kesinleşti');
   String get tryAgain => pick('Try again', 'Yeniden dene');
   String get loading => pick('Loading the tournament…', 'Turnuva yükleniyor…');
-  String get tournamentSyncing => pick(
-    'Updating tournament info…',
-    'Turnuva bilgileri güncelleniyor…',
-  );
-  String get tournamentRefreshSuccess => pick(
-    'Tournament info updated.',
-    'Turnuva bilgileri güncellendi.',
-  );
-  String get cachedTournamentHeadline => pick(
-    'Your latest tournament info',
-    'Son turnuva bilgilerin',
-  );
+  String get tournamentSyncing =>
+      pick('Updating tournament info…', 'Turnuva bilgileri güncelleniyor…');
+  String get tournamentRefreshSuccess =>
+      pick('Tournament info updated.', 'Turnuva bilgileri güncellendi.');
+  String get cachedTournamentHeadline =>
+      pick('Your latest tournament info', 'Son turnuva bilgilerin');
   String get cachedTournamentBody => pick(
     'Showing your latest tournament info.',
     'Son turnuva bilgilerin gösteriliyor.',
   );
-  String get connectionUnavailable => pick(
-    'No internet connection.',
-    'İnternet bağlantısı yok.',
-  );
+  String get connectionUnavailable =>
+      pick('No internet connection.', 'İnternet bağlantısı yok.');
   String get noConnection => pick('No connection', 'Bağlantı yok');
   String get boardLoading =>
       pick('Loading verified scores…', 'Doğrulanmış puanlar yükleniyor…');
@@ -509,14 +484,10 @@ final class TournamentCopy {
     'Sign in again to update tournament info.',
     'Turnuva bilgilerini güncellemek için yeniden oturum aç.',
   );
-  String get timedOut => pick(
-    'Connection timed out.',
-    'Bağlantı zaman aşımına uğradı.',
-  );
-  String get offline => pick(
-    'No internet connection.',
-    'İnternet bağlantısı yok.',
-  );
+  String get timedOut =>
+      pick('Connection timed out.', 'Bağlantı zaman aşımına uğradı.');
+  String get offline =>
+      pick('No internet connection.', 'İnternet bağlantısı yok.');
   String get writerBlocked => pick(
     "Today's challenge is open in another session. Continue from the session where you started.",
     'Günlük mücadele başka bir oturumda açık. Başladığın oturumdan devam edebilirsin.',
@@ -543,10 +514,8 @@ final class TournamentCopy {
   );
   String get genericFailure =>
       pick('Something went wrong.', 'Bir şeyler ters gitti.');
-  String get boardUnreadable => pick(
-    'The board could not be shown.',
-    'Tahta gösterilemedi.',
-  );
+  String get boardUnreadable =>
+      pick('The board could not be shown.', 'Tahta gösterilemedi.');
 
   String objective(int moves, int size) => pick(
     'Select a piece, then tap a highlighted empty tile. $moves moves left on a $size×$size board.',
@@ -587,10 +556,9 @@ final class TournamentCopy {
       'PROVIDER_LINK_RECOVERY_apple' ||
       'PROVIDER_LINK_RECOVERY_google' ||
       'PROVIDER_LINK_RECOVERY_APPLE' ||
-      'PROVIDER_LINK_RECOVERY_GOOGLE' =>
-        sessionRecoveryRequired,
-      'REFRESH_UNAVAILABLE' || 'AUTH_NETWORK_UNAVAILABLE' =>
-        sessionRecoveryTransient,
+      'PROVIDER_LINK_RECOVERY_GOOGLE' => sessionRecoveryRequired,
+      'REFRESH_UNAVAILABLE' ||
+      'AUTH_NETWORK_UNAVAILABLE' => sessionRecoveryTransient,
       'WRITER_NOT_AUTHORIZED' => writerBlocked,
       'RATE_LIMITED' => pick(
         'Too many tournament requests. Please try again shortly.',

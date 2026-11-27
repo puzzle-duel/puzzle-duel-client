@@ -883,7 +883,7 @@ void main() {
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(controller.rankedAuthRequired, isTrue);
     expect(controller.rankedWriterLocked, isTrue);
-    expect(controller.tournamentNoticeCode, 'RANKED_AUTH_REQUIRED');
+    expect(controller.tournamentNoticeCode, isNull);
     expect(claimPosts, 0);
     controller.dispose();
   });
