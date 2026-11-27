@@ -30,6 +30,7 @@ After every meaningful milestone, implementation, bug fix, refactor, or review r
 ## GOLDEN RULES — Account isolation & notifications (PZD-54)
 Binding detail: `docs/architecture/PZD-54-ACCOUNT-ISOLATION-AND-NOTIFICATIONS.md`.
 
-1. **Single Notification Presenter** — All transient user feedback uses `AppTopBannerHost` / `presentAppFeedback` (info/warning/success). No SnackBar/Toast parallel channels.
+1. **Single Notification Presenter** — All transient user feedback uses `AppTopBannerHost` / `presentAppFeedback` (info/warning/success). No SnackBar/Toast parallel channels. Banner lifecycle identity is generation/epoch, not message text.
 2. **Strict Account State Isolation** — Account-scoped tournament presentation and async completions must not cross logout or account-switch boundaries; fence with scope/generation.
 3. **Observability** — Auth transitions, invalidation, stale rejection, and banner lifecycle remain privacy-safe `LogEvent` diagnostics.
+4. **UX Copy Consistency** — User-facing messages must be concise, accurate, actionable, and reflect actual product behavior. Never imply restrictions, charges or entitlements that do not exist. Authentication requirements must not be presented as monetization requirements.

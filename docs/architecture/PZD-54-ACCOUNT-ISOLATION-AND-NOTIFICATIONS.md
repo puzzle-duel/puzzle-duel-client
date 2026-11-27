@@ -48,3 +48,26 @@ Relevant operations (non-exhaustive):
 - Existing auth / session / HTTP correlation events
 
 Never log tokens, credentials, emails, or sensitive account payloads.
+
+## GOLDEN RULE 4 — UX Copy Consistency
+
+User-facing messages must be concise, accurate, actionable, and reflect actual
+product behavior.
+
+- Never imply restrictions, charges, or entitlements that do not exist.
+- Authentication requirements must not be presented as monetization requirements.
+- Puzzle Duel currently has no paid gameplay features; do not describe Practice
+  or tournament gates as “free vs paid”.
+- Prefer short actionable copy (e.g. “Sign in to enter the tournament.”) over
+  redundant explanations when the surrounding UI already states the requirement.
+- Keep EN/TR (and other supported locales) in sync via `TournamentCopy` / localization
+  infrastructure — no hardcoded one-off strings for product messaging.
+
+## Notification lifecycle identity
+
+- Explicit `AppFeedbackNotice` instances are owned by `generation` + `accountEpoch`.
+- Identical message text from separate legitimate operations must present again.
+- Auto-dismiss timers, gestures, and exit animations pass the expected generation;
+  stale callbacks must not dismiss a newer banner.
+- `_dismissedNoticeContentKey` applies only to tournament-notice episodes and is
+  cleared on each refresh episode — never permanently suppress app feedback.

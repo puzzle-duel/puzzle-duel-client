@@ -370,10 +370,13 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// User/gesture dismiss of the active Top Banner.
-  void dismissAppFeedback({required String reason}) {
+  /// User/gesture/auto dismiss of feedback [generation] only (idempotent).
+  ///
+  /// Stale callbacks must pass the generation they own — never clear a newer
+  /// [appFeedback] instance that replaced the original.
+  void dismissAppFeedback({required String reason, required int generation}) {
     final current = appFeedback;
-    if (current == null) return;
+    if (current == null || current.generation != generation) return;
     unawaited(
       DiagnosticRuntime.logger.log(
         LogEvent(
@@ -390,7 +393,7 @@ final class TournamentController extends ChangeNotifier {
         ),
       ),
     );
-    clearAppFeedback(current.generation);
+    clearAppFeedback(generation);
   }
 
   void _clearPersonalTournamentFields({bool resetWriterLock = false}) {
@@ -587,6 +590,7 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
     if (sessionRecoveryRequired) {
       final recovered = await _tryClearTransientSessionRecovery();
+      if (activeEpoch != _tournamentEpoch) return;
       if (!recovered) {
         rankedWriterLocked = true;
         busy = false;
@@ -603,6 +607,7 @@ final class TournamentController extends ChangeNotifier {
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
+        if (activeEpoch != _tournamentEpoch) return;
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           unawaited(
@@ -619,8 +624,10 @@ final class TournamentController extends ChangeNotifier {
         }
         rankedAuthRequired = false;
       } on GuestAuthException catch (error) {
+        if (activeEpoch != _tournamentEpoch) return;
         if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
           await enterSessionRecovery(error.code);
+          if (activeEpoch != _tournamentEpoch) return;
           if (presentHome) route = const TournamentRoute();
           return;
         }
@@ -708,11 +715,13 @@ final class TournamentController extends ChangeNotifier {
     if (!needsRecovery || recoveryDenial != null) {
       _applyBoard(view.map, reveal: false);
     }
+    if (activeEpoch != _tournamentEpoch) return;
     if (day?.phase == DayPhase.completed) {
-      await _loadResults();
+      await _loadResults(stillCurrent: () => activeEpoch == _tournamentEpoch);
     }
     if (activeEpoch != _tournamentEpoch) return;
     await _persistHomeSnapshot();
+    if (activeEpoch != _tournamentEpoch) return;
     homeSnapshotStale = false;
     busy = false;
     booting = false;
@@ -817,7 +826,7 @@ final class TournamentController extends ChangeNotifier {
   /// Applies post-logout guest credentials without starting a claim.
   ///
   /// Guest mode after logout is expected — do not emit a RANKED_AUTH_REQUIRED
-  /// Top Banner; the Home CTA already explains verification is required.
+  /// Top Banner; the Home CTA already explains sign-in is required.
   void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
     invalidateAccountScopedPresentation(reason: 'logout');
     this.rankedAuthRequired = rankedAuthRequired;

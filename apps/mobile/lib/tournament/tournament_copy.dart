@@ -330,8 +330,8 @@ final class TournamentCopy {
     'Oturum açılamadı. Yeniden dene.',
   );
   String get rankedAuthRequired => pick(
-    'Apple or Google verification is required before official tournament play. Practice remains free.',
-    'Resmi turnuva öncesi Apple veya Google doğrulaması gerekir. Pratik ücretsiz kalır.',
+    'Sign in to enter the tournament.',
+    'Turnuvaya katılmak için oturum açmalısın.',
   );
   String get sessionRecoveryRequired => pick(
     'Your session could not be restored. You can keep practicing or recover your account.',

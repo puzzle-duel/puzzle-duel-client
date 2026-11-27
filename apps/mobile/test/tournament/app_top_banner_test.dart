@@ -60,9 +60,7 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
 
     controller.presentAppFeedback(
@@ -97,9 +95,7 @@ void main() {
       disableAnimations: false,
       reduceMotion: false,
     );
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -121,9 +117,7 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -148,9 +142,7 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -172,9 +164,7 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -203,9 +193,7 @@ void main() {
       disableAnimations: false,
       reduceMotion: false,
     );
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -232,9 +220,7 @@ void main() {
     addTearDown(() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
-    final api = ScriptedUatApi(
-      (_, _, _) async => const UatHttpResult(200, {}),
-    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
     final controller = await _pumpHome(tester, api, directory);
     controller.presentAppFeedback(
       kind: AppFeedbackKind.info,
@@ -279,6 +265,253 @@ void main() {
       expect(find.byType(SnackBar), findsNothing);
     },
   );
+
+  testWidgets(
+    'N19 identical successive app feedback presents again (generation identity)',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync('pzd54-n19');
+      addTearDown(() {
+        if (directory.existsSync()) directory.deleteSync(recursive: true);
+      });
+      TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+          .clearAccessibilityFeaturesTestValue();
+      TestWidgetsFlutterBinding.ensureInitialized()
+          .platformDispatcher
+          .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+        disableAnimations: false,
+        reduceMotion: false,
+      );
+      final api = ScriptedUatApi(
+        (_, _, _) async => const UatHttpResult(200, {}),
+      );
+      final controller = await _pumpHome(tester, api, directory);
+      const message = 'Signed out. You are playing as a guest.';
+      controller.presentAppFeedback(
+        kind: AppFeedbackKind.info,
+        message: message,
+        semanticsKey: 'auth-logout-success',
+      );
+      await tester.pump();
+      final firstGen = controller.appFeedback!.generation;
+      expect(find.byKey(const Key('auth-logout-success')), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 4100));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('auth-logout-success')), findsNothing);
+      expect(controller.appFeedback, isNull);
+
+      controller.presentAppFeedback(
+        kind: AppFeedbackKind.info,
+        message: message,
+        semanticsKey: 'auth-logout-success',
+      );
+      await tester.pump();
+      expect(controller.appFeedback!.generation, isNot(firstGen));
+      expect(find.byKey(const Key('auth-logout-success')), findsOneWidget);
+    },
+  );
+
+  testWidgets('N20 identical feedback after manual dismiss presents again', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n20');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    const message = 'Same text again';
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: message,
+      semanticsKey: 'fb-same',
+    );
+    await tester.pump();
+    final center = tester.getCenter(find.byKey(const Key('tournament-status')));
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(0, -80));
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('fb-same')), findsNothing);
+
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: message,
+      semanticsKey: 'fb-same',
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('fb-same')), findsOneWidget);
+    expect(controller.appFeedback, isNotNull);
+  });
+
+  testWidgets('N21 account epoch change invalidates prior feedback ownership', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n21');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: 'old account',
+      semanticsKey: 'fb-old-account',
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('fb-old-account')), findsOneWidget);
+    controller.markAccountStateUpdated();
+    await tester.pump();
+    expect(controller.appFeedback, isNull);
+    expect(find.byKey(const Key('fb-old-account')), findsNothing);
+  });
+
+  testWidgets('N22 old timer cannot dismiss identical-text newer generation', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n22');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue();
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher
+        .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+      disableAnimations: false,
+      reduceMotion: false,
+    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    const message = 'identical';
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: message,
+      semanticsKey: 'fb-identical',
+    );
+    await tester.pump();
+    final firstGen = controller.appFeedback!.generation;
+    await tester.pump(const Duration(milliseconds: 1000));
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: message,
+      semanticsKey: 'fb-identical',
+    );
+    await tester.pump();
+    final secondGen = controller.appFeedback!.generation;
+    expect(secondGen, isNot(firstGen));
+    // First hold would fire around 4000ms from first present (~3000 left).
+    await tester.pump(const Duration(milliseconds: 3200));
+    expect(controller.appFeedback?.generation, secondGen);
+    expect(find.byKey(const Key('fb-identical')), findsOneWidget);
+  });
+
+  testWidgets('N23 short drag while syncing still auto-dismisses app feedback', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n23');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue();
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher
+        .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+      disableAnimations: false,
+      reduceMotion: false,
+    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    controller.tournamentSync = TournamentSyncState.syncing;
+    controller.notifyListeners();
+    await tester.pump();
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: 'during sync',
+      semanticsKey: 'fb-sync-drag',
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('fb-sync-drag')), findsOneWidget);
+
+    final center = tester.getCenter(find.byKey(const Key('tournament-status')));
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(0, -12));
+    await gesture.up();
+    await tester.pump();
+    // Smooth snap-back in flight / completed; banner must remain then dismiss.
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(const Key('fb-sync-drag')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 4100));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('fb-sync-drag')), findsNothing);
+    expect(controller.appFeedback, isNull);
+  });
+
+  testWidgets('N24 insufficient drag animates snap-back then keeps banner', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n24');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue();
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher
+        .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+      disableAnimations: false,
+      reduceMotion: false,
+    );
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: 'snap',
+      semanticsKey: 'fb-snap',
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    final center = tester.getCenter(find.byKey(const Key('tournament-status')));
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(0, -20));
+    await gesture.up();
+    // Mid snap-back frame — banner still owned.
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(const Key('fb-snap')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byKey(const Key('fb-snap')), findsOneWidget);
+    expect(controller.appFeedback?.semanticsKey, 'fb-snap');
+  });
+
+  testWidgets('N25 stale dismiss generation is ignored (idempotent)', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('pzd54-n25');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final api = ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {}));
+    final controller = await _pumpHome(tester, api, directory);
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: 'one',
+      semanticsKey: 'fb-one',
+    );
+    await tester.pump();
+    final firstGen = controller.appFeedback!.generation;
+    controller.presentAppFeedback(
+      kind: AppFeedbackKind.info,
+      message: 'two',
+      semanticsKey: 'fb-two',
+    );
+    await tester.pump();
+    controller.dismissAppFeedback(reason: 'auto', generation: firstGen);
+    await tester.pump();
+    expect(find.byKey(const Key('fb-two')), findsOneWidget);
+    expect(controller.appFeedback?.semanticsKey, 'fb-two');
+  });
 }
 
 Future<TournamentController> _pumpHome(

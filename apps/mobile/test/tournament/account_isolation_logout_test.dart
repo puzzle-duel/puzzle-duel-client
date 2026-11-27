@@ -104,9 +104,7 @@ Future<TournamentController> _controller({
       bearer: token,
       playerLabel: accountType,
     ),
-    api:
-        api ??
-        ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {})),
+    api: api ?? ScriptedUatApi((_, _, _) async => const UatHttpResult(200, {})),
     stateDirectory: dir,
     identity: identity,
     sessionAuth: session,
@@ -126,7 +124,9 @@ void main() {
       'A01 logout clears completed tournament personal presentation',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a01');
-        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -163,7 +163,9 @@ void main() {
       'A02 stale successful loadDay after logout does not restore day',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a02');
-        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
         final gate = Completer<void>();
         var loadCalls = 0;
         final api = ScriptedUatApi((method, path, body) async {
@@ -209,7 +211,9 @@ void main() {
 
     test('A03 stale failed loadDay after logout does not set notice', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a03');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       final gate = Completer<void>();
       final api = ScriptedUatApi((method, path, body) async {
         if (method == 'POST' && path.contains('/claims/daily')) {
@@ -237,7 +241,9 @@ void main() {
       'A04/A05 account transition clears previous snapshot before hydrate',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a04');
-        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -257,7 +263,9 @@ void main() {
       'A06/A07 stale finally cannot clear newer account in-flight state',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a07');
-        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
         final controller = await _controller(
           dir: dir,
           playerId: '22222222-2222-2222-2222-222222222222',
@@ -279,7 +287,9 @@ void main() {
       'A08 guest cannot hydrate previous account disk snapshot as day',
       () async {
         final dir = await Directory.systemTemp.createTemp('pzd54-a08');
-        addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
         final controller = await _controller(
           dir: dir,
           playerId: '11111111-1111-1111-1111-111111111111',
@@ -296,7 +306,9 @@ void main() {
 
     test('A10 guest Practice scope remains after logout', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a10');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -310,7 +322,9 @@ void main() {
 
     test('A11 guest gate does not claim tournament', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a11');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       var claims = 0;
       final api = ScriptedUatApi((method, path, body) async {
         if (method == 'POST' && path.contains('/claims/daily')) {
@@ -333,7 +347,9 @@ void main() {
 
     test('A15 logout feedback uses Top Banner channel only', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a15');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -353,7 +369,9 @@ void main() {
 
     test('A16 logout clears authenticated navigation resume state', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-a16');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -367,7 +385,9 @@ void main() {
 
     test('stale app feedback clear is generation-fenced', () async {
       final dir = await Directory.systemTemp.createTemp('pzd54-fb');
-      addTearDown(() { if (dir.existsSync()) dir.deleteSync(recursive: true); });
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
       final controller = await _controller(
         dir: dir,
         playerId: '11111111-1111-1111-1111-111111111111',
@@ -386,8 +406,73 @@ void main() {
       );
       controller.clearAppFeedback(firstGen);
       expect(controller.appFeedback?.semanticsKey, 'second');
-      controller.dismissAppFeedback(reason: 'gesture');
+      final secondGen = controller.appFeedback!.generation;
+      // Stale dismiss of a prior generation must not clear the newer banner.
+      controller.dismissAppFeedback(reason: 'gesture', generation: firstGen);
+      expect(controller.appFeedback?.semanticsKey, 'second');
+      controller.dismissAppFeedback(reason: 'gesture', generation: secondGen);
+      expect(controller.appFeedback, isNull);
+      // Idempotent: repeating the same dismiss is a no-op.
+      controller.dismissAppFeedback(reason: 'gesture', generation: secondGen);
       expect(controller.appFeedback, isNull);
     });
+
+    test(
+      'A17 stale loadDay results after logout cannot restore prior score',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a17');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final resultsGate = Completer<void>();
+        var resultsRequested = false;
+        final api = ScriptedUatApi((method, path, body) async {
+          if (method == 'POST' && path.contains('/claims/daily')) {
+            return const UatHttpResult(201, {
+              'seriesId': 'series-completed',
+              'status': 'COMPLETED',
+              'original': true,
+            });
+          }
+          if (path.contains('/board')) {
+            return const UatHttpResult(200, {
+              'ordinal': 1,
+              'ordinalLabel': 'E1',
+              'seriesScore': 9900,
+              'writerSessionMatches': true,
+              'state': {'turnsUsed': 3, 'boardSize': 8},
+            });
+          }
+          if (path.contains('/results')) {
+            resultsRequested = true;
+            await resultsGate.future;
+            return const UatHttpResult(200, {
+              'all': 9900,
+              'onTimeAwarded': true,
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        final pending = controller.loadDay(presentHome: true);
+        for (var i = 0; i < 40 && !resultsRequested; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(resultsRequested, isTrue);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        expect(controller.day, isNull);
+        expect(controller.results, isEmpty);
+        resultsGate.complete();
+        await pending;
+        expect(controller.day, isNull);
+        expect(controller.results, isEmpty);
+        expect(controller.rankedAuthRequired, isTrue);
+      },
+    );
   });
 }
