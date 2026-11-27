@@ -1,6 +1,7 @@
 # ADR-P53 — Remote Personal Records (Practice Sync + Tournament Projection)
 
-- **Status:** Proposed (owner merge/deploy approval required)
+Status: **Proposed** (owner merge/deploy approval required)
+
 - **Date:** 2026-11-27
 - **Jira:** PZD-53 (extends PZD-43; relates PZD-26 / PZD-27)
 
