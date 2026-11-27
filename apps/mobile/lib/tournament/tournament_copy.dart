@@ -88,6 +88,10 @@ final class TournamentCopy {
     'Offline. Practice records stay available; badges update when you reconnect.',
     'Çevrimdışı. Pratik kayıtların duruyor; rozetler bağlantı gelince güncellenir.',
   );
+  String get badgeStale => pick(
+    'Showing last known badges. Reconnect to refresh.',
+    'Son bilinen rozetler gösteriliyor. Güncellemek için yeniden bağlanın.',
+  );
   String get badgeAuthRequired => pick(
     'Sign in again to load verified badges.',
     'Doğrulanmış rozetler için yeniden oturum aç.',

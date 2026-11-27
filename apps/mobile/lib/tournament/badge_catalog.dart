@@ -162,6 +162,8 @@ BadgeProgress _progressFromServer(
 enum BadgeCollectionStatus {
   loading,
   ready,
+  /// Last successful account-scoped snapshot retained during a transient failure.
+  stale,
   offline,
   unauthorized,
   serverError,

@@ -232,6 +232,9 @@ final class TournamentController extends ChangeNotifier {
   bool _renewingWriter = false;
   Timer? _sessionRenewalTimer;
   Future<bool>? _sessionRenewalInFlight;
+  /// Bumped on gameplay-session invalidation so delayed renewals cannot apply
+  /// or clear a newer in-flight renewal via [Future.whenComplete].
+  int _sessionRenewalGeneration = 0;
   bool _appForeground = true;
   bool _disposed = false;
   /// Captured with [_pending] so unknown-outcome retry can animate the accepted move.
@@ -646,10 +649,18 @@ final class TournamentController extends ChangeNotifier {
     this.rankedAuthRequired = rankedAuthRequired;
     activeSessionRecovery = null;
     sessionRecoveryRequired = false;
+    unawaited(invalidateTournamentGameplaySession(reason: 'logout'));
+    homeSnapshot = null;
+    homeSnapshotStale = false;
     if (rankedAuthRequired) {
       tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'auth_account_scope_cleared',
+    )));
     markAccountStateUpdated();
   }
 
@@ -748,7 +759,11 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
-  /// After successful provider link/login: claim at most once, then resume.
+  /// After successful provider link/login: bind account first, then resume.
+  ///
+  /// Account identity (bearer + Practice scope + epoch) is published before
+  /// tournament session restore so Profile badge reads do not depend on
+  /// gameplay session readiness.
   Future<void> completeRankedAuthAndEnter() async {
     final shouldEnter = _pendingRankedEntryOnce;
     _pendingRankedEntryOnce = false;
@@ -758,28 +773,57 @@ final class TournamentController extends ChangeNotifier {
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.sessionRestored,
-      operation: 'tournament_auth_resume',
+      operation: 'auth_state_transition_started',
     )));
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
+        // Invalidate previous tournament session before publishing account.
+        await invalidateTournamentGameplaySession(
+          reason: 'account_transition',
+        );
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           rankedAuthRequired = true;
           tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+          await clearAuthenticatedPracticeScope();
           markAccountStateUpdated();
+          unawaited(DiagnosticRuntime.logger.log(LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.sessionRestoreFailed,
+            operation: 'auth_state_transition_failed',
+            errorCode: 'RANKED_AUTH_REQUIRED',
+          )));
           return;
         }
+        await _bindPlayerId(access.playerId);
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'auth_account_scope_bound',
+        )));
       } on GuestAuthException catch (error) {
         if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
           await enterSessionRecovery(error.code);
           return;
         }
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.sessionRestoreFailed,
+          operation: 'auth_state_transition_failed',
+          errorCode: error.code,
+        )));
         _fail(error.code, degradedOnFailure: true);
         return;
       }
     }
     markAccountStateUpdated();
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'auth_state_transition_completed',
+    )));
+    // Tournament restore is independent of account publication.
     await refreshTournament(
       origin: TournamentRefreshOrigin.pullToRefresh,
       preserveRoute: true,
@@ -787,6 +831,28 @@ final class TournamentController extends ChangeNotifier {
     if (shouldEnter && tournamentReady && !rankedWriterLocked) {
       await resume();
     }
+  }
+
+  /// Clears gameplay session secret/renewal without signing the account out.
+  Future<void> invalidateTournamentGameplaySession({
+    required String reason,
+  }) async {
+    _sessionRenewalTimer?.cancel();
+    _sessionRenewalTimer = null;
+    _sessionRenewalGeneration++;
+    _sessionRenewalInFlight = null;
+    api.sessionSecret = null;
+    _verifiedSessionId = null;
+    _verifiedSessionPlayerId = null;
+    _sessionExpiresAtMs = null;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestoreFailed,
+      operation: 'tournament_session_invalidated',
+      errorCode: reason == 'account_transition'
+          ? 'ACCOUNT_TRANSITION'
+          : 'SESSION_INVALIDATED',
+    )));
   }
 
   Future<void> resume() async {
@@ -1039,13 +1105,28 @@ final class TournamentController extends ChangeNotifier {
 
   Future<bool> _renewActiveSession() {
     if (_sessionRenewalInFlight != null) return _sessionRenewalInFlight!;
-    final operation = _renewActiveSessionBody();
+    final generation = _sessionRenewalGeneration;
+    final operation = _renewActiveSessionBody(generation);
     _sessionRenewalInFlight = operation;
-    return operation.whenComplete(() => _sessionRenewalInFlight = null);
+    // Only clear the slot if this Future is still the current in-flight work.
+    // A bare `= null` in whenComplete would wipe a newer renewal started after
+    // invalidateTournamentGameplaySession nullled the previous pointer.
+    operation.whenComplete(() {
+      if (identical(_sessionRenewalInFlight, operation) &&
+          generation == _sessionRenewalGeneration) {
+        _sessionRenewalInFlight = null;
+      }
+    });
+    return operation;
   }
 
-  Future<bool> _renewActiveSessionBody() async {
-    if (_disposed || !_appForeground || api.sessionSecret == null) return false;
+  Future<bool> _renewActiveSessionBody(int generation) async {
+    if (_disposed ||
+        generation != _sessionRenewalGeneration ||
+        !_appForeground ||
+        api.sessionSecret == null) {
+      return false;
+    }
     if (_refreshInFlight != null || moveInFlight || _renewingWriter) {
       _sessionRenewalTimer?.cancel();
       _sessionRenewalTimer = Timer(const Duration(milliseconds: 500), () {
@@ -1059,8 +1140,17 @@ final class TournamentController extends ChangeNotifier {
     if (originalSessionId == null || originalPlayerId == null) return false;
     InteractionPerf.mark('tournament.session.renew.proactive');
     final response = await api.patch('/v1/tournament/session');
-    if (_disposed || originalSecret != api.sessionSecret ||
-        originalSessionId != _verifiedSessionId) {
+    if (_disposed ||
+        generation != _sessionRenewalGeneration ||
+        originalSecret != api.sessionSecret ||
+        originalSessionId != _verifiedSessionId ||
+        originalPlayerId != _verifiedSessionPlayerId) {
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.sessionRestoreFailed,
+        operation: 'tournament_session_stale_response_discarded',
+        errorCode: 'STALE_RENEWAL',
+      )));
       return false;
     }
     if (response.status == 200 &&
@@ -1083,7 +1173,9 @@ final class TournamentController extends ChangeNotifier {
       _sessionExpiresAtMs = DateTime.now().toUtc().millisecondsSinceEpoch - 1;
     }
     _sessionRenewalTimer?.cancel();
-    if (response.status != 401 && _appForeground) {
+    if (response.status != 401 &&
+        _appForeground &&
+        generation == _sessionRenewalGeneration) {
       _sessionRenewalTimer = Timer(const Duration(seconds: 2), () {
         unawaited(_renewActiveSession());
       });

@@ -7,10 +7,24 @@ import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 final class _Reporter implements CrashReporter {
   int fatal = 0;
   int nonFatal = 0;
+
   @override
-  Future<void> recordFatal(Object error, StackTrace stack) async => fatal++;
+  bool get isActive => true;
+
   @override
-  Future<void> recordNonFatal(Object error, StackTrace stack) async => nonFatal++;
+  Future<CrashRecordOutcome> recordFatal(Object error, StackTrace stack) async {
+    fatal++;
+    return CrashRecordOutcome.recorded;
+  }
+
+  @override
+  Future<CrashRecordOutcome> recordNonFatal(
+    Object error,
+    StackTrace stack,
+  ) async {
+    nonFatal++;
+    return CrashRecordOutcome.recorded;
+  }
 }
 
 final class _StalledSink implements LogSink {
@@ -32,6 +46,19 @@ void main() {
     expect(reporter.nonFatal, 1);
     expect(buffer.snapshot(), hasLength(2));
     expect(buffer.snapshot().first.toJson().toString(), isNot(contains('sensitive-secret')));
+  });
+
+  test('NoopCrashReporter never claims a Crashlytics record', () async {
+    const reporter = NoopCrashReporter();
+    expect(reporter.isActive, isFalse);
+    expect(
+      await reporter.recordNonFatal(StateError('x'), StackTrace.empty),
+      CrashRecordOutcome.skippedNotConfigured,
+    );
+    expect(
+      await reporter.recordFatal(StateError('x'), StackTrace.empty),
+      CrashRecordOutcome.skippedNotConfigured,
+    );
   });
 
   test('stalled sink is bounded and flush times out', () async {

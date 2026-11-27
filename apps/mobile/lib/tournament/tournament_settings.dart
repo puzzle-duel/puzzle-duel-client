@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
@@ -9,7 +10,7 @@ import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 
 /// Sound and haptics. This does not add gameplay settings.
-final class TournamentSettingsScreen extends StatelessWidget {
+final class TournamentSettingsScreen extends StatefulWidget {
   const TournamentSettingsScreen({
     super.key,
     required this.controller,
@@ -20,8 +21,19 @@ final class TournamentSettingsScreen extends StatelessWidget {
   final CrashReporter? crashReporter;
 
   @override
+  State<TournamentSettingsScreen> createState() =>
+      _TournamentSettingsScreenState();
+}
+
+final class _TournamentSettingsScreenState
+    extends State<TournamentSettingsScreen> {
+  var _diagnosticUploadInFlight = false;
+
+  @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
+    final controller = widget.controller;
+    final crashReporter = widget.crashReporter;
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
@@ -70,39 +82,63 @@ final class TournamentSettingsScreen extends StatelessWidget {
                       key: const Key('settings-send-diagnostics'),
                       leading: const Icon(Icons.bug_report_outlined),
                       title: const Text('Log Gönder (UAT)'),
-                      subtitle: const Text('Son güvenli hata kayıtlarını gönder'),
-                      onTap: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final result = await sendStagingManualDiagnostics(
-                          operation: 'settings_manual_report',
-                          requestId:
-                              controller.activeSessionRecovery?.lastRequestId,
-                          errorCode: controller.tournamentNoticeCode,
-                          crashReporter: crashReporter,
-                          api: controller.api,
-                        );
-                        if (!context.mounted) return;
-                        messenger.showSnackBar(SnackBar(
-                          content: Text(result.userMessage),
-                        ));
-                      },
+                      subtitle: Text(
+                        _diagnosticUploadInFlight
+                            ? 'Gönderiliyor…'
+                            : 'Son güvenli hata kayıtlarını gönder',
+                      ),
+                      onTap: _diagnosticUploadInFlight
+                          ? null
+                          : () async {
+                              setState(() => _diagnosticUploadInFlight = true);
+                              final messenger = ScaffoldMessenger.of(context);
+                              try {
+                                final result =
+                                    await sendStagingManualDiagnostics(
+                                  operation: 'settings_manual_report',
+                                  requestId: controller
+                                      .activeSessionRecovery?.lastRequestId,
+                                  errorCode: controller.tournamentNoticeCode,
+                                  crashReporter: crashReporter,
+                                  api: controller.api,
+                                );
+                                if (!context.mounted) return;
+                                messenger.showSnackBar(SnackBar(
+                                  content: Text(result.userMessage),
+                                  action: result.serverDelivered
+                                      ? SnackBarAction(
+                                          label: 'Kopyala',
+                                          onPressed: () {
+                                            Clipboard.setData(ClipboardData(
+                                              text: result.serverReportId!,
+                                            ));
+                                          },
+                                        )
+                                      : null,
+                                ));
+                              } finally {
+                                if (mounted) {
+                                  setState(
+                                    () => _diagnosticUploadInFlight = false,
+                                  );
+                                }
+                              }
+                            },
                     ),
                     const SizedBox(height: 12),
                     ListTile(
                       key: const Key('settings-staging-crash-test'),
                       leading: const Icon(Icons.warning_amber_rounded),
                       title: const Text('Crash Test (STAGING)'),
-                      subtitle: Text(FirebaseDiagnostics.enabled &&
-                              FirebaseDiagnostics.stagingDiagnosticsEnabled
-                          ? 'Onaydan sonra test crash oluşturur'
-                          : 'Firebase Crashlytics staging yapılandırması gerekli'),
+                      subtitle: Text(FirebaseDiagnostics.readinessMessage),
                       onTap: () async {
                         final messenger = ScaffoldMessenger.of(context);
                         if (!FirebaseDiagnostics.enabled ||
                             !FirebaseDiagnostics.stagingDiagnosticsEnabled) {
-                          messenger.showSnackBar(const SnackBar(
+                          messenger.showSnackBar(SnackBar(
                             content: Text(
-                                'Crash testi kullanılamıyor: staging Firebase yapılandırmasını kontrol edin.'),
+                              'Crash testi kullanılamıyor: ${FirebaseDiagnostics.readinessMessage}',
+                            ),
                           ));
                           return;
                         }
@@ -114,11 +150,13 @@ final class TournamentSettingsScreen extends StatelessWidget {
                                 'Bu işlem uygulamayı bilerek kapatır. Devam edilsin mi?'),
                             actions: [
                               TextButton(
-                                onPressed: () => Navigator.pop(dialogContext, false),
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, false),
                                 child: const Text('İptal'),
                               ),
                               TextButton(
-                                onPressed: () => Navigator.pop(dialogContext, true),
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, true),
                                 child: const Text('Test crash oluştur'),
                               ),
                             ],
