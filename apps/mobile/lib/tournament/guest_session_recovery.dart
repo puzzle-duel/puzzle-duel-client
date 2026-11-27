@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
@@ -113,6 +115,7 @@ final class StagingManualDiagnosticResult {
   const StagingManualDiagnosticResult({
     required this.breadcrumbLogged,
     required this.crashlyticsRecorded,
+    this.crashlyticsOutcome,
     this.serverReportId,
     this.serverStatus,
     this.requestId,
@@ -121,6 +124,7 @@ final class StagingManualDiagnosticResult {
 
   final bool breadcrumbLogged;
   final bool crashlyticsRecorded;
+  final CrashRecordOutcome? crashlyticsOutcome;
   final String? serverReportId;
   final int? serverStatus;
   final String? requestId;
@@ -131,22 +135,29 @@ final class StagingManualDiagnosticResult {
 
   /// Honest operator-facing status; never claims server delivery from crumbs alone.
   String get userMessage {
-    if (failureCode != null && !serverDelivered && !crashlyticsRecorded) {
-      return 'Log gönderilemedi ($failureCode).';
-    }
     if (serverDelivered) {
       return 'Sunucu raporu alındı: $serverReportId';
     }
+    final parts = <String>[];
     if (crashlyticsRecorded) {
-      final rid = requestId;
-      return rid == null
-          ? 'Crashlytics kaydı alındı; sunucu raporu yok (oturum gerekli).'
-          : 'Crashlytics kaydı alındı; sunucu raporu yok. requestId=$rid';
+      parts.add('Crashlytics SDK kaydı kabul edildi');
+    } else if (crashlyticsOutcome == CrashRecordOutcome.skippedNotConfigured) {
+      parts.add('Crashlytics yapılandırılmadı');
+    } else if (crashlyticsOutcome == CrashRecordOutcome.skippedDisabled) {
+      parts.add('Crashlytics devre dışı');
+    } else if (crashlyticsOutcome == CrashRecordOutcome.failed) {
+      parts.add('Crashlytics kaydı başarısız');
     }
-    if (breadcrumbLogged) {
-      return 'Yalnızca yerel breadcrumb yazıldı; gönderim doğrulanmadı.';
+    if (failureCode == 'AUTH_BEARER_MISSING') {
+      parts.add('sunucu raporu yok (hesap oturumu gerekli)');
+    } else if (failureCode != null) {
+      parts.add('sunucu raporu yok ($failureCode)');
+    } else if (!breadcrumbLogged) {
+      parts.add('gönderim doğrulanmadı');
+    } else if (parts.isEmpty) {
+      parts.add('yalnızca yerel breadcrumb yazıldı');
     }
-    return 'Log gönderilemedi.';
+    return parts.join('; ');
   }
 }
 
@@ -157,8 +168,17 @@ Future<StagingManualDiagnosticResult> sendStagingManualDiagnostics({
   CrashReporter? crashReporter,
   UatApi? api,
 }) async {
+  unawaited(DiagnosticRuntime.logger.log(LogEvent(
+    level: LogLevel.info,
+    code: LogCode.diagnosticFailure,
+    operation: 'diagnostic_report_requested',
+    requestId: requestId,
+    errorCode: errorCode,
+  )));
+
   var breadcrumbLogged = false;
   var crashlyticsRecorded = false;
+  CrashRecordOutcome? crashlyticsOutcome;
   String? failureCode;
   try {
     await DiagnosticRuntime.logger.log(LogEvent(
@@ -175,12 +195,31 @@ Future<StagingManualDiagnosticResult> sendStagingManualDiagnostics({
 
   if (crashReporter != null) {
     try {
-      await crashReporter.recordNonFatal(
+      crashlyticsOutcome = await crashReporter.recordNonFatal(
         StateError('STAGING_MANUAL_DIAGNOSTIC'),
         StackTrace.current,
       );
-      crashlyticsRecorded = true;
+      crashlyticsRecorded = crashlyticsOutcome == CrashRecordOutcome.recorded;
+      if (crashlyticsRecorded) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.diagnosticFailure,
+          operation: 'crashlytics_record_accepted',
+          requestId: requestId,
+        )));
+      } else {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.diagnosticFailure,
+          operation: 'crashlytics_record_skipped',
+          requestId: requestId,
+          errorCode: crashlyticsOutcome == CrashRecordOutcome.failed
+              ? 'CRASHLYTICS_RECORD_FAILED'
+              : 'CRASHLYTICS_NOT_CONFIGURED',
+        )));
+      }
     } catch (_) {
+      crashlyticsOutcome = CrashRecordOutcome.failed;
       failureCode ??= 'CRASHLYTICS_RECORD_FAILED';
     }
   }
@@ -188,7 +227,17 @@ Future<StagingManualDiagnosticResult> sendStagingManualDiagnostics({
   String? serverReportId;
   int? serverStatus;
   final bearer = api?.bearer.trim() ?? '';
-  if (api != null && bearer.isNotEmpty) {
+  if (api == null || bearer.isEmpty) {
+    failureCode ??= 'AUTH_BEARER_MISSING';
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.warning,
+      code: LogCode.diagnosticFailure,
+      operation: 'diagnostic_report_auth_unavailable',
+      requestId: requestId,
+      errorCode: 'AUTH_BEARER_MISSING',
+    )));
+  } else {
+    // Account bearer is sufficient; tournament gameplay session is not required.
     try {
       final result = await api.sendDiagnosticReport();
       serverStatus = result.status;
@@ -196,17 +245,42 @@ Future<StagingManualDiagnosticResult> sendStagingManualDiagnostics({
       if (result.status == 201 && reportId is String && reportId.isNotEmpty) {
         serverReportId = reportId;
         failureCode = null;
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.httpCompleted,
+          operation: 'diagnostic_report_completed',
+          requestId: requestId,
+          httpStatus: 201,
+        )));
       } else {
-        failureCode ??= 'SERVER_REPORT_${result.status}';
+        failureCode ??= result.status == 401 || result.status == 403
+            ? 'SERVER_REPORT_AUTH_${result.status}'
+            : 'SERVER_REPORT_${result.status}';
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.httpFailed,
+          operation: 'diagnostic_report_failed',
+          requestId: requestId,
+          httpStatus: result.status == 0 ? null : result.status,
+          errorCode: failureCode,
+        )));
       }
     } catch (_) {
       failureCode ??= 'SERVER_REPORT_FAILED';
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.warning,
+        code: LogCode.httpFailed,
+        operation: 'diagnostic_report_failed',
+        requestId: requestId,
+        errorCode: 'SERVER_REPORT_FAILED',
+      )));
     }
   }
 
   return StagingManualDiagnosticResult(
     breadcrumbLogged: breadcrumbLogged,
     crashlyticsRecorded: crashlyticsRecorded,
+    crashlyticsOutcome: crashlyticsOutcome,
     serverReportId: serverReportId,
     serverStatus: serverStatus,
     requestId: requestId,

@@ -389,7 +389,25 @@ void main() {
   });
 
   testWidgets(
-      'account switch confirmation when continue requires confirm',
+      'existing provider continue succeeds without guest-switch dialog',
+      (tester) async {
+    final providers = _ScriptedProviders();
+    await _pumpApp(tester, verified: false, providers: providers);
+    await tester.tap(find.byKey(const Key('profile')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('profile-sign-in')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('auth-google')));
+    await _settle(tester);
+
+    expect(find.byKey(const Key('account-switch-dialog')), findsNothing);
+    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+    expect(providers.continueCalls, 1);
+    expect(providers.confirmContinueCalls, 0);
+  });
+
+  testWidgets(
+      'legacy account switch confirmation when continue requires confirm',
       (tester) async {
     final providers = _ScriptedProviders(
       continueError: const ProviderAuthException(
@@ -859,7 +877,8 @@ Future<_Harness> _pumpApp(
         'boardRevision': 1,
       });
     }
-    if (path == '/v1/tournament/me/badges') {
+    if (path == '/v1/profile/me/badges' ||
+        path == '/v1/tournament/me/badges') {
       harness.badgeRequests++;
       final delay = badgeDelay;
       if (delay != null && !firstBadgeDelayed) {

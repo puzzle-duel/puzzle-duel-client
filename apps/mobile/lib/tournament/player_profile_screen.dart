@@ -10,6 +10,7 @@ import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
+import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
 /// Personal overview, version-aware practice bests, and authoritative badges.
 /// Distinct from official Tournament leaderboards.
@@ -26,7 +27,6 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   static const _practiceRules = 'core-001.v2';
   static const _practiceGenerator = 'gen-001.v1';
 
-  late PracticeStore _store;
   PracticeStats _stats = const PracticeStats(
     completedCount: 0,
     difficultyCounts: {},
@@ -39,13 +39,25 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   BadgeCollectionSnapshot _badges = BadgeCollectionSnapshot.lockedCatalog(
     status: BadgeCollectionStatus.loading,
   );
+  /// Last successful badge snapshot keyed by verified player id (never guest).
+  final Map<String, BadgeCollectionSnapshot> _badgeCacheByPlayer = {};
   var _loadingBadges = true;
   var _accountStateEpoch = -1;
   var _localLoadGeneration = 0;
   var _badgeLoadGeneration = 0;
+  String? _activeBadgeCacheKey;
 
   bool get _isVerifiedAccount =>
       widget.controller.sessionAuth?.cachedAccess?.isVerified == true;
+
+  String? get _verifiedPlayerCacheKey {
+    final access = widget.controller.sessionAuth?.cachedAccess;
+    if (access == null || !access.isVerified) return null;
+    final playerId = access.playerId.trim().toLowerCase();
+    if (playerId.isEmpty) return null;
+    final origin = UatApi.apiOrigin(widget.controller.api.baseUrl);
+    return '$origin|$playerId';
+  }
 
   @override
   void initState() {
@@ -95,9 +107,14 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       'hard': null,
     };
     _loadingBadges = true;
-    _badges = BadgeCollectionSnapshot.lockedCatalog(
-      status: BadgeCollectionStatus.loading,
-    );
+    _activeBadgeCacheKey = _verifiedPlayerCacheKey;
+    final cached = _activeBadgeCacheKey == null
+        ? null
+        : _badgeCacheByPlayer[_activeBadgeCacheKey!];
+    _badges = cached ??
+        BadgeCollectionSnapshot.lockedCatalog(
+          status: BadgeCollectionStatus.loading,
+        );
   }
 
   void _beginAccountScopedRefresh({
@@ -136,11 +153,12 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     required int expectedEpoch,
     required int generation,
   }) async {
-    _store = widget.controller.practiceStore();
-    final stats = await _store.stats();
+    // Capture a stable account-scoped store for this generation.
+    final store = widget.controller.practiceStore();
+    final stats = await store.stats();
     final bests = <String, PracticeBest?>{};
     for (final difficulty in const ['easy', 'medium', 'hard']) {
-      bests[difficulty] = await _store.personalBestForDifficulty(
+      bests[difficulty] = await store.personalBestForDifficulty(
         difficulty,
         rulesVersion: _practiceRules,
         preferredGeneratorVersion: _practiceGenerator,
@@ -163,65 +181,140 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     required int expectedEpoch,
     required int generation,
   }) async {
+    final cacheKey = _verifiedPlayerCacheKey;
+    _activeBadgeCacheKey = cacheKey;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.screenOpened,
+      operation: 'profile_badges_requested',
+    )));
     if (!_isStaleLoad(
       expectedEpoch: expectedEpoch,
       generation: generation,
       currentGeneration: _badgeLoadGeneration,
     )) {
+      final cached =
+          cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
       setState(() {
         _loadingBadges = true;
-        _badges = BadgeCollectionSnapshot.lockedCatalog(
-          status: BadgeCollectionStatus.loading,
-        );
+        _badges = cached ??
+            BadgeCollectionSnapshot.lockedCatalog(
+              status: BadgeCollectionStatus.loading,
+            );
       });
     }
     try {
-      final result = await widget.controller.api.get(
-        '/v1/tournament/me/badges',
-      );
+      // Account-scoped profile path — no tournament gameplay session required.
+      var result = await widget.controller.api.get('/v1/profile/me/badges');
+      if (result.status == 404) {
+        result = await widget.controller.api.get('/v1/tournament/me/badges');
+      }
       if (_isStaleLoad(
         expectedEpoch: expectedEpoch,
         generation: generation,
         currentGeneration: _badgeLoadGeneration,
       )) {
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'profile_badges_stale_response_discarded',
+        )));
         return;
       }
       if (result.status == 0) {
+        final cached =
+            cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
         setState(() {
           _loadingBadges = false;
-          _badges = BadgeCollectionSnapshot.lockedCatalog(
-            status: result.error == 'TIMEOUT'
-                ? BadgeCollectionStatus.serverError
-                : BadgeCollectionStatus.offline,
-            errorCode: result.error,
-          );
+          if (cached != null) {
+            _badges = BadgeCollectionSnapshot(
+              badges: cached.badges,
+              status: BadgeCollectionStatus.stale,
+              errorCode: result.error,
+            );
+            unawaited(DiagnosticRuntime.logger.log(LogEvent(
+              level: LogLevel.info,
+              code: LogCode.screenOpened,
+              operation: 'profile_badges_cache_used',
+            )));
+          } else {
+            _badges = BadgeCollectionSnapshot.lockedCatalog(
+              status: result.error == 'TIMEOUT'
+                  ? BadgeCollectionStatus.serverError
+                  : BadgeCollectionStatus.offline,
+              errorCode: result.error,
+            );
+          }
         });
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.httpFailed,
+          operation: 'profile_badges_failed',
+          errorCode: result.error,
+        )));
         return;
       }
-      if (result.status == 401) {
+      if (result.status == 401 || result.status == 403) {
         setState(() {
           _loadingBadges = false;
-          _badges = BadgeCollectionSnapshot.lockedCatalog(
+          // Do not claim "locked / not earned" on auth failure.
+          _badges = BadgeCollectionSnapshot(
+            badges: const [],
             status: BadgeCollectionStatus.unauthorized,
             errorCode: result.error,
           );
         });
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.authExpired,
+          operation: 'profile_badges_failed',
+          httpStatus: result.status,
+          errorCode: result.error,
+        )));
         return;
       }
       if (result.status < 200 || result.status >= 300) {
+        final cached =
+            cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
         setState(() {
           _loadingBadges = false;
-          _badges = BadgeCollectionSnapshot.lockedCatalog(
-            status: BadgeCollectionStatus.serverError,
-            errorCode: result.error,
-          );
+          if (cached != null) {
+            _badges = BadgeCollectionSnapshot(
+              badges: cached.badges,
+              status: BadgeCollectionStatus.stale,
+              errorCode: result.error,
+            );
+          } else {
+            _badges = BadgeCollectionSnapshot(
+              badges: const [],
+              status: BadgeCollectionStatus.serverError,
+              errorCode: result.error,
+            );
+          }
         });
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.httpFailed,
+          operation: 'profile_badges_failed',
+          httpStatus: result.status,
+          errorCode: result.error,
+        )));
         return;
+      }
+      final snapshot = BadgeCollectionSnapshot.fromServerPayload(result.map);
+      if (cacheKey != null) {
+        _badgeCacheByPlayer[cacheKey] = snapshot;
       }
       setState(() {
         _loadingBadges = false;
-        _badges = BadgeCollectionSnapshot.fromServerPayload(result.map);
+        _badges = snapshot;
       });
+      unawaited(DiagnosticRuntime.logger.log(LogEvent(
+        level: LogLevel.info,
+        code: LogCode.httpCompleted,
+        operation: 'profile_badges_completed',
+        httpStatus: result.status,
+      )));
     } catch (_) {
       if (_isStaleLoad(
         expectedEpoch: expectedEpoch,
@@ -230,11 +323,19 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       )) {
         return;
       }
+      final cached =
+          cacheKey == null ? null : _badgeCacheByPlayer[cacheKey];
       setState(() {
         _loadingBadges = false;
-        _badges = BadgeCollectionSnapshot.lockedCatalog(
-          status: BadgeCollectionStatus.serverError,
-        );
+        _badges = cached != null
+            ? BadgeCollectionSnapshot(
+                badges: cached.badges,
+                status: BadgeCollectionStatus.stale,
+              )
+            : const BadgeCollectionSnapshot(
+                badges: [],
+                status: BadgeCollectionStatus.serverError,
+              );
       });
     }
   }
@@ -811,6 +912,7 @@ final class _BadgeStatusBanner extends StatelessWidget {
     }
     final message = switch (snapshot.status) {
       BadgeCollectionStatus.ready => null,
+      BadgeCollectionStatus.stale => copy.badgeStale,
       BadgeCollectionStatus.offline => copy.badgeOffline,
       BadgeCollectionStatus.unauthorized => copy.badgeAuthRequired,
       BadgeCollectionStatus.serverError => copy.badgeServerError,

@@ -333,16 +333,26 @@ void main() {
     expect(result.serverDelivered, isFalse);
     expect(result.userMessage.contains('Crashlytics'), isTrue);
     expect(result.userMessage.contains('sunucu raporu yok'), isTrue);
-    expect(result.userMessage.contains('gönderildi. Rapor'), isFalse);
+    expect(result.failureCode, 'AUTH_BEARER_MISSING');
+
+    final noop = await sendStagingManualDiagnostics(
+      operation: 'unit_diagnostic_noop',
+      crashReporter: const NoopCrashReporter(),
+    );
+    expect(noop.crashlyticsRecorded, isFalse);
+    expect(noop.crashlyticsOutcome, CrashRecordOutcome.skippedNotConfigured);
+    expect(noop.userMessage.contains('Crashlytics kaydı alındı'), isFalse);
 
     final failed = await sendStagingManualDiagnostics(
       operation: 'unit_diagnostic_fail',
       crashReporter: _FailingCrashReporter(),
     );
     expect(failed.crashlyticsRecorded, isFalse);
-    expect(failed.userMessage.contains('gönderilemedi') ||
-            failed.userMessage.contains('breadcrumb'),
-        isTrue);
+    expect(
+      failed.userMessage.contains('başarısız') ||
+          failed.userMessage.contains('AUTH_BEARER_MISSING'),
+      isTrue,
+    );
   });
 
   test('recovery boot keeps Practice and blocks ranked claim', () async {
@@ -1486,19 +1496,39 @@ void main() {
 
 final class _RecordingCrashReporter implements CrashReporter {
   var nonFatals = 0;
+
   @override
-  Future<void> recordFatal(Object error, StackTrace stack) async {}
+  bool get isActive => true;
+
   @override
-  Future<void> recordNonFatal(Object error, StackTrace stack) async {
+  Future<CrashRecordOutcome> recordFatal(Object error, StackTrace stack) async {
+    return CrashRecordOutcome.recorded;
+  }
+
+  @override
+  Future<CrashRecordOutcome> recordNonFatal(
+    Object error,
+    StackTrace stack,
+  ) async {
     nonFatals++;
+    return CrashRecordOutcome.recorded;
   }
 }
 
 final class _FailingCrashReporter implements CrashReporter {
   @override
-  Future<void> recordFatal(Object error, StackTrace stack) async {}
+  bool get isActive => true;
+
   @override
-  Future<void> recordNonFatal(Object error, StackTrace stack) async {
+  Future<CrashRecordOutcome> recordFatal(Object error, StackTrace stack) async {
+    throw StateError('crashlytics denied');
+  }
+
+  @override
+  Future<CrashRecordOutcome> recordNonFatal(
+    Object error,
+    StackTrace stack,
+  ) async {
     throw StateError('crashlytics denied');
   }
 }

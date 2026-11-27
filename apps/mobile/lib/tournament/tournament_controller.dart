@@ -646,10 +646,18 @@ final class TournamentController extends ChangeNotifier {
     this.rankedAuthRequired = rankedAuthRequired;
     activeSessionRecovery = null;
     sessionRecoveryRequired = false;
+    unawaited(invalidateTournamentGameplaySession(reason: 'logout'));
+    homeSnapshot = null;
+    homeSnapshotStale = false;
     if (rankedAuthRequired) {
       tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'auth_account_scope_cleared',
+    )));
     markAccountStateUpdated();
   }
 
@@ -748,7 +756,11 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
-  /// After successful provider link/login: claim at most once, then resume.
+  /// After successful provider link/login: bind account first, then resume.
+  ///
+  /// Account identity (bearer + Practice scope + epoch) is published before
+  /// tournament session restore so Profile badge reads do not depend on
+  /// gameplay session readiness.
   Future<void> completeRankedAuthAndEnter() async {
     final shouldEnter = _pendingRankedEntryOnce;
     _pendingRankedEntryOnce = false;
@@ -758,28 +770,57 @@ final class TournamentController extends ChangeNotifier {
     unawaited(DiagnosticRuntime.logger.log(LogEvent(
       level: LogLevel.info,
       code: LogCode.sessionRestored,
-      operation: 'tournament_auth_resume',
+      operation: 'auth_state_transition_started',
     )));
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
+        // Invalidate previous tournament session before publishing account.
+        await invalidateTournamentGameplaySession(
+          reason: 'account_transition',
+        );
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           rankedAuthRequired = true;
           tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+          await clearAuthenticatedPracticeScope();
           markAccountStateUpdated();
+          unawaited(DiagnosticRuntime.logger.log(LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.sessionRestoreFailed,
+            operation: 'auth_state_transition_failed',
+            errorCode: 'RANKED_AUTH_REQUIRED',
+          )));
           return;
         }
+        await _bindPlayerId(access.playerId);
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'auth_account_scope_bound',
+        )));
       } on GuestAuthException catch (error) {
         if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
           await enterSessionRecovery(error.code);
           return;
         }
+        unawaited(DiagnosticRuntime.logger.log(LogEvent(
+          level: LogLevel.warning,
+          code: LogCode.sessionRestoreFailed,
+          operation: 'auth_state_transition_failed',
+          errorCode: error.code,
+        )));
         _fail(error.code, degradedOnFailure: true);
         return;
       }
     }
     markAccountStateUpdated();
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestored,
+      operation: 'auth_state_transition_completed',
+    )));
+    // Tournament restore is independent of account publication.
     await refreshTournament(
       origin: TournamentRefreshOrigin.pullToRefresh,
       preserveRoute: true,
@@ -787,6 +828,27 @@ final class TournamentController extends ChangeNotifier {
     if (shouldEnter && tournamentReady && !rankedWriterLocked) {
       await resume();
     }
+  }
+
+  /// Clears gameplay session secret/renewal without signing the account out.
+  Future<void> invalidateTournamentGameplaySession({
+    required String reason,
+  }) async {
+    _sessionRenewalTimer?.cancel();
+    _sessionRenewalTimer = null;
+    _sessionRenewalInFlight = null;
+    api.sessionSecret = null;
+    _verifiedSessionId = null;
+    _verifiedSessionPlayerId = null;
+    _sessionExpiresAtMs = null;
+    unawaited(DiagnosticRuntime.logger.log(LogEvent(
+      level: LogLevel.info,
+      code: LogCode.sessionRestoreFailed,
+      operation: 'tournament_session_invalidated',
+      errorCode: reason == 'account_transition'
+          ? 'ACCOUNT_TRANSITION'
+          : 'SESSION_INVALIDATED',
+    )));
   }
 
   Future<void> resume() async {
