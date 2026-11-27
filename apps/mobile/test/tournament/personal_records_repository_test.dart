@@ -1143,4 +1143,175 @@ void main() {
       );
     },
   );
+
+  test(
+    'after GET 404 recovery, GET 200 automatically synchronizes pending',
+    () async {
+      final session = verifiedSession(playerA);
+      var routeReady = false;
+      var posts = 0;
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET' && path.endsWith('/personal-records')) {
+          if (!routeReady) {
+            return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+          }
+          return const UatHttpResult(200, {
+            'records': <Object>[],
+            'schemaReady': true,
+          });
+        }
+        if (method == 'POST') {
+          posts += 1;
+          if (!routeReady) {
+            return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+          }
+          final record = ((body as Map)['records'] as List).first as Map;
+          return UatHttpResult(200, {
+            'schemaReady': true,
+            'records': [
+              {
+                'difficulty': 'easy',
+                'source': 'practice',
+                'score': record['score'],
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'achievedAt': '2026-11-20T00:00:00.000Z',
+              },
+            ],
+            'acknowledgements': [
+              {
+                'difficulty': 'easy',
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'completionId': record['completionId'],
+                'localRevision': record['localRevision'],
+                'acceptedScore': record['score'],
+                'remoteScore': record['score'],
+                'improved': true,
+              },
+            ],
+          });
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+      final repository = repo(session: session, api: api);
+      final scopeKey = PersonalRecordsRepository.accountScopeKey(
+        apiOrigin: origin,
+        sessionAuth: session,
+      )!;
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'recover-me', score: 91),
+        improved: true,
+      );
+      await repository.refreshAndSync(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      expect(await repository.debugPendingScores(scopeKey), {'easy': 91});
+      expect(
+        repository.debugLastSyncOutcome,
+        PersonalRecordsSyncOutcome.routeNotFound,
+      );
+      final postsWhileDown = posts;
+
+      // Backend/ingress becomes available — no new PB / app restart required.
+      routeReady = true;
+      await repository.refreshAndSync(
+        expectedGeneration: repository.accountSyncGeneration,
+      );
+      expect(posts, greaterThan(postsWhileDown));
+      expect(await repository.debugPendingScores(scopeKey), isEmpty);
+    },
+  );
+
+  test(
+    'stale account sync completion cannot block the active account',
+    () async {
+      final session = verifiedSession(playerA);
+      final firstPostStarted = Completer<void>();
+      final releaseFirstPost = Completer<UatHttpResult>();
+      var postsForB = 0;
+      Object? lastPostBody;
+
+      final api = _OriginScriptedApi((method, path, body) async {
+        if (method == 'GET') {
+          return const UatHttpResult(200, {
+            'records': <Object>[],
+            'schemaReady': true,
+          });
+        }
+        if (method == 'POST') {
+          lastPostBody = body;
+          if (!firstPostStarted.isCompleted) {
+            firstPostStarted.complete();
+            return releaseFirstPost.future;
+          }
+          postsForB += 1;
+          final record = ((body as Map)['records'] as List).first as Map;
+          return UatHttpResult(200, {
+            'schemaReady': true,
+            'records': [
+              {
+                'difficulty': 'easy',
+                'source': 'practice',
+                'score': record['score'],
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'achievedAt': '2026-11-20T00:00:00.000Z',
+              },
+            ],
+            'acknowledgements': [
+              {
+                'difficulty': 'easy',
+                'rulesVersion': personalRecordsPracticeRules,
+                'generatorVersion': personalRecordsPracticeGenerator,
+                'completionId': record['completionId'],
+                'localRevision': record['localRevision'],
+                'acceptedScore': record['score'],
+                'remoteScore': record['score'],
+                'improved': true,
+              },
+            ],
+          });
+        }
+        return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+      });
+
+      final repository = repo(session: session, api: api);
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'a-pending', score: 11),
+        improved: true,
+      );
+      await firstPostStarted.future.timeout(const Duration(seconds: 2));
+
+      repository.fenceSync();
+      session.debugSeedAccess(
+        GuestAccess.parse(
+          accessToken: verifiedJwt(playerB),
+          expiresAt: DateTime.utc(2030),
+        ),
+      );
+      await identity.bindAuthenticatedPlayer(playerB);
+
+      // Delayed failure from account A must not poison B's retry eligibility.
+      releaseFirstPost.complete(
+        const UatHttpResult(503, {'error': 'SCHEMA_NOT_READY'}),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(
+        repository.debugSyncBlockedUntilResume,
+        isTrue,
+      ); // fence sets block
+      // New local best for B is an explicit resume and must sync.
+      await repository.notifyLocalPracticeBest(
+        record: practiceRecord(sessionId: 'b-pending', score: 22),
+        improved: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(postsForB, 1);
+      final posted = ((lastPostBody as Map)['records'] as List).first as Map;
+      expect(posted['score'], 22);
+      expect(posted['completionId'], 'b-pending');
+    },
+  );
 }
