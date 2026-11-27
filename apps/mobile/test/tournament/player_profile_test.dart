@@ -56,6 +56,25 @@ void main() {
     expect(find.byKey(const Key('profile-header')), findsNothing);
   });
 
+  testWidgets('personal records segment control switches without refetch', (
+    tester,
+  ) async {
+    final directory =
+        Directory.systemTemp.createTempSync('pzd53-profile-segment');
+    await _pumpHome(tester, _api(), directory);
+    await tester.tap(find.byKey(const Key('profile')));
+    await _pumpProfile(tester);
+    expect(find.byKey(const Key('profile-records-segment')), findsOneWidget);
+    expect(find.text('Personal records'), findsOneWidget);
+    await tester.tap(find.text('Tournament'));
+    await _pumpProfile(tester);
+    expect(find.text('Tournament'), findsWidgets);
+    await tester.tap(find.text('Practice'));
+    await _pumpProfile(tester);
+    await tester.tap(find.text('All'));
+    await _pumpProfile(tester);
+  });
+
   testWidgets('shows personal bests, locked badge, and offline badge retry', (
     tester,
   ) async {
@@ -266,7 +285,8 @@ ScriptedUatApi _api() {
         'boardRevision': 1,
       });
     }
-    if (path == '/v1/tournament/me/badges') {
+    if (path == '/v1/tournament/me/badges' ||
+        path == '/v1/profile/me/badges') {
       return const UatHttpResult(200, {
         'playerScoped': true,
         'catalogVersion': 1,
@@ -280,6 +300,12 @@ ScriptedUatApi _api() {
             'grants': [],
           },
         ],
+      });
+    }
+    if (path == '/v1/profile/me/personal-records' && method == 'GET') {
+      return const UatHttpResult(200, {
+        'records': <Object>[],
+        'schemaReady': true,
       });
     }
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});

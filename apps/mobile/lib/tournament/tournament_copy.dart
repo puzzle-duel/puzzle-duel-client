@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
 
 enum BadgeProvenanceLabel { f2bPublication, unavailable }
 
@@ -70,7 +71,43 @@ final class TournamentCopy {
   );
   String get playerFallback => pick('Player', 'Oyuncu');
   String get personalRecordsTitle =>
-      pick('Practice records', 'Pratik rekorları');
+      pick('Personal records', 'Kişisel rekorlar');
+  String get personalRecordsSegmentAll => pick('All', 'Tümü');
+  String get personalRecordsSegmentPractice => pick('Practice', 'Pratik');
+  String get personalRecordsSegmentTournament =>
+      pick('Tournament', 'Turnuva');
+  String get personalRecordsBlurb => pick(
+    'Best scores on this device and your verified account. Tournament rows come from official results.',
+    'Bu cihaz ve doğrulanmış hesabındaki en iyi skorlar. Turnuva satırları resmi sonuçlardandır.',
+  );
+  String get personalRecordsSourcePractice =>
+      pick('Practice', 'Pratik');
+  String get personalRecordsSourceTournament =>
+      pick('Tournament', 'Turnuva');
+  String personalRecordsSyncStatus(PersonalRecordsSyncStatus status) =>
+      switch (status) {
+        PersonalRecordsSyncStatus.idle => '',
+        PersonalRecordsSyncStatus.syncing =>
+          pick('Syncing records…', 'Rekorlar eşitleniyor…'),
+        PersonalRecordsSyncStatus.pendingUpload => pick(
+          'Upload pending when online.',
+          'Çevrimiçi olunca yükleme bekliyor.',
+        ),
+        PersonalRecordsSyncStatus.upToDate =>
+          pick('Records up to date.', 'Rekorlar güncel.'),
+        PersonalRecordsSyncStatus.offline => pick(
+          'Offline. Showing local records.',
+          'Çevrimdışı. Yerel rekorlar gösteriliyor.',
+        ),
+        PersonalRecordsSyncStatus.unauthorized => pick(
+          'Sign in to sync personal records.',
+          'Kişisel rekorları eşitlemek için oturum aç.',
+        ),
+        PersonalRecordsSyncStatus.serverError => pick(
+          'Could not refresh records.',
+          'Rekorlar yenilenemedi.',
+        ),
+      };
   String get noPersonalBest => pick('No record yet.', 'Henüz rekorun yok.');
   String get unverifiedLocal => pick('Local only', 'Yalnızca yerel');
   String get badgeCollectionTitle =>

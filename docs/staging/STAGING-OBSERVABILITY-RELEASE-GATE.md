@@ -48,6 +48,7 @@ Game mechanics / animations / tournament rules are out of scope.
 | HTTPS request ID, HTTP başlangıç/başarı/hata ve manuel rapor | `apps/mobile/lib/tournament/uat_api.dart` |
 | Backend HTTP correlation / güvenli route sınıflaması | `puzzle-duel-backend/src/diagnostics/http-correlation.mts` |
 | Backend request log dosyası / session olayları | `puzzle-duel-backend/src/staging/staging-server.mts` |
+| Personal records (PZD-53) GET/sync + Crashlytics operations | `fetchPersonalRecords`, `syncPracticeRecords`; route `profile_personal_records` |
 
 **Bütün uygulama katmanları `DiagnosticRuntime.logger.log(LogEvent(...))` üzerinden ilerler.** Bağımsız, serbest metin içeren başka Firebase logger'ı veya request log sistemi oluşturma. `CrashlyticsLogSink` olayları Firebase custom log'a yönlendirir ve mevcut `last_request_id` custom key'ini günceller. Firebase'e doğrudan ham veri yazma. `ConsoleLogSink` ve `RingBufferLogSink` davranışını koru. Firebase devre dışıysa no-op; varmış gibi başarı raporlama.
 
