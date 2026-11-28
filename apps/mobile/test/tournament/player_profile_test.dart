@@ -6,7 +6,6 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
-import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
