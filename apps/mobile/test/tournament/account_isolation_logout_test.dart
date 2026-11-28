@@ -5,8 +5,10 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
+import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
@@ -472,6 +474,257 @@ void main() {
         expect(controller.day, isNull);
         expect(controller.results, isEmpty);
         expect(controller.rankedAuthRequired, isTrue);
+      },
+    );
+
+    test(
+      'A18 stale successful leaderboard after logout does not restore rows',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a18');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final gate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.contains('/leaderboards/daily')) {
+            await gate.future;
+            return const UatHttpResult(200, {
+              'rows': [
+                {'playerId': 'acct-a', 'score': 10200},
+              ],
+              'nextCursor': null,
+              'state': 'FINAL',
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        final pending = controller.openDaily();
+        await Future<void>.delayed(Duration.zero);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        expect(controller.leaderboard, isEmpty);
+        gate.complete();
+        await pending;
+        expect(controller.leaderboard, isEmpty);
+        expect(controller.busy, isFalse);
+        expect(controller.tournamentNoticeCode, isNull);
+      },
+    );
+
+    test(
+      'A19 stale failed leaderboard after logout does not set notice',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a19');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final gate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.contains('/leaderboards/daily')) {
+            await gate.future;
+            return const UatHttpResult(0, {'error': 'OFFLINE'});
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        final pending = controller.openDaily();
+        await Future<void>.delayed(Duration.zero);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        gate.complete();
+        await pending;
+        expect(controller.leaderboard, isEmpty);
+        expect(controller.tournamentNoticeCode, isNull);
+        expect(controller.errorCode, isNull);
+      },
+    );
+
+    test(
+      'A20 stale loadMoreLeaderboard cannot append into guest state',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a20');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final moreGate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.contains('/leaderboards/daily') &&
+              path.contains('cursor=')) {
+            await moreGate.future;
+            return const UatHttpResult(200, {
+              'rows': [
+                {'playerId': 'acct-a-page2', 'score': 9000},
+              ],
+              'nextCursor': null,
+              'state': 'FINAL',
+            });
+          }
+          if (path.contains('/leaderboards/daily')) {
+            return const UatHttpResult(200, {
+              'rows': [
+                {'playerId': 'acct-a', 'score': 10200},
+              ],
+              'nextCursor': 'cursor-a',
+              'state': 'OPEN',
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        await controller.openDaily();
+        expect((controller.leaderboard['rows'] as List?)?.length, 1);
+        expect(controller.nextCursor, 'cursor-a');
+        final pending = controller.loadMoreLeaderboard();
+        await Future<void>.delayed(Duration.zero);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        expect(controller.leaderboard, isEmpty);
+        moreGate.complete();
+        await pending;
+        expect(controller.leaderboard, isEmpty);
+        expect(controller.nextCursor, isNull);
+      },
+    );
+
+    test(
+      'A21 account switch discards in-flight weekly weeks+board responses',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a21');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final weeksGate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.contains('/leaderboards/weeks')) {
+            await weeksGate.future;
+            return const UatHttpResult(200, {
+              'weeks': ['2026-11-17'],
+            });
+          }
+          if (path.contains('/leaderboards/weekly')) {
+            return const UatHttpResult(200, {
+              'rows': [
+                {'playerId': 'acct-a', 'score': 500},
+              ],
+              'state': 'OPEN',
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        final pending = controller.openWeekly(fromHome: true);
+        await Future<void>.delayed(Duration.zero);
+        controller.invalidateAccountScopedPresentation(
+          reason: 'account_transition',
+        );
+        controller.markAccountStateUpdated();
+        weeksGate.complete();
+        await pending;
+        expect(controller.weeks, isEmpty);
+        expect(controller.leaderboard, isEmpty);
+        expect(controller.weekStart, isNull);
+      },
+    );
+
+    test(
+      'A22 same-account reauth bumps generation and rejects stale daily board',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a22');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        final gate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.contains('/leaderboards/daily')) {
+            await gate.future;
+            return const UatHttpResult(200, {
+              'rows': [
+                {'playerId': 'stale-gen', 'score': 1},
+              ],
+              'state': 'FINAL',
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+        final controller = await _controller(
+          dir: dir,
+          playerId: '11111111-1111-1111-1111-111111111111',
+          accountType: 'verified',
+          api: api,
+        );
+        final pending = controller.openDaily();
+        await Future<void>.delayed(Duration.zero);
+        // Same account / same scope: generation bump alone must fence.
+        controller.invalidateAccountScopedPresentation(
+          reason: 'account_transition',
+        );
+        controller.markAccountStateUpdated();
+        gate.complete();
+        await pending;
+        expect(controller.leaderboard, isEmpty);
+      },
+    );
+
+    test(
+      'A23 delayed home snapshot hydrate cannot cross A→Guest→A generation',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a23');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        const playerId = '11111111-1111-1111-1111-111111111111';
+        final controller = await _controller(
+          dir: dir,
+          playerId: playerId,
+          accountType: 'verified',
+        );
+        final scope = controller.identity.activeScope;
+        final snap = TournamentHomeSnapshot.fromLive(
+          scope: scope,
+          day: _completedDay(score: 7777),
+          originalUtcDate: '2026-11-27',
+          capturedAtMs: 1,
+          results: {'all': 7777, 'onTimeAwarded': true},
+        )!;
+        await TournamentHomeSnapshotStore(DirectoryKvStore(dir)).save(snap);
+
+        final gate = Completer<void>();
+        controller.debugBeforeHomeSnapshotLoad = () => gate.future;
+        controller.day = null;
+        controller.results = const {};
+        controller.homeSnapshot = null;
+        final pending = controller.debugHydrateHomeSnapshot();
+        await Future<void>.delayed(Duration.zero);
+
+        // Leave and return to the same player scope with a newer generation.
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        await controller.identity.bindAuthenticatedPlayer(playerId);
+        controller.markAccountStateUpdated();
+        expect(controller.identity.activeScope.storageKey, scope.storageKey);
+
+        gate.complete();
+        await pending;
+        expect(controller.day, isNull);
+        expect(controller.results, isEmpty);
+        expect(controller.homeSnapshot, isNull);
       },
     );
   });

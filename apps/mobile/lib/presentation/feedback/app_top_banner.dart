@@ -366,8 +366,22 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
       return;
     }
 
-    // Same lifecycle instance — keep timers/animations intact.
+    // Same lifecycle instance — keep timers/animations intact, but tournament
+    // notices held during sync must gain an auto-dismiss timer once sync ends
+    // even when notice content did not change.
     if (nextId == _activeId) {
+      if (fromSyncEdge &&
+          !nextId.isAppFeedback &&
+          !_dragging &&
+          _dismiss == null &&
+          _shouldScheduleAutoDismiss(hasExplicitFeedback: false)) {
+        _scheduleDismiss(
+          kind: nextKind,
+          id: nextId,
+          reduceMotion: reduceMotion,
+          explicitFeedback: false,
+        );
+      }
       return;
     }
     // Tournament notices only: suppress re-show of the same content within

@@ -217,6 +217,28 @@ final class TournamentController extends ChangeNotifier {
   TournamentHomeSnapshot? homeSnapshot;
   bool homeSnapshotStale = false;
 
+  /// Test-only: awaited at the start of [_hydrateHomeSnapshot] before disk I/O.
+  @visibleForTesting
+  Future<void> Function()? debugBeforeHomeSnapshotLoad;
+
+  /// Test-only entry for delayed-hydration isolation regressions.
+  @visibleForTesting
+  Future<void> debugHydrateHomeSnapshot() => _hydrateHomeSnapshot();
+
+  /// True when [tournamentEpoch]/[accountEpoch] still own presentation mutations.
+  bool _ownsAccountPresentation({
+    required int tournamentEpoch,
+    required int accountEpoch,
+    String? scopeKey,
+  }) {
+    if (tournamentEpoch != _tournamentEpoch) return false;
+    if (accountEpoch != accountStateEpoch) return false;
+    if (scopeKey != null && scopeKey != identity.activeScope.storageKey) {
+      return false;
+    }
+    return true;
+  }
+
   bool booting = true;
   bool busy = false;
   bool moveInFlight = false;
@@ -1863,6 +1885,8 @@ final class TournamentController extends ChangeNotifier {
     bool preserveReturn = false,
     bool fromHome = false,
   }) async {
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     _cancelPendingResolutionNav();
     if (fromHome) category = 'ALL';
     final opened = preserveReturn
@@ -1886,6 +1910,12 @@ final class TournamentController extends ChangeNotifier {
 
     if (weekly && weeks.isEmpty) {
       final listed = await api.get('/v1/tournament/leaderboards/weeks');
+      if (!_ownsAccountPresentation(
+        tournamentEpoch: tournamentEpoch,
+        accountEpoch: accountEpoch,
+      )) {
+        return;
+      }
       if (!_accepted(listed, const {200}, degradedOnFailure: true)) {
         busy = false;
         notifyListeners();
@@ -1896,6 +1926,12 @@ final class TournamentController extends ChangeNotifier {
           item.toString(),
       ];
       weekStart ??= weeks.isEmpty ? null : weeks.first;
+    }
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
     }
     if (weekly && fromHome && weeks.isNotEmpty) weekStart = weeks.first;
     final selectedWeek = week ?? weekStart;
@@ -1909,6 +1945,12 @@ final class TournamentController extends ChangeNotifier {
     }
     final path = _leaderboardPath(weekly: weekly, week: selectedWeek);
     final response = await api.get(path);
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (!_accepted(response, const {200}, degradedOnFailure: true)) {
       busy = false;
       notifyListeners();
@@ -1926,12 +1968,21 @@ final class TournamentController extends ChangeNotifier {
   Future<void> loadMoreLeaderboard() async {
     final cursor = nextCursor;
     if (cursor == null || busy) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     final weekly = route.place == TournamentPlace.weekly;
+    final week = weekStart;
     busy = true;
     notifyListeners();
     final response = await api.get(
-      _leaderboardPath(weekly: weekly, week: weekStart, cursor: cursor),
+      _leaderboardPath(weekly: weekly, week: week, cursor: cursor),
     );
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (!_accepted(response, const {200}, degradedOnFailure: true)) return;
     final existing = leaderboard['rows'];
     final more = response.map['rows'];
@@ -1966,8 +2017,16 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _loadResults({bool Function()? stillCurrent}) async {
     final id = seriesId;
     if (id == null) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     final response = await api.get('/v1/tournament/series/$id/results');
     if (stillCurrent != null && !stillCurrent()) return;
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (response.status == 200) {
       results = response.map;
       resultsError = null;
@@ -2058,6 +2117,12 @@ final class TournamentController extends ChangeNotifier {
 
   /// Returns true only when a usable session secret is ready for ranked calls.
   Future<bool> _restoreSession({bool degradedOnFailure = false}) async {
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    bool stillOwns() => _ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    );
     final binding =
         config.stagingSessionBinding ?? UatApi.authBinding(config.bearer);
     final origin = UatApi.apiOrigin(config.baseUrl);
@@ -2076,6 +2141,7 @@ final class TournamentController extends ChangeNotifier {
     if (saved != null) {
       api.sessionSecret = saved;
       final current = await api.get('/v1/tournament/session');
+      if (!stillOwns()) return false;
       _diagSession(
         operation: 'GET',
         endpoint: '/v1/tournament/session',
@@ -2095,11 +2161,13 @@ final class TournamentController extends ChangeNotifier {
             sessionId: _verifiedSessionId!,
             origin: origin,
           );
+          if (!stillOwns()) return false;
         }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
-        return true;
+        return stillOwns();
       }
       if (current.status == 0) {
         // Bound session + network failure: keep practice scope, do not POST.
@@ -2114,6 +2182,7 @@ final class TournamentController extends ChangeNotifier {
       api.sessionSecret = null;
       if (current.status == 401) {
         await identity.clearAuthenticatedPlayer();
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
       }
       InteractionPerf.mark('tournament.session.restore.rejected');
@@ -2130,6 +2199,7 @@ final class TournamentController extends ChangeNotifier {
     }
 
     final opened = await api.post('/v1/tournament/session');
+    if (!stillOwns()) return false;
     _diagSession(
       operation: 'POST',
       endpoint: '/v1/tournament/session',
@@ -2140,7 +2210,9 @@ final class TournamentController extends ChangeNotifier {
     if (opened.status != 201) {
       if (opened.status == 401) {
         await identity.clearAuthenticatedPlayer();
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
+        if (!stillOwns()) return false;
         _fail('UNAUTHENTICATED', degradedOnFailure: degradedOnFailure);
         return false;
       }
@@ -2172,9 +2244,12 @@ final class TournamentController extends ChangeNotifier {
         sessionId: _verifiedSessionId!,
         origin: origin,
       );
+      if (!stillOwns()) return false;
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
+    if (!stillOwns()) return false;
     await _hydrateHomeSnapshot();
+    if (!stillOwns()) return false;
     _persistBoundSession(
       secret: api.sessionSecret,
       binding: binding,
@@ -2270,7 +2345,21 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _hydrateHomeSnapshot() async {
-    final snap = await _homeSnapshots.load(identity.activeScope);
+    final scope = identity.activeScope;
+    final scopeKey = scope.storageKey;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    final beforeLoad = debugBeforeHomeSnapshotLoad;
+    if (beforeLoad != null) await beforeLoad();
+    final snap = await _homeSnapshots.load(scope);
+    // Scope equality alone is insufficient for A → Guest → A; fence generation.
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+      scopeKey: scopeKey,
+    )) {
+      return;
+    }
     homeSnapshot = snap;
     if (snap == null) {
       homeSnapshotStale = false;
@@ -2301,14 +2390,24 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _persistHomeSnapshot() async {
     final current = day;
     if (current == null) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    final scope = identity.activeScope;
     final snap = TournamentHomeSnapshot.fromLive(
-      scope: identity.activeScope,
+      scope: scope,
       day: current,
       originalUtcDate: _today(),
       capturedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
       results: results,
     );
     if (snap == null) return;
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+      scopeKey: scope.storageKey,
+    )) {
+      return;
+    }
     final previous = homeSnapshot;
     if (previous != null &&
         previous.scopeKey == snap.scopeKey &&

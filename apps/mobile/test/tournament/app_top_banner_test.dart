@@ -512,6 +512,42 @@ void main() {
     expect(find.byKey(const Key('fb-two')), findsOneWidget);
     expect(controller.appFeedback?.semanticsKey, 'fb-two');
   });
+
+  testWidgets(
+    'N26 tournament notice kept during sync schedules dismiss when sync ends',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync('pzd54-n26');
+      addTearDown(() {
+        if (directory.existsSync()) directory.deleteSync(recursive: true);
+      });
+      TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+          .clearAccessibilityFeaturesTestValue();
+      TestWidgetsFlutterBinding.ensureInitialized()
+          .platformDispatcher
+          .accessibilityFeaturesTestValue = FakeAccessibilityFeatures(
+        disableAnimations: false,
+        reduceMotion: false,
+      );
+      final api = ScriptedUatApi(
+        (_, _, _) async => const UatHttpResult(200, {}),
+      );
+      final controller = await _pumpHome(tester, api, directory);
+      controller.tournamentSync = TournamentSyncState.syncing;
+      controller.tournamentNoticeCode = 'OFFLINE';
+      controller.notifyListeners();
+      await tester.pump();
+      expect(find.byKey(const Key('tournament-status-error')), findsOneWidget);
+
+      // Sync ends with the same notice content — must become auto-dismissible.
+      controller.tournamentSync = TournamentSyncState.degraded;
+      controller.notifyListeners();
+      await tester.pump();
+      expect(find.byKey(const Key('tournament-status-error')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 4100));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('tournament-status-error')), findsNothing);
+    },
+  );
 }
 
 Future<TournamentController> _pumpHome(
