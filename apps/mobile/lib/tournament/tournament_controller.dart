@@ -225,6 +225,10 @@ final class TournamentController extends ChangeNotifier {
   @visibleForTesting
   Future<void> debugHydrateHomeSnapshot() => _hydrateHomeSnapshot();
 
+  /// Test-only: whether same-device registration succeeded for this restore.
+  @visibleForTesting
+  bool get debugSameDeviceRegistered => _sameDeviceRegistered;
+
   /// True when [tournamentEpoch]/[accountEpoch] still own presentation mutations.
   bool _ownsAccountPresentation({
     required int tournamentEpoch,
@@ -2155,13 +2159,14 @@ final class TournamentController extends ChangeNotifier {
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-          _sameDeviceRegistered = await _deviceRecovery.register(
+          final registered = await _deviceRecovery.register(
             api: api,
             playerId: _verifiedSessionPlayerId!,
             sessionId: _verifiedSessionId!,
             origin: origin,
           );
           if (!stillOwns()) return false;
+          _sameDeviceRegistered = registered;
         }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
@@ -2184,6 +2189,9 @@ final class TournamentController extends ChangeNotifier {
         await identity.clearAuthenticatedPlayer();
         if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
+        // Fence before falling through to POST — stale 401 recovery must not
+        // open a fresh writer under a newer account scope.
+        if (!stillOwns()) return false;
       }
       InteractionPerf.mark('tournament.session.restore.rejected');
     } else {
@@ -2238,13 +2246,14 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
     if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-      _sameDeviceRegistered = await _deviceRecovery.register(
+      final registered = await _deviceRecovery.register(
         api: api,
         playerId: _verifiedSessionPlayerId!,
         sessionId: _verifiedSessionId!,
         origin: origin,
       );
       if (!stillOwns()) return false;
+      _sameDeviceRegistered = registered;
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
     if (!stillOwns()) return false;

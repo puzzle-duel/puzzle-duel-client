@@ -125,20 +125,27 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
     super.didChangeDependencies();
     if (_didDepend) return;
     _didDepend = true;
-    _apply(fromSyncEdge: false);
+    _apply(syncEnded: false, refreshSuccessEligible: false);
   }
 
   @override
   void didUpdateWidget(covariant AppTopBannerHost oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final finishedSync =
-        (_wasSyncing && !widget.syncing && widget.notice == null) ||
+    // Sync-ended must not require notice == null — a persistent OFFLINE (etc.)
+    // notice still needs its auto-dismiss timer once sync completes (N26).
+    final syncEnded = _wasSyncing && !widget.syncing;
+    // Info success toast only when a refresh episode finishes cleanly.
+    final refreshSuccessEligible =
+        (syncEnded && widget.notice == null) ||
         (oldWidget.notice != null &&
             widget.notice == null &&
             !widget.syncing &&
             widget.controller.tournamentReady);
     _wasSyncing = widget.syncing;
-    _apply(fromSyncEdge: finishedSync);
+    _apply(
+      syncEnded: syncEnded,
+      refreshSuccessEligible: refreshSuccessEligible,
+    );
   }
 
   @override
@@ -286,7 +293,11 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
     motion.reverse().whenComplete(finish);
   }
 
-  void _apply({required bool fromSyncEdge}) {
+  /// Test seam: true while an auto-dismiss [Timer] is armed.
+  @visibleForTesting
+  bool get hasPendingAutoDismiss => _dismiss?.isActive == true;
+
+  void _apply({required bool syncEnded, required bool refreshSuccessEligible}) {
     final reduceMotion = _reduceMotion;
     final notice = widget.notice;
     final feedback = widget.controller.appFeedback;
@@ -297,7 +308,7 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
     BannerLifecycleId? nextId;
 
     // A new refresh episode may re-announce the same offline copy.
-    if (widget.syncing || fromSyncEdge) {
+    if (widget.syncing || syncEnded) {
       _dismissedNoticeContentKey = null;
     }
 
@@ -334,7 +345,9 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
       } else if (notice != null) {
         nextKind = AppFeedbackKind.warning;
         nextText = widget.copy.forTournamentRefreshError(notice);
-      } else if (infoOk && fromSyncEdge && widget.controller.tournamentReady) {
+      } else if (infoOk &&
+          refreshSuccessEligible &&
+          widget.controller.tournamentReady) {
         nextKind = AppFeedbackKind.info;
         nextText = widget.copy.tournamentRefreshSuccess;
       } else if (widget.syncing) {
@@ -370,7 +383,7 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
     // notices held during sync must gain an auto-dismiss timer once sync ends
     // even when notice content did not change.
     if (nextId == _activeId) {
-      if (fromSyncEdge &&
+      if (syncEnded &&
           !nextId.isAppFeedback &&
           !_dragging &&
           _dismiss == null &&
@@ -381,6 +394,10 @@ final class AppTopBannerHostState extends State<AppTopBannerHost>
           reduceMotion: reduceMotion,
           explicitFeedback: false,
         );
+      } else if (widget.syncing && !nextId.isAppFeedback) {
+        // Tournament notices are not auto-dismissible while sync is in flight.
+        _dismiss?.cancel();
+        _dismiss = null;
       }
       return;
     }

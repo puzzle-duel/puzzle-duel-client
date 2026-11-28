@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
+import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_controller.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_home_snapshot.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
@@ -725,6 +727,182 @@ void main() {
         expect(controller.day, isNull);
         expect(controller.results, isEmpty);
         expect(controller.homeSnapshot, isNull);
+      },
+    );
+
+    test(
+      'A24 stale device register result is not assigned after logout',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a24');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        const playerId = '11111111-1111-4111-8111-111111111111';
+        const sessionId = '33333333-3333-4333-8333-333333333333';
+        const bearer = 'Bearer player-a-token';
+        final binding = UatApi.authBinding(bearer);
+        const origin = 'https://staging.puzzle-duel.app';
+        File('${dir.path}/pzd-uat-session.json').writeAsStringSync(
+          jsonEncode({
+            'version': 2,
+            'sessions': {
+              binding: {'secret': 'bound-secret-a', 'apiOrigin': origin},
+            },
+          }),
+        );
+
+        const channel = MethodChannel('pzd/device_signing');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              if (call.method == 'registerProof') {
+                return {
+                  'spkiBase64Url': 'test-public-key',
+                  'signatureBase64Url': 'test-registration-signature',
+                };
+              }
+              return null;
+            });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+        });
+
+        final registerGate = Completer<void>();
+        var registerStarted = false;
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.endsWith('/session') && method == 'GET') {
+            return const UatHttpResult(200, {
+              'playerId': playerId,
+              'sessionId': sessionId,
+              'expiresAtMs': 9999999999999,
+            });
+          }
+          if (path.endsWith('/devices/register')) {
+            registerStarted = true;
+            await registerGate.future;
+            return const UatHttpResult(200, {
+              'deviceCredentialId': '44444444-4444-4444-8444-444444444444',
+            });
+          }
+          if (path.contains('/claims/daily')) {
+            return const UatHttpResult(201, {
+              'seriesId': 'series-a',
+              'status': 'ACTIVE',
+              'original': true,
+            });
+          }
+          if (path.contains('/board')) {
+            return const UatHttpResult(200, {
+              'ordinal': 1,
+              'ordinalLabel': 'E1',
+              'seriesScore': 0,
+              'writerSessionMatches': true,
+              'state': {'turnsUsed': 0, 'boardSize': 8},
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+
+        final identity = PracticeIdentityStore(dir);
+        await identity.load();
+        await identity.bindAuthenticatedPlayer(playerId);
+        final controller = TournamentController(
+          config: const UatConfig(
+            baseUrl: origin,
+            bearer: bearer,
+            playerLabel: 'verified',
+          ),
+          api: api,
+          stateDirectory: dir,
+          identity: identity,
+          deviceRecovery: SameDeviceRecovery(isSupportedDevice: () => true),
+        );
+        addTearDown(controller.dispose);
+        await controller.beginLocal();
+
+        final pending = controller.refreshTournament();
+        for (var i = 0; i < 50 && !registerStarted; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(registerStarted, isTrue);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        expect(controller.debugSameDeviceRegistered, isFalse);
+        registerGate.complete();
+        await pending;
+        expect(controller.debugSameDeviceRegistered, isFalse);
+      },
+    );
+
+    test(
+      'A25 stale GET 401 hydrate must not open a fresh POST session',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('pzd54-a25');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        const bearer = 'Bearer player-a-token';
+        final binding = UatApi.authBinding(bearer);
+        const origin = 'https://staging.puzzle-duel.app';
+        File('${dir.path}/pzd-uat-session.json').writeAsStringSync(
+          jsonEncode({
+            'version': 2,
+            'sessions': {
+              binding: {'secret': 'expired-secret-a', 'apiOrigin': origin},
+            },
+          }),
+        );
+
+        var postSessionCalls = 0;
+        var hydrateStarted = false;
+        final hydrateGate = Completer<void>();
+        final api = ScriptedUatApi((method, path, body) async {
+          if (path.endsWith('/session') && method == 'GET') {
+            return const UatHttpResult(401, {'error': 'UNAUTHENTICATED'});
+          }
+          if (path.endsWith('/session') && method == 'POST') {
+            postSessionCalls++;
+            return const UatHttpResult(201, {
+              'playerId': 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+              'sessionId': 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+              'sessionSecret': 'fresh-after-401',
+              'expiresAtMs': 9999999999999,
+            });
+          }
+          return const UatHttpResult(200, {});
+        });
+
+        final identity = PracticeIdentityStore(dir);
+        await identity.load();
+        await identity.bindAuthenticatedPlayer(
+          '11111111-1111-1111-1111-111111111111',
+        );
+        final controller = TournamentController(
+          config: const UatConfig(
+            baseUrl: origin,
+            bearer: bearer,
+            playerLabel: 'verified',
+          ),
+          api: api,
+          stateDirectory: dir,
+          identity: identity,
+        );
+        addTearDown(controller.dispose);
+        await controller.beginLocal();
+        controller.debugBeforeHomeSnapshotLoad = () async {
+          hydrateStarted = true;
+          await hydrateGate.future;
+        };
+
+        final pending = controller.refreshTournament();
+        for (var i = 0; i < 50 && !hydrateStarted; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(hydrateStarted, isTrue);
+        controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
+        hydrateGate.complete();
+        await pending;
+        expect(postSessionCalls, 0);
+        expect(api.sessionSecret, isNull);
       },
     );
   });

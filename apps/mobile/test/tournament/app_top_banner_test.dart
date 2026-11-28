@@ -532,20 +532,38 @@ void main() {
         (_, _, _) async => const UatHttpResult(200, {}),
       );
       final controller = await _pumpHome(tester, api, directory);
+      final hostFinder = find.byKey(const Key('tournament-status-host'));
+      final hostState = tester.state<AppTopBannerHostState>(hostFinder);
+
+      // Enter sync first so the subsequent notice is presented while syncing.
       controller.tournamentSync = TournamentSyncState.syncing;
+      controller.notifyListeners();
+      await tester.pump();
+      expect(tester.widget<AppTopBannerHost>(hostFinder).syncing, isTrue);
+
       controller.tournamentNoticeCode = 'OFFLINE';
       controller.notifyListeners();
       await tester.pump();
+      expect(tester.widget<AppTopBannerHost>(hostFinder).syncing, isTrue);
       expect(find.byKey(const Key('tournament-status-error')), findsOneWidget);
+      // Held during sync — no auto-dismiss timer yet.
+      expect(hostState.hasPendingAutoDismiss, isFalse);
 
-      // Sync ends with the same notice content — must become auto-dismissible.
+      // Sync ends with the same non-null notice — must arm the timer.
       controller.tournamentSync = TournamentSyncState.degraded;
       controller.notifyListeners();
       await tester.pump();
+      expect(tester.widget<AppTopBannerHost>(hostFinder).syncing, isFalse);
       expect(find.byKey(const Key('tournament-status-error')), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 4100));
-      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        hostState.hasPendingAutoDismiss,
+        isTrue,
+        reason: 'sync-ended with persistent notice must schedule auto-dismiss',
+      );
+      await tester.pump(AppTopBannerHostState.warningHold);
+      await tester.pump(AppTopBannerHostState.slideOut);
       expect(find.byKey(const Key('tournament-status-error')), findsNothing);
+      expect(hostState.hasPendingAutoDismiss, isFalse);
     },
   );
 }
