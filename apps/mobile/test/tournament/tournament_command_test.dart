@@ -25,10 +25,21 @@ final class ScriptedUatApi extends UatApi {
   onRequest;
 
   @override
-  Future<UatHttpResult> get(String path) => onRequest('GET', path, null);
+  Future<UatHttpResult> get(String path) async {
+    final result = await onRequest('GET', path, null);
+    // PZD-55 Home refresh uses calendar; keep legacy scripts that omit it.
+    // Do not mask transport failures (status 0) as a successful overview.
+    if (path.endsWith('/calendar') && result.status == 404) {
+      return UatHttpResult(200, _defaultCalendarFixture());
+    }
+    return result;
+  }
 
   @override
   Future<UatHttpResult> patch(String path) => onRequest('PATCH', path, null);
+
+  @override
+  Future<UatHttpResult> delete(String path) => onRequest('DELETE', path, null);
 
   @override
   Future<UatHttpResult> post(String path, [Object? body]) {
@@ -36,6 +47,47 @@ final class ScriptedUatApi extends UatApi {
     if (path.endsWith('/claims/daily')) claimPosts += 1;
     return onRequest('POST', path, body);
   }
+}
+
+Map<String, Object?> _defaultCalendarFixture({bool accountScoped = true}) {
+  final today = DateTime.now().toUtc();
+  final dayStart = DateTime.utc(today.year, today.month, today.day);
+  final mondayOffset = (dayStart.weekday + 6) % 7;
+  final monday = dayStart.subtract(Duration(days: mondayOffset));
+  final days = <Map<String, Object?>>[];
+  for (var i = 0; i < 7; i++) {
+    final date = monday.add(Duration(days: i));
+    final iso = date.toIso8601String().substring(0, 10);
+    final isToday = date == dayStart;
+    final isFuture = date.isAfter(dayStart);
+    days.add({
+      'date': iso,
+      'status': isFuture
+          ? 'LOCKED_FUTURE'
+          : isToday
+          ? 'AVAILABLE_TODAY'
+          : 'AVAILABLE_PAST',
+      'isToday': isToday,
+      'canStart': accountScoped && !isFuture,
+      'canResume': false,
+      'canViewResults': false,
+      'completedBoardCount': 0,
+      'totalBoardCount': 6,
+    });
+  }
+  return {
+    'weekStartUtc': monday.toIso8601String().substring(0, 10),
+    'weekEndUtc': monday
+        .add(const Duration(days: 6))
+        .toIso8601String()
+        .substring(0, 10),
+    'serverNowMs': DateTime.now().toUtc().millisecondsSinceEpoch,
+    'currentTournamentDate': dayStart.toIso8601String().substring(0, 10),
+    'completedDayCount': 0,
+    'playablePastDayCount': accountScoped ? mondayOffset : 0,
+    'accountScoped': accountScoped,
+    'days': days,
+  };
 }
 
 void main() {

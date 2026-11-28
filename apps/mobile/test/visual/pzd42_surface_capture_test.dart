@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_top_banner.dart';
 import 'package:puzzle_duel_mobile/theme/app_theme.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_flow.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
@@ -157,12 +158,22 @@ Future<void> _captureHome(
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});
   });
   await _pump(tester, api);
+  final live = tester
+      .widget<AppTopBannerHost>(
+        find.byKey(const Key('tournament-status-host')),
+      )
+      .controller;
+  // Calendar boot no longer auto-claims; resume selected day for progress/complete.
+  if (turnsUsed > 0 || completed || openResults) {
+    await live.resume();
+    await tester.pumpAndSettle();
+  }
   if (openSettings) {
     await tester.tap(find.byKey(const Key('settings')));
     await tester.pumpAndSettle();
   }
   if (openResults) {
-    await tester.tap(find.byKey(const Key('primary-action')));
+    await live.openResults();
     await tester.pumpAndSettle();
   }
   await _golden(tester, name);
@@ -207,6 +218,13 @@ Future<void> _captureBoard(WidgetTester tester, String name, List<Map<String, Ob
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});
   });
   await _pump(tester, api);
+  // Weekly hub calendar grows the Home card; scroll actions into view.
+  await tester.scrollUntilVisible(
+    find.byKey(const Key('leaderboard')),
+    80,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
   await tester.tap(find.byKey(const Key('leaderboard')));
   await tester.pumpAndSettle();
   if (daily) {

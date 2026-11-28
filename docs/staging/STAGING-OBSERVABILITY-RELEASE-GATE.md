@@ -8,6 +8,8 @@ Bu kural iOS ve Android için, local debug, staging release, CI/Firebase distrib
 
 ## Yayın engeli (RELEASE BLOCKER)
 
+**ABSOLUTE NO-REGRESSION — Log Gönder (UAT):** No action or change may negatively impact manual diagnostic upload, its visibility, authorized guest/verified-account operation, HTTP 201 + reportId delivery, or Request ID / Report ID Inspector correlation. Before every change assess impact; after every development run applicable regression tests and verify end-to-end on staging before merge/release/Done. FAIL or NOT_RUN blocks acceptance; green CI alone is insufficient. Never bypass authentication, redaction, or production isolation; never fake success. If a regression is found, prioritize restoring diagnostics before unrelated work.
+
 - Ayarlar'da **Log Gönder (UAT)** her staging build'de GÖRÜNÜR ve tıklanabilir olmalı; güvenli, sınırlandırılmış olaylar yetkilendirilmiş staging sunucusuna gönderilmeli.
 - Backend **POST /v1/diagnostics/reports** aktif staging session ile **201 + reportId** dönmeli; reportId sunucu tarafında takip edilebilir olmalı. **404, 401, 403, 429 veya 5xx = test başarısız**; herhangi biri nedenine göre çözülmeden release onayı verilmez.
 - Ayarlar'da **Crash Test (STAGING)** staging build'de GÖRÜNÜR olmalı. Firebase Crashlytics yapılandırılmamışsa bir neden gösterilmeli; başarı taklidi yapılmamalı. Yapılandırılmışsa onay diyaloğu sonrasında gerçek test crash tetiklenebilmeli ve staging Crashlytics projesinde görüldüğü doğrulanmalı.

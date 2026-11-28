@@ -200,7 +200,10 @@ void main() {
           api: api,
         );
         controller.day = _completedDay();
-        final pending = controller.loadDay(presentHome: true);
+        final pending = controller.loadDay(
+          presentHome: true,
+          originalUtcDate: '2026-11-28',
+        );
         await Future<void>.delayed(Duration.zero);
         controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
         expect(controller.day, isNull);
@@ -232,7 +235,10 @@ void main() {
         accountType: 'verified',
         api: api,
       );
-      final pending = controller.loadDay(presentHome: true);
+      final pending = controller.loadDay(
+        presentHome: true,
+        originalUtcDate: '2026-11-28',
+      );
       await Future<void>.delayed(Duration.zero);
       controller.applyGuestSessionAfterLogout(rankedAuthRequired: true);
       gate.complete();
@@ -463,7 +469,10 @@ void main() {
           accountType: 'verified',
           api: api,
         );
-        final pending = controller.loadDay(presentHome: true);
+        final pending = controller.loadDay(
+          presentHome: true,
+          originalUtcDate: '2026-11-28',
+        );
         for (var i = 0; i < 40 && !resultsRequested; i++) {
           await Future<void>.delayed(Duration.zero);
         }

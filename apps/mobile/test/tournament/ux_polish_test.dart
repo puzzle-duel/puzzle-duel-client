@@ -122,7 +122,11 @@ void main() {
     });
     final api = _onlineApi();
     await _pumpHome(tester, api, directory);
-    await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 200);
+    await tester.drag(
+      find.byKey(const Key('home-scroll')),
+      const Offset(0, -480),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('leaderboard')));
     await _pumpFrames(tester);
     expect(find.text('Provisional'), findsOneWidget);
@@ -131,7 +135,7 @@ void main() {
     expect(navigator.canPop(), isTrue);
     await tester.tap(find.byKey(const Key('nav-back')));
     await _pumpFrames(tester);
-    expect(find.byKey(const Key('home-title')), findsOneWidget);
+    expect(find.byKey(const Key('home-daily-card')), findsOneWidget);
     expect(find.text('Provisional'), findsNothing);
   });
 
@@ -142,13 +146,17 @@ void main() {
     });
     final api = _onlineApi();
     await _pumpHome(tester, api, directory);
-    await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 200);
+    await tester.drag(
+      find.byKey(const Key('home-scroll')),
+      const Offset(0, -480),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('leaderboard')));
     await _pumpFrames(tester);
     final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
     expect(await navigator.maybePop(), isTrue);
     await _pumpFrames(tester);
-    expect(find.byKey(const Key('home-title')), findsOneWidget);
+    expect(find.byKey(const Key('home-daily-card')), findsOneWidget);
   });
 
   testWidgets('practice picker shows title beside back arrow', (tester) async {
@@ -158,7 +166,11 @@ void main() {
     });
     final api = _onlineApi();
     await _pumpHome(tester, api, directory);
-    await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
+    await tester.drag(
+      find.byKey(const Key('home-scroll')),
+      const Offset(0, -480),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('practice')));
     await _pumpFrames(tester);
     expect(find.byKey(const Key('practice-title')), findsOneWidget);
@@ -176,7 +188,11 @@ void main() {
     });
     final api = _onlineApi();
     await _pumpHome(tester, api, directory);
-    await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
+    await tester.drag(
+      find.byKey(const Key('home-scroll')),
+      const Offset(0, -480),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('practice')));
     await _pumpFrames(tester);
     await tester.tap(find.byKey(const Key('practice-easy')));
@@ -221,7 +237,11 @@ void main() {
       locale: const Locale('tr'),
       textScaler: const TextScaler.linear(1.3),
     );
-    await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
+    await tester.drag(
+      find.byKey(const Key('home-scroll')),
+      const Offset(0, -480),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('practice')));
     await _pumpFrames(tester);
     expect(find.text('Pratik Yap'), findsOneWidget);
@@ -322,18 +342,26 @@ void main() {
     final api = _onlineApi();
     await _pumpHome(tester, api, directory);
     for (var i = 0; i < 3; i++) {
-      await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 200);
+      await tester.drag(
+        find.byKey(const Key('home-scroll')),
+        const Offset(0, -480),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('leaderboard')));
       await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('nav-back')));
       await _pumpFrames(tester);
-      expect(find.byKey(const Key('home-title')), findsOneWidget);
-      await tester.scrollUntilVisible(find.byKey(const Key('practice')), 200);
+      expect(find.byKey(const Key('home-daily-card')), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('home-scroll')),
+        const Offset(0, -480),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('practice')));
       await _pumpFrames(tester);
       await tester.tap(find.byKey(const Key('nav-back')));
       await _pumpFrames(tester);
-      expect(find.byKey(const Key('home-title')), findsOneWidget);
+      expect(find.byKey(const Key('home-daily-card')), findsOneWidget);
     }
   });
 }

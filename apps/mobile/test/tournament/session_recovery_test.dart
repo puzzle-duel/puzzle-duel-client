@@ -273,6 +273,7 @@ void main() {
       haptics: const SilentTournamentHaptics(),
     );
     await controller.start();
+    await controller.startSelectedManifest();
     expect(controller.tournamentNoticeCode, 'TIMEOUT');
     expect(
       await store.bestScore(
@@ -348,6 +349,9 @@ void main() {
     await controller.refreshTournament();
     expect(controller.tournamentReady, isTrue);
     expect(sessionPosts, 1);
+    // Calendar refresh does not claim; explicit start/resume does.
+    expect(claims, 0);
+    await controller.startSelectedManifest();
     expect(claims, 1);
   });
 

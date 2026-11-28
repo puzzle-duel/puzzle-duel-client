@@ -25,6 +25,7 @@ import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
 import 'package:puzzle_duel_mobile/tournament/same_device_recovery.dart';
+import 'package:puzzle_duel_mobile/tournament/weekly_tournament_overview.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 /// Local features vs authoritative Tournament refresh.
@@ -230,6 +231,21 @@ final class TournamentController extends ChangeNotifier {
   TournamentHomeSnapshot? homeSnapshot;
   bool homeSnapshotStale = false;
 
+  /// PZD-55 account-scoped weekly hub (null until first successful fetch).
+  WeeklyTournamentOverview? weeklyOverview;
+
+  /// Home calendar selection only — independent of active gameplay series date.
+  String? selectedTournamentDate;
+
+  /// UTC date of the active claimed/resumed series (snapshot / resume identity).
+  /// Never inferred from Home selection alone; set only after a successful claim.
+  String? activeManifestUtcDate;
+
+  bool weeklyOverviewLoading = false;
+
+  /// True after a calendar fetch failure until the next successful overview.
+  bool weeklyOverviewFailed = false;
+
   /// Test-only: awaited at the start of [_hydrateHomeSnapshot] before disk I/O.
   @visibleForTesting
   Future<void> Function()? debugBeforeHomeSnapshotLoad;
@@ -278,6 +294,8 @@ final class TournamentController extends ChangeNotifier {
   String? _verifiedSessionId;
   bool _openedFreshSession = false;
   bool _sameDeviceRegistered = false;
+  /// Last device-registration denial code (never fabricated).
+  String? _deviceRegistrationDenial;
   int? _sessionExpiresAtMs;
   bool _renewingWriter = false;
   Timer? _sessionRenewalTimer;
@@ -453,6 +471,11 @@ final class TournamentController extends ChangeNotifier {
     weeklyFinal = false;
     homeSnapshot = null;
     homeSnapshotStale = false;
+    weeklyOverview = null;
+    selectedTournamentDate = null;
+    activeManifestUtcDate = null;
+    weeklyOverviewLoading = false;
+    weeklyOverviewFailed = false;
     resultsError = null;
     errorCode = null;
     noticeCode = null;
@@ -472,6 +495,33 @@ final class TournamentController extends ChangeNotifier {
     }
     busy = false;
     moveInFlight = false;
+  }
+
+  WeeklyTournamentDay? get selectedWeeklyDay {
+    final overview = weeklyOverview;
+    final selected = selectedTournamentDate;
+    if (overview == null || selected == null) return null;
+    return overview.dayFor(selected);
+  }
+
+  /// Home day-card selection only — never claims or starts ranked gameplay.
+  void selectTournamentDay(String date) {
+    final overview = weeklyOverview;
+    if (overview == null) return;
+    final day = overview.dayFor(date);
+    if (day == null) return;
+    if (day.status == WeeklyDayStatus.unknown) return;
+    selectedTournamentDate = date;
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'selectTournamentDay',
+        ),
+      ),
+    );
+    notifyListeners();
   }
 
   /// Guest / unverified gate: clear personal fields, no auto auth warning banner.
@@ -607,17 +657,136 @@ final class TournamentController extends ChangeNotifier {
     tournamentNoticeCode = null;
     errorCode = null;
     notifyListeners();
-    final sessionOk = await _restoreSession(degradedOnFailure: true);
+    // Best-effort gameplay session restore; weekly overview is Bearer-scoped.
+    await _restoreSession(degradedOnFailure: true);
     if (epoch != _tournamentEpoch) return;
-    if (!sessionOk || api.sessionSecret == null) {
-      if (epoch == _tournamentEpoch &&
-          tournamentSync == TournamentSyncState.syncing) {
-        tournamentSync = TournamentSyncState.degraded;
-        notifyListeners();
-      }
+    // Do not follow a rejected bearer with calendar (avoids request storms).
+    if (tournamentNoticeCode == 'UNAUTHENTICATED') {
+      busy = false;
+      booting = false;
+      if (!preserveRoute) route = const TournamentRoute();
+      notifyListeners();
       return;
     }
-    await loadDay(presentHome: !preserveRoute, epoch: epoch);
+    await fetchWeeklyTournamentOverview(epoch: epoch);
+    if (epoch != _tournamentEpoch) return;
+    if (!preserveRoute) route = const TournamentRoute();
+    busy = false;
+    booting = false;
+    notifyListeners();
+  }
+
+  /// Read-only weekly hub fetch. Never creates claims or consumes attempts.
+  Future<void> fetchWeeklyTournamentOverview({int? epoch}) async {
+    final activeEpoch = epoch ?? _tournamentEpoch;
+    weeklyOverviewLoading = true;
+    notifyListeners();
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.httpStarted,
+          operation: 'fetchWeeklyTournament',
+        ),
+      ),
+    );
+    if (sessionAuth != null) {
+      try {
+        final access = await sessionAuth!.authenticate();
+        if (activeEpoch != _tournamentEpoch) return;
+        api.bearer = UatApi.normalizeBearer(access.accessToken);
+        rankedAuthRequired = !access.isVerified;
+      } on GuestAuthException catch (error) {
+        if (activeEpoch != _tournamentEpoch) return;
+        if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
+          await enterSessionRecovery(error.code);
+          weeklyOverviewLoading = false;
+          return;
+        }
+        _fail(error.code, degradedOnFailure: true);
+        weeklyOverviewLoading = false;
+        weeklyOverviewFailed = true;
+        return;
+      }
+    }
+    final response = await api.get('/v1/tournament/calendar');
+    if (activeEpoch != _tournamentEpoch) return;
+    weeklyOverviewLoading = false;
+    if (!_accepted(response, const {200}, degradedOnFailure: true)) {
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.httpFailed,
+            operation: 'fetchWeeklyTournament',
+            // Transport failures use status 0 — omit invalid HTTP codes.
+            httpStatus: response.status >= 100 && response.status <= 599
+                ? response.status
+                : null,
+            errorCode: response.error,
+          ),
+        ),
+      );
+      weeklyOverviewFailed = true;
+      // Cold failure: never leave fabricated eligibility. Stale prior overview
+      // may remain until the next successful fetch (homeSnapshotStale path).
+      final transport = tournamentNoticeCode;
+      if (transport != 'TIMEOUT' &&
+          transport != 'OFFLINE' &&
+          transport != 'UNAUTHENTICATED') {
+        tournamentNoticeCode = 'WEEKLY_OVERVIEW_UNAVAILABLE';
+      }
+      notifyListeners();
+      return;
+    }
+    final parsed = WeeklyTournamentOverview.tryParse(response.map);
+    if (parsed == null) {
+      _fail('WEEKLY_OVERVIEW_UNAVAILABLE', degradedOnFailure: true);
+      weeklyOverviewFailed = true;
+      return;
+    }
+    final previousSelection = selectedTournamentDate;
+    weeklyOverview = parsed;
+    weeklyOverviewFailed = false;
+    serverNowMs = parsed.serverNowMs;
+    if (previousSelection != null && parsed.dayFor(previousSelection) != null) {
+      selectedTournamentDate = previousSelection;
+    } else {
+      selectedTournamentDate = parsed.currentTournamentDate;
+    }
+    if (rankedAuthRequired || !parsed.accountScoped) {
+      day = null;
+      seriesId = null;
+      results = const {};
+      _claim = null;
+      activeManifestUtcDate = null;
+    }
+    tournamentSync = TournamentSyncState.ready;
+    // Keep session-auth / transport banners; clear calendar-load failure.
+    const keepNotices = {
+      'TIMEOUT',
+      'UNAUTHENTICATED',
+      'AUTH_UNAVAILABLE',
+      'OFFLINE',
+    };
+    if (tournamentNoticeCode == null ||
+        tournamentNoticeCode == 'WEEKLY_OVERVIEW_UNAVAILABLE' ||
+        !keepNotices.contains(tournamentNoticeCode)) {
+      tournamentNoticeCode = null;
+    }
+    errorCode = null;
+    syncedAt = DateTime.now().toUtc();
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.httpCompleted,
+          operation: 'fetchWeeklyTournament',
+          httpStatus: 200,
+        ),
+      ),
+    );
+    notifyListeners();
   }
 
   /// Compatibility entry used by older tests: local ready then ranked refresh.
@@ -626,8 +795,13 @@ final class TournamentController extends ChangeNotifier {
     await refreshTournament(origin: TournamentRefreshOrigin.startup);
   }
 
-  /// Reads today's series. Opening Home after this does not claim again.
-  Future<void> loadDay({required bool presentHome, int? epoch}) async {
+  /// Claims or resumes the given UTC date (defaults to selected/today).
+  /// Home day selection must not call this — only the primary CTA / resume path.
+  Future<void> loadDay({
+    required bool presentHome,
+    int? epoch,
+    String? originalUtcDate,
+  }) async {
     final activeEpoch = epoch ?? _tournamentEpoch;
     busy = true;
     notifyListeners();
@@ -678,8 +852,35 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
     }
+    // Explicit selected/active date only — never invent client-local `_today()`.
+    final claimDate =
+        originalUtcDate ??
+        selectedTournamentDate ??
+        weeklyOverview?.currentTournamentDate;
+    if (claimDate == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(claimDate)) {
+      busy = false;
+      booting = false;
+      tournamentNoticeCode = 'MALFORMED_REQUEST';
+      tournamentSync = TournamentSyncState.degraded;
+      notifyListeners();
+      return;
+    }
+    final overviewDay = weeklyOverview?.dayFor(claimDate);
+    if (overviewDay != null &&
+        originalUtcDate == null &&
+        !overviewDay.canStart &&
+        !overviewDay.canResume) {
+      // Server overview says this day is not claimable; do not silently claim.
+      busy = false;
+      booting = false;
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
+      tournamentSync = TournamentSyncState.degraded;
+      notifyListeners();
+      return;
+    }
     final claim = await api.post('/v1/tournament/claims/daily', {
-      'originalUtcDate': _today(),
+      'originalUtcDate': claimDate,
     });
     if (activeEpoch != _tournamentEpoch) return;
     if (claim.status == 403 && claim.error == 'RANKED_AUTH_REQUIRED') {
@@ -701,6 +902,8 @@ final class TournamentController extends ChangeNotifier {
     rankedAuthRequired = false;
     _claim = claim.map;
     seriesId = claim.map['seriesId']?.toString();
+    activeManifestUtcDate =
+        claim.map['originalUtcDate']?.toString() ?? claimDate;
     final id = seriesId;
     if (id == null || id.isEmpty) {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
@@ -722,37 +925,26 @@ final class TournamentController extends ChangeNotifier {
         claim.map['original'] == false &&
         (writerMatches == false || (writerMatches == null && openedFresh));
     if (needsRecovery) {
-      if (_sameDeviceRegistered &&
-          _verifiedSessionPlayerId != null &&
-          _verifiedSessionId != null) {
-        final attempt = await _deviceRecovery.recoverDetailed(
-          api: api,
-          playerId: _verifiedSessionPlayerId!,
-          newSessionId: _verifiedSessionId!,
-          origin: UatApi.apiOrigin(config.baseUrl),
-          seriesId: id,
-        );
+      recoveryDenial = await _attemptWriterRecovery(
+        seriesId: id,
+        activeEpoch: activeEpoch,
+      );
+      if (activeEpoch != _tournamentEpoch) return;
+      if (recoveryDenial == null) {
+        final verified = await api.get('/v1/tournament/series/$id/board');
         if (activeEpoch != _tournamentEpoch) return;
-        if (!attempt.succeeded) {
-          recoveryDenial =
-              UatApi.diagnosticErrorCode(attempt.errorCode) ??
-              'RECOVERY_NOT_ELIGIBLE';
-        } else {
-          // Proof acceptance must be followed by fresh server-owned writer
-          // metadata, not an assumption about entitlement.
-          final verified = await api.get('/v1/tournament/series/$id/board');
-          if (activeEpoch != _tournamentEpoch) return;
-          if (!_accepted(verified, const {200}, degradedOnFailure: true)) {
-            return;
-          }
-          if (verified.map['writerSessionMatches'] == false) {
-            recoveryDenial = 'WRITER_NOT_AUTHORIZED';
-          } else {
-            _applyBoard(verified.map, reveal: false);
-          }
+        if (!_accepted(verified, const {200}, degradedOnFailure: true)) {
+          return;
         }
-      } else {
-        recoveryDenial = 'RECOVERY_NOT_ELIGIBLE';
+        if (verified.map['writerSessionMatches'] != true) {
+          recoveryDenial = 'WRITER_NOT_AUTHORIZED';
+          _diagRecovery(
+            operation: 'writer_recovery_denied',
+            errorCode: recoveryDenial,
+          );
+        } else {
+          _applyBoard(verified.map, reveal: false);
+        }
       }
     }
     if (!needsRecovery || recoveryDenial != null) {
@@ -790,9 +982,11 @@ final class TournamentController extends ChangeNotifier {
     errorCode = null;
     route = const TournamentRoute();
     notifyListeners();
-    if (!tournamentReady && tournamentSync != TournamentSyncState.syncing) {
-      await refreshTournament(origin: TournamentRefreshOrigin.background);
-    }
+    // Always refresh calendar on Home return — even when tournamentReady.
+    // Completing a weekly day leaves ready=true with a stale overview until
+    // GET /v1/tournament/calendar runs. refreshTournament dedupes in-flight
+    // callers and fetchWeeklyTournamentOverview preserves selected date.
+    await refreshTournament(origin: TournamentRefreshOrigin.background);
   }
 
   /// Returns the shell to Home without starting a network refresh.
@@ -835,7 +1029,7 @@ final class TournamentController extends ChangeNotifier {
       }
     }
     if (sessionAuth == null) {
-      await resume();
+      await startSelectedManifest();
       return;
     }
     GuestAccess access;
@@ -863,6 +1057,73 @@ final class TournamentController extends ChangeNotifier {
       return;
     }
     rankedAuthRequired = false;
+    await startSelectedManifest();
+  }
+
+  /// Starts, resumes, or opens results for the Home-selected tournament day.
+  ///
+  /// Server `canStart` / `canResume` / `canViewResults` are authoritative.
+  /// Never falls back to client `_today()` when selection/eligibility is missing.
+  Future<void> startSelectedManifest() async {
+    if (rankedAuthRequired || sessionRecoveryRequired) {
+      await requestRankedEntry();
+      return;
+    }
+    final selected = selectedWeeklyDay;
+    if (selected == null) {
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
+      notifyListeners();
+      return;
+    }
+    if (selected.status == WeeklyDayStatus.lockedFuture ||
+        selected.status == WeeklyDayStatus.closed ||
+        selected.status == WeeklyDayStatus.unavailable ||
+        selected.status == WeeklyDayStatus.unknown) {
+      tournamentNoticeCode = selected.status == WeeklyDayStatus.lockedFuture
+          ? 'CLAIM_WINDOW_CLOSED'
+          : 'TOURNAMENT_UNAVAILABLE';
+      notifyListeners();
+      return;
+    }
+    if (selected.canViewResults &&
+        (selected.status == WeeklyDayStatus.completed ||
+            selected.seriesId != null)) {
+      if (selected.seriesId != null && selected.seriesId!.isNotEmpty) {
+        seriesId = selected.seriesId;
+      }
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'viewManifestResults',
+          ),
+        ),
+      );
+      await openResults();
+      return;
+    }
+    if (!selected.canStart && !selected.canResume) {
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
+      notifyListeners();
+      return;
+    }
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: selected.canResume
+              ? 'resumeSelectedManifest'
+              : 'startSelectedManifest',
+        ),
+      ),
+    );
+    await loadDay(
+      presentHome: false,
+      originalUtcDate: selected.date,
+    );
+    if (!tournamentReady || rankedWriterLocked) return;
     await resume();
   }
 
@@ -1026,8 +1287,8 @@ final class TournamentController extends ChangeNotifier {
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
-        // Invalidate previous tournament session before publishing account.
-        await invalidateTournamentGameplaySession(reason: 'account_transition');
+        // Revoke previous tournament writer session before publishing account.
+        await revokeTournamentGameplaySession(reason: 'account_transition');
         // Never flash previous account personal data under the new identity.
         invalidateAccountScopedPresentation(reason: 'account_transition');
         api.bearer = UatApi.normalizeBearer(access.accessToken);
@@ -1111,6 +1372,51 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
+  /// Best-effort server revoke while verified bearer + secret are still set.
+  /// Call before guest logout credential replacement.
+  Future<void> revokeTournamentGameplaySession({
+    required String reason,
+  }) async {
+    final accountEpoch = accountStateEpoch;
+    final tournamentEpoch = _tournamentEpoch;
+    final secret = api.sessionSecret;
+    String? revokeError;
+    var revokeAttempted = false;
+    if (secret != null && secret.isNotEmpty) {
+      revokeAttempted = true;
+      try {
+        final deleted = await api.delete('/v1/tournament/session');
+        if (deleted.status == 204) {
+          revokeError = null;
+        } else if (deleted.status == 401) {
+          revokeError = 'UNAUTHENTICATED';
+        } else {
+          revokeError =
+              UatApi.diagnosticErrorCode(deleted.error) ?? 'REQUEST_FAILED';
+        }
+      } catch (_) {
+        revokeError = 'OFFLINE';
+      }
+    }
+    if (accountEpoch != accountStateEpoch ||
+        tournamentEpoch != _tournamentEpoch) {
+      _diagRecovery(
+        operation: 'tournament_session_revoke_stale',
+        errorCode: 'ACCOUNT_TRANSITION',
+      );
+      return;
+    }
+    if (revokeAttempted) {
+      _diagRecovery(
+        operation: revokeError == null
+            ? 'tournament_session_revoked'
+            : 'tournament_session_revoke_failed',
+        errorCode: revokeError,
+      );
+    }
+    await invalidateTournamentGameplaySession(reason: reason);
+  }
+
   /// Clears gameplay session secret/renewal without signing the account out.
   Future<void> invalidateTournamentGameplaySession({
     required String reason,
@@ -1137,6 +1443,80 @@ final class TournamentController extends ChangeNotifier {
     );
   }
 
+  /// Device-crypto recovery first (when registered); else verified unanchored
+  /// reclaim. Never fabricates device proof or unlocks without server OK.
+  Future<String?> _attemptWriterRecovery({
+    required String seriesId,
+    required int activeEpoch,
+  }) async {
+    if (_sameDeviceRegistered &&
+        _verifiedSessionPlayerId != null &&
+        _verifiedSessionId != null) {
+      _diagRecovery(operation: 'device_recovery_challenge');
+      final attempt = await _deviceRecovery.recoverDetailed(
+        api: api,
+        playerId: _verifiedSessionPlayerId!,
+        newSessionId: _verifiedSessionId!,
+        origin: UatApi.apiOrigin(config.baseUrl),
+        seriesId: seriesId,
+      );
+      if (activeEpoch != _tournamentEpoch) return 'RECOVERY_NOT_ELIGIBLE';
+      if (attempt.succeeded) {
+        _diagRecovery(operation: 'device_writer_recovery');
+        return null;
+      }
+      final deviceDenial =
+          UatApi.diagnosticErrorCode(attempt.errorCode) ??
+          'RECOVERY_NOT_ELIGIBLE';
+      // Anchored path denied; do not fall through to unanchored reclaim when
+      // registration succeeded (claim is likely device-anchored).
+      if (deviceDenial != 'RECOVERY_NOT_ELIGIBLE' &&
+          deviceDenial != 'NOT_FOUND') {
+        _diagRecovery(
+          operation: 'writer_recovery_denied',
+          errorCode: deviceDenial,
+        );
+        return deviceDenial;
+      }
+    } else if (!_sameDeviceRegistered) {
+      _diagRecovery(
+        operation: 'device_registration_skipped',
+        errorCode: _deviceRegistrationDenial,
+      );
+    }
+
+    _diagRecovery(operation: 'unanchored_writer_reclaim');
+    final reclaim = await _deviceRecovery.reclaimUnanchored(
+      api: api,
+      seriesId: seriesId,
+    );
+    if (activeEpoch != _tournamentEpoch) return 'RECOVERY_NOT_ELIGIBLE';
+    if (reclaim.succeeded) {
+      _diagRecovery(operation: 'unanchored_writer_reclaim');
+      return null;
+    }
+    final denial =
+        UatApi.diagnosticErrorCode(reclaim.errorCode) ??
+        'RECOVERY_NOT_ELIGIBLE';
+    _diagRecovery(operation: 'writer_recovery_denied', errorCode: denial);
+    return denial;
+  }
+
+  void _diagRecovery({required String operation, String? errorCode}) {
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: errorCode == null ? LogLevel.info : LogLevel.warning,
+          code: errorCode == null
+              ? LogCode.sessionRestored
+              : LogCode.writerBindingRejected,
+          operation: operation,
+          errorCode: errorCode,
+        ),
+      ),
+    );
+  }
+
   Future<void> resume() async {
     // The Home action must never appear tappable but do nothing. A degraded
     // session may be refreshed safely before deciding whether resume is legal.
@@ -1148,7 +1528,23 @@ final class TournamentController extends ChangeNotifier {
         preserveRoute: true,
       );
     }
-    if (!tournamentReady || rankedWriterLocked) {
+    // Calendar ready ≠ claimed series. Claim/resume only the selected eligible
+    // day — never invent `_today()` when selection/identity is missing.
+    // Writer-locked resume still re-enters loadDay so same-device recovery can
+    // be retried after refresh (server fence remains authoritative).
+    final needsSeries =
+        day == null || seriesId == null || seriesId!.isEmpty;
+    if (!rankedAuthRequired && (needsSeries || rankedWriterLocked)) {
+      final selected = selectedWeeklyDay;
+      if (selected != null && (selected.canStart || selected.canResume)) {
+        await loadDay(presentHome: false, originalUtcDate: selected.date);
+      }
+    }
+    if (!tournamentReady ||
+        rankedWriterLocked ||
+        day == null ||
+        seriesId == null ||
+        seriesId!.isEmpty) {
       // Never bypass the server-owned writer fence or attempt an unsafe move.
       tournamentNoticeCode = rankedWriterLocked
           ? (tournamentNoticeCode ?? 'WRITER_NOT_AUTHORIZED')
@@ -1510,6 +1906,18 @@ final class TournamentController extends ChangeNotifier {
       }
       InteractionPerf.mark('tournament.session.renew.before_command');
       await refreshTournament(preserveRoute: true);
+      // After session rotation, re-bind the selected/active manifest writer.
+      // Never invent client `_today()` — only explicit selected or active date.
+      final reclaimDate =
+          selectedWeeklyDay != null &&
+              (selectedWeeklyDay!.canStart || selectedWeeklyDay!.canResume)
+          ? selectedWeeklyDay!.date
+          : activeManifestUtcDate;
+      if (reclaimDate != null &&
+          RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(reclaimDate) &&
+          !rankedAuthRequired) {
+        await loadDay(presentHome: false, originalUtcDate: reclaimDate);
+      }
       final ready =
           tournamentReady && !rankedWriterLocked && api.sessionSecret != null;
       if (!ready && route.place == TournamentPlace.playing) {
@@ -2172,6 +2580,7 @@ final class TournamentController extends ChangeNotifier {
 
     _openedFreshSession = false;
     _sameDeviceRegistered = false;
+    _deviceRegistrationDenial = null;
     _verifiedSessionPlayerId = null;
     _verifiedSessionId = null;
     _sessionExpiresAtMs = null;
@@ -2193,14 +2602,23 @@ final class TournamentController extends ChangeNotifier {
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-          final registered = await _deviceRecovery.register(
+          final attempt = await _deviceRecovery.registerDetailed(
             api: api,
             playerId: _verifiedSessionPlayerId!,
             sessionId: _verifiedSessionId!,
             origin: origin,
           );
           if (!stillOwns()) return false;
-          _sameDeviceRegistered = registered;
+          _sameDeviceRegistered = attempt.succeeded;
+          _deviceRegistrationDenial = attempt.succeeded
+              ? null
+              : UatApi.diagnosticErrorCode(attempt.errorCode);
+          _diagRecovery(
+            operation: attempt.succeeded
+                ? 'device_registration'
+                : 'device_registration_denied',
+            errorCode: _deviceRegistrationDenial,
+          );
         }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
@@ -2280,14 +2698,23 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
     if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-      final registered = await _deviceRecovery.register(
+      final attempt = await _deviceRecovery.registerDetailed(
         api: api,
         playerId: _verifiedSessionPlayerId!,
         sessionId: _verifiedSessionId!,
         origin: origin,
       );
       if (!stillOwns()) return false;
-      _sameDeviceRegistered = registered;
+      _sameDeviceRegistered = attempt.succeeded;
+      _deviceRegistrationDenial = attempt.succeeded
+          ? null
+          : UatApi.diagnosticErrorCode(attempt.errorCode);
+      _diagRecovery(
+        operation: attempt.succeeded
+            ? 'device_registration'
+            : 'device_registration_denied',
+        errorCode: _deviceRegistrationDenial,
+      );
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
     if (!stillOwns()) return false;
@@ -2417,6 +2844,9 @@ final class TournamentController extends ChangeNotifier {
     if (day == null) {
       day = snap.toDay();
       seriesId = snap.seriesId;
+      if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(snap.originalUtcDate)) {
+        activeManifestUtcDate = snap.originalUtcDate;
+      }
       if (snap.verifiedAll != null || snap.onTimeAwarded != null) {
         results = {
           if (snap.verifiedAll != null) 'all': snap.verifiedAll,
@@ -2436,10 +2866,18 @@ final class TournamentController extends ChangeNotifier {
     final tournamentEpoch = _tournamentEpoch;
     final accountEpoch = accountStateEpoch;
     final scope = identity.activeScope;
+    final manifestDate =
+        activeManifestUtcDate ??
+        _claim?['originalUtcDate']?.toString() ??
+        homeSnapshot?.originalUtcDate;
+    if (manifestDate == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(manifestDate)) {
+      return;
+    }
     final snap = TournamentHomeSnapshot.fromLive(
       scope: scope,
       day: current,
-      originalUtcDate: _today(),
+      originalUtcDate: manifestDate,
       capturedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
       results: results,
     );
