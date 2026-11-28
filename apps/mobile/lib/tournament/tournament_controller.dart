@@ -12,6 +12,8 @@ import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
+import 'package:puzzle_duel_mobile/badges/local/badge_sync_repository.dart';
+import 'package:puzzle_duel_mobile/badges/local/local_badge_ledger.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
@@ -196,6 +198,17 @@ final class TournamentController extends ChangeNotifier {
         practiceStore: practiceStore,
       );
 
+  late final LocalBadgeLedger localBadgeLedger = LocalBadgeLedger(
+    store: _kv,
+    identity: identity,
+  );
+
+  late final BadgeSyncRepository badgeSync = BadgeSyncRepository(
+    api: api,
+    sessionAuth: sessionAuth,
+    ledger: localBadgeLedger,
+  );
+
   TournamentRoute route = const TournamentRoute();
   TournamentDay? day;
   Map<String, Object?> board = const {};
@@ -363,6 +376,8 @@ final class TournamentController extends ChangeNotifier {
     // Fence before kick so in-flight work from the previous account cannot
     // mutate the newly published scope.
     personalRecords.fenceSync();
+    localBadgeLedger.fence();
+    badgeSync.fence();
     unawaited(
       DiagnosticRuntime.logger.log(
         LogEvent(
@@ -546,6 +561,8 @@ final class TournamentController extends ChangeNotifier {
   void _kickPersonalRecordsSync() {
     final generation = personalRecords.accountSyncGeneration;
     unawaited(personalRecords.refreshAndSync(expectedGeneration: generation));
+    badgeSync.allowResume();
+    unawaited(badgeSync.scheduleSyncIfNeeded(force: true));
   }
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
@@ -1250,7 +1267,9 @@ final class TournamentController extends ChangeNotifier {
   /// Account identity (bearer + Practice scope + epoch) is published before
   /// tournament session restore so Profile badge reads do not depend on
   /// gameplay session readiness.
-  Future<void> completeRankedAuthAndEnter() async {
+  Future<void> completeRankedAuthAndEnter({
+    bool authorizeGuestBadgeAdoption = false,
+  }) async {
     final shouldEnter = _pendingRankedEntryOnce;
     _pendingRankedEntryOnce = false;
     rankedAuthRequired = false;
@@ -1289,7 +1308,22 @@ final class TournamentController extends ChangeNotifier {
           );
           return;
         }
+        final guestLocalId = identity.guestLocalId;
         await _bindPlayerId(access.playerId);
+        // Guest→verified link only (explicit authorization). Login / account
+        // switch must not pull guest evidence into an unrelated player.
+        if (authorizeGuestBadgeAdoption) {
+          unawaited(
+            localBadgeLedger
+                .adoptGuestProgressIntoActivePlayer(
+                  BadgeGuestAdoptionAuthorization(
+                    sourceGuestLocalId: guestLocalId,
+                    targetPlayerId: access.playerId,
+                  ),
+                )
+                .then((_) => badgeSync.scheduleSyncIfNeeded(force: true)),
+          );
+        }
         unawaited(
           DiagnosticRuntime.logger.log(
             LogEvent(
