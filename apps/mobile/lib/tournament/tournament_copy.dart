@@ -511,6 +511,10 @@ final class TournamentCopy {
   String get provisional => pick('Provisional', 'Geçici');
   String get finalLabel => pick('Final', 'Kesinleşti');
   String get tryAgain => pick('Try again', 'Yeniden dene');
+  String get weeklyOverviewUnavailable => pick(
+    'Weekly tournament information could not be loaded.',
+    'Haftalık turnuva bilgileri yüklenemedi.',
+  );
   String get loading => pick('Loading the tournament…', 'Turnuva yükleniyor…');
   String get tournamentSyncing =>
       pick('Updating tournament info…', 'Turnuva bilgileri güncelleniyor…');
@@ -620,6 +624,8 @@ final class TournamentCopy {
         'This session cannot resume the challenge. Your progress is preserved.',
         'Bu oturum mücadeleye devam edemiyor. İlerlemen korunuyor.',
       ),
+      'WEEKLY_OVERVIEW_UNAVAILABLE' ||
+      'AUTH_UNAVAILABLE' => weeklyOverviewUnavailable,
       null || '' => genericFailure,
       _ => genericFailure,
     };

@@ -105,11 +105,8 @@ final class _TournamentSettingsScreenState
                                       api: controller.api,
                                     );
                                 if (!context.mounted) return;
-                                final message =
-                                    result.serverDelivered &&
-                                        result.serverReportId != null
-                                    ? '${result.userMessage} (${result.serverReportId})'
-                                    : result.userMessage;
+                                // userMessage already includes serverReportId once.
+                                final message = result.userMessage;
                                 if (result.serverDelivered &&
                                     result.serverReportId != null) {
                                   await Clipboard.setData(

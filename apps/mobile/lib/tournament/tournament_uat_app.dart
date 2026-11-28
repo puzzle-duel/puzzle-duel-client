@@ -881,6 +881,11 @@ final class _HomeScreen extends StatelessWidget {
     // under a guest / recovery scope, even if a stale field briefly remains.
     final hidePersonalTournament = needsAuth || needsRecovery;
     final overview = controller.weeklyOverview;
+    final overviewLoading = controller.weeklyOverviewLoading ||
+        (controller.booting && overview == null);
+    final overviewFailed = controller.weeklyOverviewFailed;
+    final overviewUnavailable = overview == null && overviewFailed;
+    final overviewPending = overview == null && overviewLoading;
     final selectedDate =
         controller.selectedTournamentDate ?? overview?.currentTournamentDate;
     final selected = selectedDate == null
@@ -907,12 +912,13 @@ final class _HomeScreen extends StatelessWidget {
     final stale =
         !hidePersonalTournament &&
         controller.homeSnapshotStale &&
-        !controller.tournamentReady;
+        !controller.tournamentReady &&
+        overview != null;
     final connectivityLost = controller.tournamentConnectivityLost;
     final verified = activeMatchesSelected
         ? tournamentInt(controller.results['all'])
         : null;
-    final score = hidePersonalTournament
+    final score = hidePersonalTournament || overviewUnavailable || overviewPending
         ? null
         : selected?.verifiedScore ??
               (activeMatchesSelected
@@ -920,14 +926,18 @@ final class _HomeScreen extends StatelessWidget {
                         ? verified ?? day?.seriesScore
                         : day?.seriesScore)
                   : null);
-    final scoreLabel = hidePersonalTournament
+    final scoreLabel = hidePersonalTournament ||
+            overviewUnavailable ||
+            overviewPending
         ? copy.scoreUnavailable
         : (selected?.status == WeeklyDayStatus.completed && score != null)
         ? copy.verifiedScore
         : score == null
         ? copy.scoreUnavailable
         : copy.currentScore;
-    final badge = hidePersonalTournament
+    final badge = hidePersonalTournament ||
+            overviewUnavailable ||
+            overviewPending
         ? null
         : selected?.completionTiming == CompletionTiming.onTime
         ? copy.onTime
@@ -940,48 +950,68 @@ final class _HomeScreen extends StatelessWidget {
               ? copy.onTime
               : copy.onTimeMissing)
         : null;
-    final primary = syncing
-        ? copy.tournamentSyncing
-        : needsRecovery
+    final primary = needsRecovery
         ? copy.restoreSession
         : needsAuth
         ? copy.guestTournamentHeadline
-        : selected?.status == WeeklyDayStatus.lockedFuture ||
-              selected?.status == WeeklyDayStatus.closed ||
-              selected?.status == WeeklyDayStatus.unavailable ||
-              selected?.status == WeeklyDayStatus.unknown
+        : overviewPending || (syncing && overview == null)
+        ? copy.tournamentSyncing
+        : overviewUnavailable
+        ? copy.tryAgain
+        : syncing
+        ? copy.tournamentSyncing
+        : selected == null
+        ? copy.tryAgain
+        : selected.status == WeeklyDayStatus.lockedFuture ||
+              selected.status == WeeklyDayStatus.closed ||
+              selected.status == WeeklyDayStatus.unavailable ||
+              selected.status == WeeklyDayStatus.unknown
         ? copy.notAvailableYet
-        : selected?.status == WeeklyDayStatus.completed ||
-              selected?.canViewResults == true
+        : selected.status == WeeklyDayStatus.completed ||
+              selected.canViewResults
         ? copy.viewResults
-        : selected?.status == WeeklyDayStatus.inProgress ||
-              selected?.canResume == true
+        : selected.status == WeeklyDayStatus.inProgress ||
+              selected.canResume
         ? copy.continueTournament
-        : selected?.status == WeeklyDayStatus.availablePast
+        : selected.status == WeeklyDayStatus.availablePast
         ? copy.startChallenge
         : copy.playToday;
-    final headline = stale
-        ? copy.cachedTournamentHeadline
-        : needsRecovery
+    final headline = needsRecovery
         ? copy.sessionRecoveryRequired
         : needsAuth
         ? copy.guestTournamentHeadline
-        : selected?.status == WeeklyDayStatus.completed &&
-              selected?.isToday == true
+        : overviewPending || (syncing && overview == null)
+        ? copy.loading
+        : overviewUnavailable
+        ? copy.weeklyOverviewUnavailable
+        : stale
+        ? copy.cachedTournamentHeadline
+        : selected == null
+        ? copy.weeklyOverviewUnavailable
+        : selected.status == WeeklyDayStatus.completed &&
+              selected.isToday
         ? copy.completedHeadline
-        : selected?.status == WeeklyDayStatus.completed
+        : selected.status == WeeklyDayStatus.completed
         ? copy.pastChallengeHeadline
-        : selected?.status == WeeklyDayStatus.inProgress
+        : selected.status == WeeklyDayStatus.inProgress
         ? copy.progressHeadline
-        : selected?.status == WeeklyDayStatus.availablePast
+        : selected.status == WeeklyDayStatus.availablePast
         ? copy.pastChallengeHeadline
         : copy.readyHeadline;
     final bodyOverride = needsAuth
         ? copy.guestTournamentBody
+        : overviewUnavailable
+        ? null
         : (!hidePersonalTournament &&
               selected?.status == WeeklyDayStatus.availablePast)
         ? copy.latePlayExplanation
         : null;
+    final hasRankedEligibility = selected != null &&
+        !needsAuth &&
+        !needsRecovery &&
+        !overviewUnavailable &&
+        !overviewPending &&
+        (selected.canStart || selected.canResume || selected.canViewResults);
     final selectedIneligible =
         selected != null &&
         !needsAuth &&
@@ -991,16 +1021,25 @@ final class _HomeScreen extends StatelessWidget {
         !selected.canResume &&
         !selected.canViewResults;
     VoidCallback? onPrimary;
-    if (syncing) {
-      onPrimary = null;
-    } else if (selected?.status == WeeklyDayStatus.lockedFuture ||
-        selected?.status == WeeklyDayStatus.closed ||
-        selected?.status == WeeklyDayStatus.unavailable ||
-        selected?.status == WeeklyDayStatus.unknown ||
-        selectedIneligible) {
-      onPrimary = null;
-    } else if (needsRecovery || needsAuth) {
+    if (needsRecovery || needsAuth) {
       onPrimary = () => unawaited(controller.requestRankedEntry());
+    } else if (overviewPending || (syncing && overview == null)) {
+      onPrimary = null;
+    } else if (overviewUnavailable || selected == null) {
+      onPrimary = () => unawaited(
+        controller.refreshTournament(
+          origin: TournamentRefreshOrigin.pullToRefresh,
+        ),
+      );
+    } else if (syncing) {
+      onPrimary = null;
+    } else if (selected.status == WeeklyDayStatus.lockedFuture ||
+        selected.status == WeeklyDayStatus.closed ||
+        selected.status == WeeklyDayStatus.unavailable ||
+        selected.status == WeeklyDayStatus.unknown ||
+        selectedIneligible ||
+        !hasRankedEligibility) {
+      onPrimary = null;
     } else {
       onPrimary = () => unawaited(controller.startSelectedManifest());
     }

@@ -230,6 +230,9 @@ final class TournamentController extends ChangeNotifier {
 
   bool weeklyOverviewLoading = false;
 
+  /// True after a calendar fetch failure until the next successful overview.
+  bool weeklyOverviewFailed = false;
+
   /// Test-only: awaited at the start of [_hydrateHomeSnapshot] before disk I/O.
   @visibleForTesting
   Future<void> Function()? debugBeforeHomeSnapshotLoad;
@@ -455,6 +458,7 @@ final class TournamentController extends ChangeNotifier {
     selectedTournamentDate = null;
     activeManifestUtcDate = null;
     weeklyOverviewLoading = false;
+    weeklyOverviewFailed = false;
     resultsError = null;
     errorCode = null;
     noticeCode = null;
@@ -682,6 +686,7 @@ final class TournamentController extends ChangeNotifier {
         }
         _fail(error.code, degradedOnFailure: true);
         weeklyOverviewLoading = false;
+        weeklyOverviewFailed = true;
         return;
       }
     }
@@ -703,15 +708,27 @@ final class TournamentController extends ChangeNotifier {
           ),
         ),
       );
+      weeklyOverviewFailed = true;
+      // Cold failure: never leave fabricated eligibility. Stale prior overview
+      // may remain until the next successful fetch (homeSnapshotStale path).
+      final transport = tournamentNoticeCode;
+      if (transport != 'TIMEOUT' &&
+          transport != 'OFFLINE' &&
+          transport != 'UNAUTHENTICATED') {
+        tournamentNoticeCode = 'WEEKLY_OVERVIEW_UNAVAILABLE';
+      }
+      notifyListeners();
       return;
     }
     final parsed = WeeklyTournamentOverview.tryParse(response.map);
     if (parsed == null) {
-      _fail('MALFORMED_REQUEST', degradedOnFailure: true);
+      _fail('WEEKLY_OVERVIEW_UNAVAILABLE', degradedOnFailure: true);
+      weeklyOverviewFailed = true;
       return;
     }
     final previousSelection = selectedTournamentDate;
     weeklyOverview = parsed;
+    weeklyOverviewFailed = false;
     serverNowMs = parsed.serverNowMs;
     if (previousSelection != null && parsed.dayFor(previousSelection) != null) {
       selectedTournamentDate = previousSelection;
@@ -726,7 +743,7 @@ final class TournamentController extends ChangeNotifier {
       activeManifestUtcDate = null;
     }
     tournamentSync = TournamentSyncState.ready;
-    // Keep session-auth failure banners; calendar success is independent.
+    // Keep session-auth / transport banners; clear calendar-load failure.
     const keepNotices = {
       'TIMEOUT',
       'UNAUTHENTICATED',
@@ -734,6 +751,7 @@ final class TournamentController extends ChangeNotifier {
       'OFFLINE',
     };
     if (tournamentNoticeCode == null ||
+        tournamentNoticeCode == 'WEEKLY_OVERVIEW_UNAVAILABLE' ||
         !keepNotices.contains(tournamentNoticeCode)) {
       tournamentNoticeCode = null;
     }
