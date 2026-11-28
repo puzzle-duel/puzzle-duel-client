@@ -624,6 +624,14 @@ final class TournamentCopy {
         'This session cannot resume the challenge. Your progress is preserved.',
         'Bu oturum mücadeleye devam edemiyor. İlerlemen korunuyor.',
       ),
+      'WRITER_STILL_ACTIVE' => pick(
+        'This challenge is still active on another session. Wait or finish there, then try again.',
+        'Bu mücadele başka bir oturumda hâlâ aktif. Orada bitir veya bekle, sonra yeniden dene.',
+      ),
+      'RECOVERY_PROOF_INVALID' => pick(
+        'Device recovery could not be verified. Your progress is preserved.',
+        'Cihaz kurtarma doğrulanamadı. İlerlemen korunuyor.',
+      ),
       'WEEKLY_OVERVIEW_UNAVAILABLE' ||
       'AUTH_UNAVAILABLE' => weeklyOverviewUnavailable,
       null || '' => genericFailure,

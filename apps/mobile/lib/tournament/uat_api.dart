@@ -185,6 +185,8 @@ class UatApi {
 
   Future<UatHttpResult> patch(String path) => _send('PATCH', path, null);
 
+  Future<UatHttpResult> delete(String path) => _send('DELETE', path, null);
+
   Future<UatHttpResult> post(String path, [Object? body]) =>
       _send('POST', path, body);
 
@@ -395,6 +397,7 @@ class UatApi {
       'HARD_CUTOFF_EXPIRED',
       'SERIES_STATE_INCONSISTENT',
       'WRITER_NOT_AUTHORIZED',
+      'NOT_FOUND',
       'UNAUTHENTICATED',
       'STATE_CONFLICT',
       'CLAIM_WINDOW_CLOSED',

@@ -906,37 +906,26 @@ final class TournamentController extends ChangeNotifier {
         claim.map['original'] == false &&
         (writerMatches == false || (writerMatches == null && openedFresh));
     if (needsRecovery) {
-      if (_sameDeviceRegistered &&
-          _verifiedSessionPlayerId != null &&
-          _verifiedSessionId != null) {
-        final attempt = await _deviceRecovery.recoverDetailed(
-          api: api,
-          playerId: _verifiedSessionPlayerId!,
-          newSessionId: _verifiedSessionId!,
-          origin: UatApi.apiOrigin(config.baseUrl),
-          seriesId: id,
-        );
+      recoveryDenial = await _attemptWriterRecovery(
+        seriesId: id,
+        activeEpoch: activeEpoch,
+      );
+      if (activeEpoch != _tournamentEpoch) return;
+      if (recoveryDenial == null) {
+        final verified = await api.get('/v1/tournament/series/$id/board');
         if (activeEpoch != _tournamentEpoch) return;
-        if (!attempt.succeeded) {
-          recoveryDenial =
-              UatApi.diagnosticErrorCode(attempt.errorCode) ??
-              'RECOVERY_NOT_ELIGIBLE';
-        } else {
-          // Proof acceptance must be followed by fresh server-owned writer
-          // metadata, not an assumption about entitlement.
-          final verified = await api.get('/v1/tournament/series/$id/board');
-          if (activeEpoch != _tournamentEpoch) return;
-          if (!_accepted(verified, const {200}, degradedOnFailure: true)) {
-            return;
-          }
-          if (verified.map['writerSessionMatches'] == false) {
-            recoveryDenial = 'WRITER_NOT_AUTHORIZED';
-          } else {
-            _applyBoard(verified.map, reveal: false);
-          }
+        if (!_accepted(verified, const {200}, degradedOnFailure: true)) {
+          return;
         }
-      } else {
-        recoveryDenial = 'RECOVERY_NOT_ELIGIBLE';
+        if (verified.map['writerSessionMatches'] == false) {
+          recoveryDenial = 'WRITER_NOT_AUTHORIZED';
+          _diagRecovery(
+            operation: 'writer_recovery_denied',
+            errorCode: recoveryDenial,
+          );
+        } else {
+          _applyBoard(verified.map, reveal: false);
+        }
       }
     }
     if (!needsRecovery || recoveryDenial != null) {
@@ -1277,8 +1266,8 @@ final class TournamentController extends ChangeNotifier {
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
-        // Invalidate previous tournament session before publishing account.
-        await invalidateTournamentGameplaySession(reason: 'account_transition');
+        // Revoke previous tournament writer session before publishing account.
+        await revokeTournamentGameplaySession(reason: 'account_transition');
         // Never flash previous account personal data under the new identity.
         invalidateAccountScopedPresentation(reason: 'account_transition');
         api.bearer = UatApi.normalizeBearer(access.accessToken);
@@ -1347,6 +1336,22 @@ final class TournamentController extends ChangeNotifier {
     }
   }
 
+  /// Best-effort server revoke while verified bearer + secret are still set.
+  /// Call before guest logout credential replacement.
+  Future<void> revokeTournamentGameplaySession({
+    required String reason,
+  }) async {
+    final secret = api.sessionSecret;
+    if (secret != null && secret.isNotEmpty) {
+      try {
+        await api.delete('/v1/tournament/session');
+      } catch (_) {
+        // Local clear still proceeds; reclaim handles expired writers.
+      }
+    }
+    await invalidateTournamentGameplaySession(reason: reason);
+  }
+
   /// Clears gameplay session secret/renewal without signing the account out.
   Future<void> invalidateTournamentGameplaySession({
     required String reason,
@@ -1368,6 +1373,80 @@ final class TournamentController extends ChangeNotifier {
           errorCode: reason == 'account_transition'
               ? 'ACCOUNT_TRANSITION'
               : 'SESSION_INVALIDATED',
+        ),
+      ),
+    );
+  }
+
+  /// Device-crypto recovery first (when registered); else verified unanchored
+  /// reclaim. Never fabricates device proof or unlocks without server OK.
+  Future<String?> _attemptWriterRecovery({
+    required String seriesId,
+    required int activeEpoch,
+  }) async {
+    if (_sameDeviceRegistered &&
+        _verifiedSessionPlayerId != null &&
+        _verifiedSessionId != null) {
+      _diagRecovery(operation: 'device_recovery_challenge');
+      final attempt = await _deviceRecovery.recoverDetailed(
+        api: api,
+        playerId: _verifiedSessionPlayerId!,
+        newSessionId: _verifiedSessionId!,
+        origin: UatApi.apiOrigin(config.baseUrl),
+        seriesId: seriesId,
+      );
+      if (activeEpoch != _tournamentEpoch) return 'RECOVERY_NOT_ELIGIBLE';
+      if (attempt.succeeded) {
+        _diagRecovery(operation: 'device_writer_recovery');
+        return null;
+      }
+      final deviceDenial =
+          UatApi.diagnosticErrorCode(attempt.errorCode) ??
+          'RECOVERY_NOT_ELIGIBLE';
+      // Anchored path denied; do not fall through to unanchored reclaim when
+      // registration succeeded (claim is likely device-anchored).
+      if (deviceDenial != 'RECOVERY_NOT_ELIGIBLE' &&
+          deviceDenial != 'NOT_FOUND') {
+        _diagRecovery(
+          operation: 'writer_recovery_denied',
+          errorCode: deviceDenial,
+        );
+        return deviceDenial;
+      }
+    } else if (!_sameDeviceRegistered) {
+      _diagRecovery(
+        operation: 'device_registration_skipped',
+        errorCode: 'NOT_FOUND',
+      );
+    }
+
+    _diagRecovery(operation: 'unanchored_writer_reclaim');
+    final reclaim = await _deviceRecovery.reclaimUnanchored(
+      api: api,
+      seriesId: seriesId,
+    );
+    if (activeEpoch != _tournamentEpoch) return 'RECOVERY_NOT_ELIGIBLE';
+    if (reclaim.succeeded) {
+      _diagRecovery(operation: 'unanchored_writer_reclaim');
+      return null;
+    }
+    final denial =
+        UatApi.diagnosticErrorCode(reclaim.errorCode) ??
+        'RECOVERY_NOT_ELIGIBLE';
+    _diagRecovery(operation: 'writer_recovery_denied', errorCode: denial);
+    return denial;
+  }
+
+  void _diagRecovery({required String operation, String? errorCode}) {
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: errorCode == null ? LogLevel.info : LogLevel.warning,
+          code: errorCode == null
+              ? LogCode.sessionRestored
+              : LogCode.writerBindingRejected,
+          operation: operation,
+          errorCode: errorCode,
         ),
       ),
     );
@@ -2465,6 +2544,12 @@ final class TournamentController extends ChangeNotifier {
           );
           if (!stillOwns()) return false;
           _sameDeviceRegistered = registered;
+          _diagRecovery(
+            operation: registered
+                ? 'device_registration'
+                : 'device_registration_denied',
+            errorCode: registered ? null : 'NOT_FOUND',
+          );
         }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
@@ -2552,6 +2637,12 @@ final class TournamentController extends ChangeNotifier {
       );
       if (!stillOwns()) return false;
       _sameDeviceRegistered = registered;
+      _diagRecovery(
+        operation: registered
+            ? 'device_registration'
+            : 'device_registration_denied',
+        errorCode: registered ? null : 'NOT_FOUND',
+      );
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
     if (!stillOwns()) return false;

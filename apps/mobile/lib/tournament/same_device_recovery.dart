@@ -57,6 +57,24 @@ final class SameDeviceRecovery {
     }
   }
 
+  /// Verified-account reclaim for legacy unanchored writers only.
+  /// Server decides eligibility; never fabricates device proof.
+  Future<RecoveryAttempt> reclaimUnanchored({
+    required UatApi api,
+    required String seriesId,
+  }) async {
+    if (seriesId.isEmpty) {
+      return const RecoveryAttempt(false, 'RECOVERY_NOT_ELIGIBLE');
+    }
+    final response = await api.post(
+      '/v1/tournament/series/$seriesId/reclaim-writer',
+    );
+    return RecoveryAttempt(
+      response.status == 200 && response.map['writerGeneration'] is int,
+      response.status == 200 ? null : response.error,
+    );
+  }
+
   /// A successful recovery changes ONLY the server-owned writer binding.
   /// Callers must reload the authoritative board before sending commands.
   /// Compatibility API for existing callers and tests.

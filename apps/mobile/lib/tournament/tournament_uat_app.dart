@@ -435,6 +435,8 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     }
     controller.setAuthUiBusy(true);
     try {
+      // Revoke server writer session while verified bearer+secret still apply.
+      await controller.revokeTournamentGameplaySession(reason: 'logout');
       final result = await coordinator.logoutAndStartGuest();
       if (!mounted) return;
       if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
