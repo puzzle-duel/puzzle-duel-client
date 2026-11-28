@@ -1,4 +1,8 @@
 # AGENTS.md — Puzzle Duel Client (binding for coding agents)
+
+## MANDATORY FIRST STEP — project action ledger (owner 2026-11-28)
+Before ANY Puzzle Duel action (including read-only review, user-facing build commands, troubleshooting, Jira or GitHub operations), read `docs/DEVELOPMENT-HISTORY.md`, `docs/staging/SERVER-CONFIG.md` and relevant accepted decisions from the actual target ref. After each meaningful action append its outcome, evidence, decisions, tests and next step to the ledger. This is mandatory for all agents, including ChatGPT and Cursor. Verify existing approved UX and regressions before changing anything; do not resurrect removed behaviors. Staging transport is **https://84-13-66-211.sslip.io** (Oracle **84.13.66.211**); **https://staging.puzzle-duel.app is the JWT issuer, not the API transport**. Never give build instructions without the runbook's trusted TLS health preflight and complete OAuth/Firebase flags. No direct Oracle SSH, unapproved merge/deploy, destructive reset or data wipe.
+
 ## Authority and scope
 Read `BLUEPRINT.md`, relevant `docs/features/` and `docs/adr/` before modifying code. This repo is ONLY the iOS/Android client; the backend belongs to `puzzle-duel-backend`.
 Priority: explicit owner instructions > accepted product blueprint/ADRs > feature spec > code conventions. If contradictory, STOP and ask; **never silently choose**.
