@@ -8,6 +8,8 @@ import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/diagnostics/screen_breadcrumb_observer.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx_scope.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_top_banner.dart';
 import 'package:puzzle_duel_mobile/presentation/game/board/accessible_board.dart';
 import 'package:puzzle_duel_mobile/presentation/game/offer_tray.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
@@ -44,7 +46,9 @@ Future<void> runTournamentUatApp(
   GuestSessionRecovery? sessionRecovery,
   CrashReporter? crashReporter,
 }) async {
-  final directory = await AppStateDirectory.resolveForGuestSlot(stagingGuestSlot);
+  final directory = await AppStateDirectory.resolveForGuestSlot(
+    stagingGuestSlot,
+  );
   runApp(
     TournamentUatApp(
       config: config,
@@ -142,9 +146,11 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
             ),
       );
       controller.onRequestRankedAuth = () {
-        unawaited(controller.sessionRecoveryRequired
-            ? _presentSessionRecovery(controller)
-            : _presentRankedAuth(controller));
+        unawaited(
+          controller.sessionRecoveryRequired
+              ? _presentSessionRecovery(controller)
+              : _presentRankedAuth(controller),
+        );
       };
       controller.onRequestSignOut = () {
         unawaited(_presentSignOut(controller));
@@ -164,13 +170,17 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       );
       final bootRecovery = controller.activeSessionRecovery;
       if (bootRecovery != null) {
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.sessionRestoreFailed,
-          operation: 'guest_recovery_shell_ready',
-          requestId: bootRecovery.lastRequestId,
-          errorCode: bootRecovery.code,
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.sessionRestoreFailed,
+              operation: 'guest_recovery_shell_ready',
+              requestId: bootRecovery.lastRequestId,
+              errorCode: bootRecovery.code,
+            ),
+          ),
+        );
       }
       // Audio warm-up must not delay first tap.
       unawaited(_sfx.prepare());
@@ -188,57 +198,74 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         !mounted ||
         navContext == null ||
         controller.authUiBusy) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.warning,
-        code: LogCode.authRefreshFailed,
-        operation: 'ranked_auth_sheet_present_failed',
-        errorCode: controller.authUiBusy
-            ? 'AUTH_IN_FLIGHT'
-            : 'AUTH_SHEET_CONTEXT_MISSING',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.authRefreshFailed,
+            operation: 'ranked_auth_sheet_present_failed',
+            errorCode: controller.authUiBusy
+                ? 'AUTH_IN_FLIGHT'
+                : 'AUTH_SHEET_CONTEXT_MISSING',
+          ),
+        ),
+      );
       return;
     }
     controller.setAuthUiBusy(true);
     try {
-      final pendingRecovery =
-          await coordinator.consumePendingLinkRecoveryIfNeeded();
+      final pendingRecovery = await coordinator
+          .consumePendingLinkRecoveryIfNeeded();
       if (!mounted) return;
       if (pendingRecovery != null &&
           pendingRecovery.outcome == AuthFlowOutcome.loggedIn &&
           pendingRecovery.access != null) {
-        controller.api.bearer =
-            UatApi.normalizeBearer(pendingRecovery.access!.accessToken);
+        controller.api.bearer = UatApi.normalizeBearer(
+          pendingRecovery.access!.accessToken,
+        );
         await controller.completeRankedAuthAndEnter();
         _showAuthFeedback(controller, success: true);
         return;
       }
       final presentContext = _navKey.currentContext;
       if (!mounted || presentContext == null || !presentContext.mounted) {
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.authRefreshFailed,
-          operation: 'ranked_auth_sheet_present_failed',
-          errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.authRefreshFailed,
+              operation: 'ranked_auth_sheet_present_failed',
+              errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+            ),
+          ),
+        );
         return;
       }
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info,
-        code: LogCode.screenOpened,
-        operation: 'ranked_auth_sheet_present',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'ranked_auth_sheet_present',
+          ),
+        ),
+      );
       final localProgressProtected =
           await PracticeStore.hasMeaningfulLocalProgress(
-        controller.practiceStore(),
-      );
+            controller.practiceStore(),
+          );
       final sheetContext = _navKey.currentContext;
       if (!mounted || sheetContext == null || !sheetContext.mounted) {
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.authRefreshFailed,
-          operation: 'ranked_auth_sheet_present_failed',
-          errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
-        )));
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.authRefreshFailed,
+              operation: 'ranked_auth_sheet_present_failed',
+              errorCode: 'AUTH_SHEET_CONTEXT_MISSING',
+            ),
+          ),
+        );
         return;
       }
       final result = await showRankedAuthSheet(
@@ -247,25 +274,32 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         localProgressProtected: localProgressProtected,
         recoverySeed:
             pendingRecovery?.outcome == AuthFlowOutcome.recoveryRequired
-                ? pendingRecovery
-                : null,
+            ? pendingRecovery
+            : null,
       );
       if (!mounted) return;
       if (result == null) return;
       if (result.outcome == AuthFlowOutcome.linked ||
           result.outcome == AuthFlowOutcome.loggedIn) {
-        await controller.completeRankedAuthAndEnter();
+        await controller.completeRankedAuthAndEnter(
+          authorizeGuestBadgeAdoption:
+              result.outcome == AuthFlowOutcome.linked,
+        );
         _showAuthFeedback(controller, success: true);
       } else if (result.outcome == AuthFlowOutcome.failed) {
         _showAuthFeedback(controller, success: false);
       }
     } catch (_) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.warning,
-        code: LogCode.authRefreshFailed,
-        operation: 'ranked_auth_sheet_present_failed',
-        errorCode: 'AUTH_SHEET_PRESENT_FAILED',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.authRefreshFailed,
+            operation: 'ranked_auth_sheet_present_failed',
+            errorCode: 'AUTH_SHEET_PRESENT_FAILED',
+          ),
+        ),
+      );
       _showAuthFeedback(controller, success: false);
     } finally {
       if (mounted) controller.setAuthUiBusy(false);
@@ -283,13 +317,12 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     final message = logout
         ? (success ? copy.logoutSucceeded : copy.logoutFailed)
         : (success ? copy.loginSucceeded : copy.loginFailed);
-    ScaffoldMessenger.of(navContext).showSnackBar(
-      SnackBar(
-        key: Key(success
-            ? (logout ? 'auth-logout-success' : 'auth-login-success')
-            : (logout ? 'auth-logout-failure' : 'auth-login-failure')),
-        content: Text(message),
-      ),
+    controller.presentAppFeedback(
+      kind: success ? AppFeedbackKind.info : AppFeedbackKind.warning,
+      message: message,
+      semanticsKey: success
+          ? (logout ? 'auth-logout-success' : 'auth-login-success')
+          : (logout ? 'auth-logout-failure' : 'auth-login-failure'),
     );
   }
 
@@ -299,13 +332,17 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     // Always use the mutable controller snapshot — never stale widget seed.
     final recovery = controller.activeSessionRecovery;
     if (recovery == null || !controller.sessionRecoveryRequired) return;
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'guest_session_recovery_sheet',
-      requestId: recovery.lastRequestId,
-      errorCode: recovery.code,
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'guest_session_recovery_sheet',
+          requestId: recovery.lastRequestId,
+          errorCode: recovery.code,
+        ),
+      ),
+    );
     await showModalBottomSheet<void>(
       context: navContext,
       isScrollControlled: true,
@@ -354,11 +391,15 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
         controller.authUiBusy) {
       return;
     }
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'profile_logout_tapped',
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'profile_logout_tapped',
+        ),
+      ),
+    );
     final copy = TournamentCopy.of(navContext);
     final confirmed = await showDialog<bool>(
       context: navContext,
@@ -382,42 +423,54 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     );
     if (!mounted) return;
     if (confirmed != true) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info,
-        code: LogCode.screenOpened,
-        operation: 'auth_logout_cancelled',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'auth_logout_cancelled',
+          ),
+        ),
+      );
       return;
     }
     controller.setAuthUiBusy(true);
     try {
       final result = await coordinator.logoutAndStartGuest();
       if (!mounted) return;
-      if (result.outcome != AuthFlowOutcome.loggedIn ||
-          result.access == null) {
-        unawaited(DiagnosticRuntime.logger.log(LogEvent(
-          level: LogLevel.warning,
-          code: LogCode.authRefreshFailed,
-          operation: 'auth_logout_failed',
-          errorCode: result.errorCode ?? 'AUTH_UNAVAILABLE',
-        )));
+      if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
+        unawaited(
+          DiagnosticRuntime.logger.log(
+            LogEvent(
+              level: LogLevel.warning,
+              code: LogCode.authRefreshFailed,
+              operation: 'auth_logout_failed',
+              errorCode: result.errorCode ?? 'AUTH_UNAVAILABLE',
+            ),
+          ),
+        );
         _showAuthFeedback(controller, success: false, logout: true);
         return;
       }
-      controller.api.bearer =
-          UatApi.normalizeBearer(result.access!.accessToken);
+      controller.api.bearer = UatApi.normalizeBearer(
+        result.access!.accessToken,
+      );
       await controller.clearAuthenticatedPracticeScope();
       controller.applyGuestSessionAfterLogout(
         rankedAuthRequired: result.access!.isGuest,
       );
       _showAuthFeedback(controller, success: true, logout: true);
     } catch (_) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.warning,
-        code: LogCode.authRefreshFailed,
-        operation: 'auth_logout_failed',
-        errorCode: 'AUTH_UNAVAILABLE',
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.authRefreshFailed,
+            operation: 'auth_logout_failed',
+            errorCode: 'AUTH_UNAVAILABLE',
+          ),
+        ),
+      );
       _showAuthFeedback(controller, success: false, logout: true);
     } finally {
       if (mounted) controller.setAuthUiBusy(false);
@@ -459,15 +512,53 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
           final copyLocale = requested.languageCode == 'tr'
               ? const Locale('tr')
               : const Locale('en');
-          final wrapped = TournamentLocale(
+          Widget tree = TournamentLocale(
             locale: copyLocale,
             child: child ?? const SizedBox.shrink(),
           );
           final scaler = widget.textScaler;
-          if (scaler == null) return wrapped;
-          return MediaQuery(
-            data: MediaQuery.of(context).copyWith(textScaler: scaler),
-            child: wrapped,
+          if (scaler != null) {
+            tree = MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: scaler),
+              child: tree,
+            );
+          }
+          final live = controller;
+          if (live == null) return tree;
+          // App-wide Top Banner above Navigator so Profile/Settings logout
+          // feedback is visible (Single Notification Presenter).
+          return ListenableBuilder(
+            listenable: live,
+            builder: (context, _) {
+              final copy = TournamentCopy.of(context);
+              final syncing =
+                  live.tournamentSync == TournamentSyncState.syncing;
+              final topInset = MediaQuery.paddingOf(context).top;
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  tree,
+                  // Sit below typical app/header action row so Profile/Settings
+                  // remain tappable while the banner stays swipe-dismissible.
+                  Positioned(
+                    top: topInset + 56,
+                    left: 16,
+                    right: 16,
+                    child: AppTopBannerHost(
+                      key: const Key('tournament-status-host'),
+                      controller: live,
+                      copy: copy,
+                      // Play writer/auth rejections use noticeCode; Home refresh
+                      // failures use tournamentNoticeCode.
+                      notice:
+                          live.tournamentNoticeCode ?? live.noticeCode,
+                      syncing: syncing,
+                      infoBanners: live.tournamentInfoBannersEnabled,
+                    ),
+                  ),
+                ],
+              );
+            },
           );
         },
         home: controller == null
@@ -508,10 +599,7 @@ final class SilentGameSfx extends GameSfx {
 }
 
 final class _TournamentShell extends StatelessWidget {
-  const _TournamentShell({
-    required this.controller,
-    this.crashReporter,
-  });
+  const _TournamentShell({required this.controller, this.crashReporter});
 
   final TournamentController controller;
   final CrashReporter? crashReporter;
@@ -549,26 +637,20 @@ final class _TournamentShell extends StatelessWidget {
       // pop reveals a stable Home backdrop instead of a second leaderboard.
       TournamentPlace.daily || TournamentPlace.weekly =>
         controller.route.leaderboardReturn == TournamentPlace.home
-            ? _HomeScreen(
-                controller: controller,
-                crashReporter: crashReporter,
-              )
+            ? _HomeScreen(controller: controller, crashReporter: crashReporter)
             : TournamentLeaderboardView(controller: controller),
       TournamentPlace.overview => _OverviewScreen(controller: controller),
       TournamentPlace.recovery => _RecoveryScreen(controller: controller),
       TournamentPlace.home => _HomeScreen(
-          controller: controller,
-          crashReporter: crashReporter,
-        ),
+        controller: controller,
+        crashReporter: crashReporter,
+      ),
     };
   }
 }
 
 final class _PlayFeedback extends StatelessWidget {
-  const _PlayFeedback({
-    required this.controller,
-    required this.copy,
-  });
+  const _PlayFeedback({required this.controller, required this.copy});
 
   final TournamentController controller;
   final TournamentCopy copy;
@@ -587,7 +669,8 @@ final class _PlayFeedback extends StatelessWidget {
       builder: (context, _) {
         final view = controller.session.view;
         final scriptDelta = view.activeScript?.applied.scoreDelta;
-        final delta = (view.isResolving && scriptDelta != null && scriptDelta > 0)
+        final delta =
+            (view.isResolving && scriptDelta != null && scriptDelta > 0)
             ? scriptDelta
             : controller.scoreDelta;
         // Ranked notices (including WRITER_NOT_AUTHORIZED) use the floating banner.
@@ -723,10 +806,7 @@ final class _Loading extends StatelessWidget {
 }
 
 final class _HomeScreen extends StatelessWidget {
-  const _HomeScreen({
-    required this.controller,
-    this.crashReporter,
-  });
+  const _HomeScreen({required this.controller, this.crashReporter});
 
   final TournamentController controller;
   final CrashReporter? crashReporter;
@@ -734,51 +814,66 @@ final class _HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
-    final day = controller.day;
+    final needsAuth = controller.rankedAuthRequired;
+    final needsRecovery = controller.sessionRecoveryRequired;
+    // Defense in depth: never paint authenticated personal tournament data
+    // under a guest / recovery scope, even if a stale field briefly remains.
+    final hidePersonalTournament = needsAuth || needsRecovery;
+    final day = hidePersonalTournament ? null : controller.day;
     final phase = day?.phase ?? DayPhase.ready;
-    final syncing =
-        controller.tournamentSync == TournamentSyncState.syncing;
-    final stale = controller.homeSnapshotStale && !controller.tournamentReady;
-    final notice = controller.tournamentNoticeCode;
+    final syncing = controller.tournamentSync == TournamentSyncState.syncing;
+    final stale =
+        !hidePersonalTournament &&
+        controller.homeSnapshotStale &&
+        !controller.tournamentReady;
     final connectivityLost = controller.tournamentConnectivityLost;
-    final verified = tournamentInt(controller.results['all']);
-    final score = phase == DayPhase.completed
+    final verified = hidePersonalTournament
+        ? null
+        : tournamentInt(controller.results['all']);
+    final score = hidePersonalTournament
+        ? null
+        : phase == DayPhase.completed
         ? verified ?? day?.seriesScore
         : day?.seriesScore;
-    final scoreLabel = phase == DayPhase.completed && verified != null
+    final scoreLabel = hidePersonalTournament
+        ? copy.scoreUnavailable
+        : phase == DayPhase.completed && verified != null
         ? copy.verifiedScore
         : score == null
         ? copy.scoreUnavailable
         : copy.currentScore;
-    final badge = phase == DayPhase.completed && controller.results.isNotEmpty
+    final badge = hidePersonalTournament
+        ? null
+        : phase == DayPhase.completed && controller.results.isNotEmpty
         ? (controller.results['onTimeAwarded'] == true
               ? copy.onTime
               : copy.onTimeMissing)
         : null;
-    final needsAuth = controller.rankedAuthRequired;
-    final needsRecovery = controller.sessionRecoveryRequired;
     final primary = syncing
         ? copy.tournamentSyncing
         : needsRecovery
-            ? copy.restoreSession
-            : needsAuth
-                ? copy.signInToPlay
-                : switch (phase) {
-                    DayPhase.completed => copy.viewResults,
-                    DayPhase.betweenGames || DayPhase.inProgress =>
-                      copy.continueTournament,
-                    _ => copy.playToday,
-                  };
+        ? copy.restoreSession
+        : needsAuth
+        ? copy.signInToPlay
+        : switch (phase) {
+            DayPhase.completed => copy.viewResults,
+            DayPhase.betweenGames ||
+            DayPhase.inProgress => copy.continueTournament,
+            _ => copy.playToday,
+          };
     final headline = stale
         ? copy.cachedTournamentHeadline
         : needsRecovery
-            ? copy.sessionRecoveryRequired
-            : switch (phase) {
-                DayPhase.completed => copy.completedHeadline,
-                DayPhase.inProgress || DayPhase.betweenGames =>
-                  copy.progressHeadline,
-                _ => copy.readyHeadline,
-              };
+        ? copy.sessionRecoveryRequired
+        : needsAuth
+        ? copy.guestTournamentHeadline
+        : switch (phase) {
+            DayPhase.completed => copy.completedHeadline,
+            DayPhase.inProgress ||
+            DayPhase.betweenGames => copy.progressHeadline,
+            _ => copy.readyHeadline,
+          };
+    final bodyOverride = needsAuth ? copy.guestTournamentBody : null;
     VoidCallback? onPrimary;
     if (syncing) {
       onPrimary = null;
@@ -833,7 +928,9 @@ final class _HomeScreen extends StatelessWidget {
                                 copy.tagline,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: GameTokens.accent),
+                                style: const TextStyle(
+                                  color: GameTokens.accent,
+                                ),
                               ),
                             ],
                           ),
@@ -866,6 +963,7 @@ final class _HomeScreen extends StatelessWidget {
                       phase: phase,
                       badge: badge,
                       headline: headline,
+                      bodyOverride: bodyOverride,
                       action: primary,
                       onAction: onPrimary,
                       connectivityLost: connectivityLost,
@@ -875,310 +973,7 @@ final class _HomeScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              // Floating status: does not participate in ListView layout.
-              Positioned(
-                top: 0,
-                left: 16,
-                right: 16,
-                child: IgnorePointer(
-                  ignoring: true,
-                  child: _TournamentStatusHost(
-                    key: const Key('tournament-status-host'),
-                    controller: controller,
-                    copy: copy,
-                    notice: notice,
-                    syncing: syncing,
-                    infoBanners: controller.tournamentInfoBannersEnabled,
-                  ),
-                ),
-              ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _NotifyKind { info, error, success }
-
-final class _TournamentStatusHost extends StatefulWidget {
-  const _TournamentStatusHost({
-    super.key,
-    required this.controller,
-    required this.copy,
-    required this.notice,
-    required this.syncing,
-    required this.infoBanners,
-  });
-
-  final TournamentController controller;
-  final TournamentCopy copy;
-  final String? notice;
-  final bool syncing;
-
-  /// When false (startup/background), suppress blue info toasts.
-  final bool infoBanners;
-
-  @override
-  State<_TournamentStatusHost> createState() => _TournamentStatusHostState();
-}
-
-final class _TournamentStatusHostState extends State<_TournamentStatusHost>
-    with SingleTickerProviderStateMixin {
-  static const _slideIn = Duration(milliseconds: 240);
-  static const _infoHold = Duration(milliseconds: 2500);
-  static const _errorHold = Duration(milliseconds: 4000);
-  static const _slideOut = Duration(milliseconds: 280);
-
-  late final AnimationController _motion = AnimationController(
-    vsync: this,
-    duration: _slideIn,
-  );
-  late final Animation<Offset> _slide = Tween<Offset>(
-    begin: const Offset(0, -1.15),
-    end: Offset.zero,
-  ).animate(CurvedAnimation(parent: _motion, curve: Curves.easeOutCubic));
-  late final Animation<double> _fade = CurvedAnimation(
-    parent: _motion,
-    curve: Curves.easeOut,
-  );
-  Timer? _dismiss;
-  int _motionEpoch = 0;
-  _NotifyKind? _kind;
-  String? _text;
-  String? _activeSignature;
-  String? _dismissedSignature;
-  var _wasSyncing = false;
-  var _didDepend = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _wasSyncing = widget.syncing;
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_didDepend) return;
-    _didDepend = true;
-    _apply(fromSyncEdge: false);
-  }
-
-  @override
-  void didUpdateWidget(covariant _TournamentStatusHost oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final finishedSync =
-        (_wasSyncing && !widget.syncing && widget.notice == null) ||
-        (oldWidget.notice != null &&
-            widget.notice == null &&
-            !widget.syncing &&
-            widget.controller.tournamentReady);
-    _wasSyncing = widget.syncing;
-    _apply(fromSyncEdge: finishedSync);
-  }
-
-  @override
-  void dispose() {
-    _dismiss?.cancel();
-    _motion.dispose();
-    super.dispose();
-  }
-
-  bool get _reduceMotion {
-    final media = MediaQuery.maybeOf(context);
-    return media?.disableAnimations == true ||
-        WidgetsBinding
-            .instance
-            .platformDispatcher
-            .accessibilityFeatures
-            .reduceMotion;
-  }
-
-  Color get _accent => switch (_kind) {
-    _NotifyKind.info => GameTokens.notifyInfo,
-    _NotifyKind.error => GameTokens.notifyError,
-    _NotifyKind.success => GameTokens.notifySuccess,
-    null => GameTokens.notifyInfo,
-  };
-
-  void _clearBanner({required String? dismissedFor}) {
-    setState(() {
-      _kind = null;
-      _text = null;
-      _activeSignature = null;
-      _dismissedSignature = dismissedFor;
-    });
-  }
-
-  void _scheduleDismiss({
-    required _NotifyKind kind,
-    required String signature,
-    required bool reduceMotion,
-  }) {
-    final hold = kind == _NotifyKind.error ? _errorHold : _infoHold;
-    final epoch = ++_motionEpoch;
-    _dismiss?.cancel();
-    _dismiss = Timer(hold, () {
-      if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
-        return;
-      }
-      if (reduceMotion) {
-        _motion.value = 0;
-        _clearBanner(dismissedFor: signature);
-        return;
-      }
-      _motion.duration = _slideOut;
-      _motion.reverse().whenComplete(() {
-        if (!mounted || epoch != _motionEpoch || _activeSignature != signature) {
-          return;
-        }
-        _clearBanner(dismissedFor: signature);
-      });
-    });
-  }
-
-  void _apply({required bool fromSyncEdge}) {
-    final reduceMotion = _reduceMotion;
-    final notice = widget.notice;
-    final infoOk = widget.infoBanners;
-    _NotifyKind? nextKind;
-    String? nextText;
-
-    // A new refresh episode may re-announce the same offline copy.
-    if (widget.syncing || fromSyncEdge) {
-      _dismissedSignature = null;
-    }
-
-    // UX-11: never show blue "updating…" toast — native pull spinner covers load.
-    if (notice == 'OFFLINE') {
-      nextKind = _NotifyKind.error;
-      nextText = widget.copy.connectionUnavailable;
-    } else if (notice == 'TIMEOUT') {
-      nextKind = _NotifyKind.error;
-      nextText = widget.copy.timedOut;
-    } else if (notice == 'UNAUTHENTICATED' ||
-        notice == 'WRITER_NOT_AUTHORIZED') {
-      // Auth/writer: red notice, never treat as wifi outage.
-      nextKind = _NotifyKind.error;
-      nextText = widget.copy.forTournamentRefreshError(notice);
-    } else if (notice != null) {
-      nextKind = _NotifyKind.error;
-      nextText = widget.copy.forTournamentRefreshError(notice);
-    } else if (infoOk &&
-        fromSyncEdge &&
-        widget.controller.tournamentReady) {
-      // Pull-to-refresh completion stays info (blue), not success green.
-      nextKind = _NotifyKind.info;
-      nextText = widget.copy.tournamentRefreshSuccess;
-    } else if (widget.syncing) {
-      // In-flight refresh: no floating info toast (startup, background, or pull).
-      nextKind = null;
-      nextText = null;
-    }
-
-    if (nextKind == null || nextText == null) {
-      _dismiss?.cancel();
-      _dismiss = null;
-      if (_text != null) {
-        final epoch = ++_motionEpoch;
-        final leaving = _activeSignature;
-        if (reduceMotion) {
-          _motion.value = 0;
-          _clearBanner(dismissedFor: leaving);
-        } else {
-          _motion.duration = _slideOut;
-          _motion.reverse().whenComplete(() {
-            if (!mounted || epoch != _motionEpoch) return;
-            _clearBanner(dismissedFor: leaving);
-          });
-        }
-      }
-      return;
-    }
-
-    final signature = '${nextKind.name}|$nextText';
-    if (signature == _activeSignature) {
-      return;
-    }
-    if (signature == _dismissedSignature) {
-      return;
-    }
-
-    _dismiss?.cancel();
-    _dismiss = null;
-    final changed = nextText != _text || nextKind != _kind;
-    setState(() {
-      _kind = nextKind;
-      _text = nextText;
-      _activeSignature = signature;
-      _dismissedSignature = null;
-    });
-    if (reduceMotion) {
-      _motion.value = 1;
-    } else if (changed) {
-      _motion.duration = _slideIn;
-      _motion.forward(from: 0);
-    } else if (_motion.value < 1) {
-      _motion.forward();
-    }
-
-    // Syncing stays until replaced; info completion + errors auto-dismiss.
-    if (!widget.syncing) {
-      _scheduleDismiss(
-        kind: nextKind,
-        signature: signature,
-        reduceMotion: reduceMotion,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final text = _text;
-    final kind = _kind;
-    if (text == null || kind == null) return const SizedBox.shrink();
-    final accent = _accent;
-    // Near-opaque tinted navy so Home header/icons cannot read through.
-    final fill = Color.alphaBlend(
-      accent.withValues(alpha: 0.42),
-      GameTokens.surface,
-    ).withValues(alpha: 0.94);
-    return SlideTransition(
-      position: _slide,
-      child: FadeTransition(
-        opacity: _fade,
-        child: Material(
-          key: Key('tournament-status-${kind.name}'),
-          color: Colors.transparent,
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          child: DecoratedBox(
-            key: const Key('tournament-status'),
-            decoration: BoxDecoration(
-              color: fill,
-              borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-              border: Border.all(color: accent.withValues(alpha: 0.72)),
-            ),
-            child: Semantics(
-              liveRegion: true,
-              container: true,
-              label: text,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Text(
-                  text,
-                  key: const Key('tournament-status-text'),
-                  softWrap: true,
-                  style: const TextStyle(
-                    color: GameTokens.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
-                  ),
-                ),
-              ),
-            ),
           ),
         ),
       ),
@@ -1311,6 +1106,7 @@ final class _DailyCard extends StatelessWidget {
     required this.phase,
     required this.badge,
     required this.headline,
+    this.bodyOverride,
     required this.action,
     required this.onAction,
     required this.connectivityLost,
@@ -1323,6 +1119,7 @@ final class _DailyCard extends StatelessWidget {
   final DayPhase phase;
   final String? badge;
   final String headline;
+  final String? bodyOverride;
   final String action;
   final VoidCallback? onAction;
   final bool connectivityLost;
@@ -1333,12 +1130,14 @@ final class _DailyCard extends StatelessWidget {
     final tone = phase == DayPhase.completed
         ? GameTokens.success
         : _tone(label);
-    final body = switch (phase) {
-      DayPhase.completed => copy.completedBody,
-      DayPhase.ready when day?.original == false => copy.alreadyClaimed,
-      DayPhase.inProgress || DayPhase.betweenGames => label,
-      _ => copy.readyBody,
-    };
+    final body =
+        bodyOverride ??
+        switch (phase) {
+          DayPhase.completed => copy.completedBody,
+          DayPhase.ready when day?.original == false => copy.alreadyClaimed,
+          DayPhase.inProgress || DayPhase.betweenGames => label,
+          _ => copy.readyBody,
+        };
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1404,7 +1203,10 @@ final class _DailyCard extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       badge!,
-                      style: TextStyle(fontWeight: FontWeight.w800, color: tone),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: tone,
+                      ),
                     ),
                   ),
                 const SizedBox(height: 16),
@@ -1544,7 +1346,6 @@ final class _PlayScreen extends StatelessWidget {
     final size = view.canonicalState?.boardSize ?? day?.boardSize ?? 0;
     final moves = view.movesRemaining;
     final tone = _tone(day?.label);
-    final notice = controller.noticeCode;
     return Scaffold(
       body: ArcadeBackdrop(
         child: SafeArea(
@@ -1629,10 +1430,7 @@ final class _PlayScreen extends StatelessWidget {
                     key: const Key('play-feedback'),
                     height: 44,
                     child: Center(
-                      child: _PlayFeedback(
-                        controller: controller,
-                        copy: copy,
-                      ),
+                      child: _PlayFeedback(controller: controller, copy: copy),
                     ),
                   ),
                   Expanded(
@@ -1678,7 +1476,11 @@ final class _PlayScreen extends StatelessWidget {
                           return OfferTray(
                             offers:
                                 live.canonicalState?.offers ??
-                                const [OfferEmpty(), OfferEmpty(), OfferEmpty()],
+                                const [
+                                  OfferEmpty(),
+                                  OfferEmpty(),
+                                  OfferEmpty(),
+                                ],
                             selectedIndex: live.selectedOfferIndex,
                             enabled: !locked,
                             selectionLabel: copy.selectPiece,
@@ -1692,22 +1494,6 @@ final class _PlayScreen extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-              Positioned(
-                top: 0,
-                left: 16,
-                right: 16,
-                child: IgnorePointer(
-                  ignoring: true,
-                  child: _TournamentStatusHost(
-                    key: const Key('play-status-host'),
-                    controller: controller,
-                    copy: copy,
-                    notice: notice,
-                    syncing: false,
-                    infoBanners: false,
-                  ),
-                ),
               ),
             ],
           ),
@@ -2276,13 +2062,17 @@ final class _GuestSessionRecoverySheetState
       _error = null;
       _status = null;
     });
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'guest_recovery_provider_started',
-      requestId: widget.recovery.lastRequestId,
-      errorCode: widget.recovery.code,
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'guest_recovery_provider_started',
+          requestId: widget.recovery.lastRequestId,
+          errorCode: widget.recovery.code,
+        ),
+      ),
+    );
     final AuthFlowResult result;
     if (widget.recovery.pendingLink != null) {
       result = await coordinator.recoverPendingLink(provider);
@@ -2330,13 +2120,17 @@ final class _GuestSessionRecoverySheetState
     if (auth == null || onNew == null || _busy) return;
     if (!widget.recovery.allowsExplicitNewGuest) return;
 
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.screenOpened,
-      operation: 'guest_explicit_new_prompt',
-      requestId: widget.recovery.lastRequestId,
-      errorCode: widget.recovery.code,
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'guest_explicit_new_prompt',
+          requestId: widget.recovery.lastRequestId,
+          errorCode: widget.recovery.code,
+        ),
+      ),
+    );
 
     final copy = TournamentCopy.of(context);
     final confirmed = await showDialog<bool>(
@@ -2363,13 +2157,17 @@ final class _GuestSessionRecoverySheetState
     );
     if (!mounted) return;
     if (confirmed != true) {
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.info,
-        code: LogCode.screenOpened,
-        operation: 'guest_explicit_new_cancelled',
-        requestId: widget.recovery.lastRequestId,
-        errorCode: widget.recovery.code,
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'guest_explicit_new_cancelled',
+            requestId: widget.recovery.lastRequestId,
+            errorCode: widget.recovery.code,
+          ),
+        ),
+      );
       return;
     }
 
@@ -2378,13 +2176,17 @@ final class _GuestSessionRecoverySheetState
       _error = null;
       _status = null;
     });
-    unawaited(DiagnosticRuntime.logger.log(LogEvent(
-      level: LogLevel.info,
-      code: LogCode.authRefreshSucceeded,
-      operation: 'guest_explicit_new_confirmed',
-      requestId: widget.recovery.lastRequestId,
-      errorCode: widget.recovery.code,
-    )));
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.authRefreshSucceeded,
+          operation: 'guest_explicit_new_confirmed',
+          requestId: widget.recovery.lastRequestId,
+          errorCode: widget.recovery.code,
+        ),
+      ),
+    );
     try {
       final access = await auth.replaceWithExplicitNewGuest();
       await onNew(access);
@@ -2395,13 +2197,17 @@ final class _GuestSessionRecoverySheetState
         _busy = false;
         _error = error.code;
       });
-      unawaited(DiagnosticRuntime.logger.log(LogEvent(
-        level: LogLevel.warning,
-        code: LogCode.authRefreshFailed,
-        operation: 'guest_explicit_new_failed',
-        requestId: auth.lastAuthRequestId,
-        errorCode: error.code,
-      )));
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.warning,
+            code: LogCode.authRefreshFailed,
+            operation: 'guest_explicit_new_failed',
+            requestId: auth.lastAuthRequestId,
+            errorCode: error.code,
+          ),
+        ),
+      );
     }
   }
 
@@ -2433,9 +2239,10 @@ final class _GuestSessionRecoverySheetState
   @override
   Widget build(BuildContext context) {
     final copy = TournamentCopy.of(context);
-    final canProvider = widget.recovery.canAttemptProviderRecover &&
-        widget.coordinator != null;
-    final canNewGuest = widget.recovery.allowsExplicitNewGuest &&
+    final canProvider =
+        widget.recovery.canAttemptProviderRecover && widget.coordinator != null;
+    final canNewGuest =
+        widget.recovery.allowsExplicitNewGuest &&
         widget.sessionAuth != null &&
         widget.onExplicitNewGuest != null;
     final transient = widget.recovery.isTransientNetwork;
@@ -2508,8 +2315,9 @@ final class _GuestSessionRecoverySheetState
             if (canNewGuest) ...[
               FilledButton.tonal(
                 key: const Key('guest-recovery-new-guest'),
-                onPressed:
-                    _busy ? null : () => unawaited(_confirmStartNewGuest()),
+                onPressed: _busy
+                    ? null
+                    : () => unawaited(_confirmStartNewGuest()),
                 child: Text(copy.startAsNewGuest),
               ),
               const SizedBox(height: 8),

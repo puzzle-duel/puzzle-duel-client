@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_top_banner.dart';
 import 'package:puzzle_duel_mobile/tournament/auth_coordinator.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/provider_sign_in.dart';
+import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
@@ -23,13 +24,17 @@ String _jwt({
       .encode(utf8.encode(jsonEncode({'alg': 'none'})))
       .replaceAll('=', '');
   final payload = base64Url
-      .encode(utf8.encode(jsonEncode({
-        'iss': 'https://staging.puzzle-duel.app',
-        'aud': 'puzzle-duel-api',
-        'sub': sub,
-        'account_type': accountType,
-        'fid': fid,
-      })))
+      .encode(
+        utf8.encode(
+          jsonEncode({
+            'iss': 'https://staging.puzzle-duel.app',
+            'aud': 'puzzle-duel-api',
+            'sub': sub,
+            'account_type': accountType,
+            'fid': fid,
+          }),
+        ),
+      )
       .replaceAll('=', '');
   return '$header.$payload.sig';
 }
@@ -74,7 +79,8 @@ final class _MemStore implements GuestCredentialStore {
   @override
   Future<String?> readVaultJournal() async => vaultJournal;
   @override
-  Future<void> writeVaultJournal(String encoded) async => vaultJournal = encoded;
+  Future<void> writeVaultJournal(String encoded) async =>
+      vaultJournal = encoded;
   @override
   Future<void> clearVaultJournal() async => vaultJournal = null;
 }
@@ -107,7 +113,8 @@ final class _ScriptedProviders implements ProviderAuthPort {
     required ProviderAuthPurpose purpose,
     String? guestBearer,
   }) async {
-    final needsBinding = purpose == ProviderAuthPurpose.login ||
+    final needsBinding =
+        purpose == ProviderAuthPurpose.login ||
         purpose == ProviderAuthPurpose.continueWith;
     return ProviderChallenge(
       provider: provider,
@@ -279,13 +286,13 @@ void main() {
   });
 
   tearDown(() {
-    TestWidgetsFlutterBinding.ensureInitialized()
-        .platformDispatcher
+    TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
         .clearAccessibilityFeaturesTestValue();
   });
 
-  testWidgets('logout confirm cancel keeps verified profile state',
-      (tester) async {
+  testWidgets('logout confirm cancel keeps verified profile state', (
+    tester,
+  ) async {
     await _pumpApp(tester, verified: true);
     await tester.tap(find.byKey(const Key('profile')));
     await _settle(tester);
@@ -302,8 +309,9 @@ void main() {
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
   });
 
-  testWidgets('logout confirm shows loading and updates to guest live',
-      (tester) async {
+  testWidgets('logout confirm shows loading and updates to guest live', (
+    tester,
+  ) async {
     final delay = Completer<void>();
     final providers = _ScriptedProviders(logoutDelay: delay);
     await _pumpApp(tester, verified: true, providers: providers);
@@ -329,6 +337,42 @@ void main() {
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
     expect(providers.logoutCalls, 1);
   });
+
+  testWidgets(
+    'PZD-54 real logout UI clears account-scoped day and shows Top Banner',
+    (tester) async {
+      await _pumpApp(tester, verified: true);
+      final controller = tester
+          .widget<AppTopBannerHost>(
+            find.byKey(const Key('tournament-status-host')),
+          )
+          .controller;
+      controller.day = TournamentDay(
+        seriesId: 'series-logout-ui',
+        original: true,
+        claimStatus: 'COMPLETED',
+        ordinal: 6,
+        ordinalLabel: 'H1',
+        seriesScore: 10200,
+        resultsPublished: true,
+      );
+      controller.results = {'all': 10200, 'onTimeAwarded': true};
+      controller.notifyListeners();
+
+      await tester.tap(find.byKey(const Key('profile')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-out')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
+      await _settle(tester);
+
+      expect(controller.day, isNull);
+      expect(controller.results, isEmpty);
+      expect(find.byKey(const Key('auth-logout-success')), findsOneWidget);
+      expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+    },
+  );
 
   testWidgets('failed logout shows localized failure feedback', (tester) async {
     final providers = _ScriptedProviders(
@@ -359,38 +403,88 @@ void main() {
   });
 
   testWidgets(
-      'existing Google continue after logout succeeds for empty guest',
-      (tester) async {
-    final providers = _ScriptedProviders(
-      continuePlayerId: '11111111-1111-1111-1111-111111111111',
-    );
-    await _pumpApp(tester, verified: true, providers: providers);
+    'existing Google continue after logout succeeds for empty guest',
+    (tester) async {
+      final providers = _ScriptedProviders(
+        continuePlayerId: '11111111-1111-1111-1111-111111111111',
+      );
+      await _pumpApp(tester, verified: true, providers: providers);
 
-    await tester.tap(find.byKey(const Key('profile')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('profile-sign-out')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
-    await _settle(tester);
-    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('profile')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-out')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
+      await _settle(tester);
+      expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('profile-sign-in')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('auth-google')));
-    await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-in')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await _settle(tester);
 
-    expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
-    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
-    expect(providers.continueCalls, 1);
-    expect(providers.linkCalls, 0);
-    expect(providers.loginCalls, 0);
-    expect(find.byKey(const Key('offer-tray')), findsNothing);
-    expect(find.byKey(const Key('profile-header')), findsOneWidget);
-  });
+      expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
+      expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+      expect(providers.continueCalls, 1);
+      expect(providers.linkCalls, 0);
+      expect(providers.loginCalls, 0);
+      expect(find.byKey(const Key('offer-tray')), findsNothing);
+      expect(find.byKey(const Key('profile-header')), findsOneWidget);
+    },
+  );
 
   testWidgets(
-      'existing provider continue succeeds without guest-switch dialog',
-      (tester) async {
+    'existing provider continue succeeds without guest-switch dialog',
+    (tester) async {
+      final providers = _ScriptedProviders();
+      await _pumpApp(tester, verified: false, providers: providers);
+      await tester.tap(find.byKey(const Key('profile')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-in')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await _settle(tester);
+
+      expect(find.byKey(const Key('account-switch-dialog')), findsNothing);
+      expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+      expect(providers.continueCalls, 1);
+      expect(providers.confirmContinueCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'legacy account switch confirmation when continue requires confirm',
+    (tester) async {
+      final providers = _ScriptedProviders(
+        continueError: const ProviderAuthException(
+          'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+          httpStatus: 409,
+          continuationToken: 'switch-token-opaque',
+          targetPlayerId: '11111111-1111-1111-1111-111111111111',
+        ),
+      );
+      await _pumpApp(tester, verified: false, providers: providers);
+      await tester.tap(find.byKey(const Key('profile')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-in')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await _settle(tester);
+
+      expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('account-switch-confirm')));
+      await _settle(tester);
+
+      expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
+      expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
+      expect(providers.continueCalls, 1);
+      expect(providers.confirmContinueCalls, 1);
+    },
+  );
+
+  testWidgets('profile-only continue does not auto-start ranked play', (
+    tester,
+  ) async {
     final providers = _ScriptedProviders();
     await _pumpApp(tester, verified: false, providers: providers);
     await tester.tap(find.byKey(const Key('profile')));
@@ -399,67 +493,17 @@ void main() {
     await _settle(tester);
     await tester.tap(find.byKey(const Key('auth-google')));
     await _settle(tester);
-
-    expect(find.byKey(const Key('account-switch-dialog')), findsNothing);
-    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
-    expect(providers.continueCalls, 1);
-    expect(providers.confirmContinueCalls, 0);
-  });
-
-  testWidgets(
-      'legacy account switch confirmation when continue requires confirm',
-      (tester) async {
-    final providers = _ScriptedProviders(
-      continueError: const ProviderAuthException(
-        'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
-        httpStatus: 409,
-        continuationToken: 'switch-token-opaque',
-        targetPlayerId: '11111111-1111-1111-1111-111111111111',
-      ),
-    );
-    await _pumpApp(tester, verified: false, providers: providers);
-    await tester.tap(find.byKey(const Key('profile')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('profile-sign-in')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('auth-google')));
-    await _settle(tester);
-
-    expect(find.byKey(const Key('account-switch-dialog')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('account-switch-confirm')));
-    await _settle(tester);
-
-    expect(find.byKey(const Key('auth-sheet-title')), findsNothing);
-    expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
-    expect(providers.continueCalls, 1);
-    expect(providers.confirmContinueCalls, 1);
-  });
-
-  testWidgets('profile-only continue does not auto-start ranked play',
-      (tester) async {
-    final providers = _ScriptedProviders();
-    await _pumpApp(tester, verified: false, providers: providers);
-    await tester.tap(find.byKey(const Key('profile')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('profile-sign-in')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('auth-google')));
-    await _settle(tester);
     expect(find.byKey(const Key('profile-account-verified')), findsOneWidget);
     expect(find.byKey(const Key('offer-tray')), findsNothing);
     expect(find.byKey(const Key('profile-header')), findsOneWidget);
     expect(providers.continueCalls, 1);
   });
 
-  testWidgets(
-      'profile header and account card stay consistent after logout',
-      (tester) async {
+  testWidgets('profile header and account card stay consistent after logout', (
+    tester,
+  ) async {
     // Static config label must not stick as "Verified" after guest switch.
-    await _pumpApp(
-      tester,
-      verified: true,
-      playerLabel: 'Verified',
-    );
+    await _pumpApp(tester, verified: true, playerLabel: 'Verified');
     await tester.tap(find.byKey(const Key('profile')));
     await _settle(tester);
     expect(find.byKey(const Key('profile-header-verified')), findsOneWidget);
@@ -479,41 +523,40 @@ void main() {
   });
 
   testWidgets(
-      'delayed pre-logout badge response is discarded after account switch',
-      (tester) async {
-    final badgeGate = Completer<void>();
-    final harness = await _pumpApp(
-      tester,
-      verified: true,
-      badgeDelay: badgeGate,
-      verifiedBadgeEarnedCount: 9,
-    );
-    await tester.tap(find.byKey(const Key('profile')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(harness.badgeRequests, greaterThanOrEqualTo(1));
+    'delayed pre-logout badge response is discarded after account switch',
+    (tester) async {
+      final badgeGate = Completer<void>();
+      final harness = await _pumpApp(
+        tester,
+        verified: true,
+        badgeDelay: badgeGate,
+        verifiedBadgeEarnedCount: 9,
+      );
+      await tester.tap(find.byKey(const Key('profile')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(harness.badgeRequests, greaterThanOrEqualTo(1));
 
-    await tester.tap(find.byKey(const Key('profile-sign-out')));
-    await _settle(tester);
-    await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
-    await _settle(tester);
-    expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
-    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('profile-sign-out')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('profile-sign-out-confirm')));
+      await _settle(tester);
+      expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
+      expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
 
-    // Old verified badge payload arrives late — must be ignored.
-    badgeGate.complete();
-    await _settle(tester);
-    expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
-    expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
-    expect(find.textContaining('9'), findsNothing);
-    expect(
-      find.text('9 kez kazanıldı', skipOffstage: false),
-      findsNothing,
-    );
-  });
+      // Old verified badge payload arrives late — must be ignored.
+      badgeGate.complete();
+      await _settle(tester);
+      expect(find.byKey(const Key('profile-header-guest')), findsOneWidget);
+      expect(find.byKey(const Key('profile-account-guest')), findsOneWidget);
+      expect(find.textContaining('9'), findsNothing);
+      expect(find.text('9 kez kazanıldı', skipOffstage: false), findsNothing);
+    },
+  );
 
-  testWidgets('cancel switch clears awaiting marker and keeps guest',
-      (tester) async {
+  testWidgets('cancel switch clears awaiting marker and keeps guest', (
+    tester,
+  ) async {
     final providers = _ScriptedProviders(
       continueError: const ProviderAuthException(
         'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
@@ -553,10 +596,12 @@ void main() {
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
     );
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
+    session.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
     final providers = _ScriptedProviders();
     final coordinator = AuthCoordinator(
       session: session,
@@ -592,123 +637,150 @@ void main() {
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
     );
-    restarted.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
+    restarted.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
     final recoverCoordinator = AuthCoordinator(
       session: restarted,
       providers: providers,
       signIn: FakeProviderSignIn(),
     );
-    final recovered =
-        await recoverCoordinator.recoverPendingLink(AuthProviderKind.google);
+    final recovered = await recoverCoordinator.recoverPendingLink(
+      AuthProviderKind.google,
+    );
     expect(recovered.outcome, AuthFlowOutcome.cancelled);
     expect(recovered.errorCode, 'ACCOUNT_SWITCH_CANCELLED');
     expect(store.pendingLink, isNull);
     expect(providers.continueCalls, 0);
   });
 
-  test('confirm recovery carries exact operation binding; wrong binding rejected',
-      () async {
-    final store = _MemStore()..token = 'g' * 64;
-    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-    const targetId = '11111111-1111-1111-1111-111111111111';
-    const operationB = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-    final session = GuestAuthClient(
-      origin: 'https://staging.puzzle-duel.app',
-      credentials: store,
-    );
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
-    session.debugTransport = (path, body) async {
-      expect(path, '/v1/auth/refresh');
-      return (status: 401, body: {'error': 'INVALID_REFRESH'});
-    };
-    final providers = _ScriptedProviders(continuePlayerId: targetId);
-    final coordinator = AuthCoordinator(
-      session: session,
-      providers: providers,
-      signIn: FakeProviderSignIn(),
-    );
+  test(
+    'confirm recovery carries exact operation binding; wrong binding rejected',
+    () async {
+      final store = _MemStore()..token = 'g' * 64;
+      const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      const targetId = '11111111-1111-1111-1111-111111111111';
+      const operationB = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+      final session = GuestAuthClient(
+        origin: 'https://staging.puzzle-duel.app',
+        credentials: store,
+      );
+      session.debugSeedAccess(
+        GuestAccess.parse(
+          accessToken: _jwt(
+            sub: guestId,
+            accountType: 'guest',
+            fid: 'guest-fid',
+          ),
+          expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        ),
+      );
+      session.debugTransport = (path, body) async {
+        expect(path, '/v1/auth/refresh');
+        return (status: 401, body: {'error': 'INVALID_REFRESH'});
+      };
+      final providers = _ScriptedProviders(continuePlayerId: targetId);
+      final coordinator = AuthCoordinator(
+        session: session,
+        providers: providers,
+        signIn: FakeProviderSignIn(),
+      );
 
-    await session.markPendingUnifiedConfirm(
-      provider: 'google',
-      targetPlayerId: targetId,
-      operationId: operationB,
-    );
-    final recovered =
-        await coordinator.recoverPendingLink(AuthProviderKind.google);
-    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
-    expect(providers.recoverLinkedCalls, 1);
-    expect(providers.lastRecoverOperationId, operationB);
-    expect(store.pendingLink, isNull);
+      await session.markPendingUnifiedConfirm(
+        provider: 'google',
+        targetPlayerId: targetId,
+        operationId: operationB,
+      );
+      final recovered = await coordinator.recoverPendingLink(
+        AuthProviderKind.google,
+      );
+      expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+      expect(providers.recoverLinkedCalls, 1);
+      expect(providers.lastRecoverOperationId, operationB);
+      expect(store.pendingLink, isNull);
 
-    // Marker without operation binding must not authorize recovery.
-    store.pendingLink = 'confirm|google|$targetId';
-    expect(PendingLinkRecovery.tryParse(store.pendingLink), isNull);
-    final session2 = GuestAuthClient(
-      origin: 'https://staging.puzzle-duel.app',
-      credentials: store,
-    );
-    session2.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
-    final rejected = await AuthCoordinator(
-      session: session2,
-      providers: providers,
-      signIn: FakeProviderSignIn(),
-    ).recoverPendingLink(AuthProviderKind.google);
-    expect(rejected.outcome, AuthFlowOutcome.failed);
-    expect(rejected.errorCode, 'RECOVERY_MARKER_MISSING');
-    expect(providers.recoverLinkedCalls, 1);
-  });
+      // Marker without operation binding must not authorize recovery.
+      store.pendingLink = 'confirm|google|$targetId';
+      expect(PendingLinkRecovery.tryParse(store.pendingLink), isNull);
+      final session2 = GuestAuthClient(
+        origin: 'https://staging.puzzle-duel.app',
+        credentials: store,
+      );
+      session2.debugSeedAccess(
+        GuestAccess.parse(
+          accessToken: _jwt(
+            sub: guestId,
+            accountType: 'guest',
+            fid: 'guest-fid',
+          ),
+          expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        ),
+      );
+      final rejected = await AuthCoordinator(
+        session: session2,
+        providers: providers,
+        signIn: FakeProviderSignIn(),
+      ).recoverPendingLink(AuthProviderKind.google);
+      expect(rejected.outcome, AuthFlowOutcome.failed);
+      expect(rejected.errorCode, 'RECOVERY_MARKER_MISSING');
+      expect(providers.recoverLinkedCalls, 1);
+    },
+  );
 
-  test('continue marker binds operation id used by mutate and recovery',
-      () async {
-    final store = _MemStore()..token = 'g' * 64;
-    const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-    final session = GuestAuthClient(
-      origin: 'https://staging.puzzle-duel.app',
-      credentials: store,
-    );
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest', fid: 'guest-fid'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
-    session.debugTransport = (path, body) async {
-      expect(path, '/v1/auth/refresh');
-      return (status: 401, body: {'error': 'INVALID_REFRESH'});
-    };
-    final providers = _ScriptedProviders(
-      continueError: const ProviderAuthException(
-        'AUTH_NETWORK_UNAVAILABLE',
-        httpStatus: 0,
-      ),
-    );
-    final coordinator = AuthCoordinator(
-      session: session,
-      providers: providers,
-      signIn: FakeProviderSignIn(),
-    );
-    final result = await coordinator.continueWithProvider(
-      AuthProviderKind.google,
-      localProgressProtected: false,
-    );
-    expect(result.outcome, AuthFlowOutcome.recoveryRequired);
-    final pending = PendingLinkRecovery.tryParse(store.pendingLink);
-    expect(pending?.kind, PendingAuthRecoveryKind.unifiedContinue);
-    expect(pending?.hasOperationBinding, isTrue);
-    expect(providers.lastContinueOperationId, pending?.operationId);
+  test(
+    'continue marker binds operation id used by mutate and recovery',
+    () async {
+      final store = _MemStore()..token = 'g' * 64;
+      const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      final session = GuestAuthClient(
+        origin: 'https://staging.puzzle-duel.app',
+        credentials: store,
+      );
+      session.debugSeedAccess(
+        GuestAccess.parse(
+          accessToken: _jwt(
+            sub: guestId,
+            accountType: 'guest',
+            fid: 'guest-fid',
+          ),
+          expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        ),
+      );
+      session.debugTransport = (path, body) async {
+        expect(path, '/v1/auth/refresh');
+        return (status: 401, body: {'error': 'INVALID_REFRESH'});
+      };
+      final providers = _ScriptedProviders(
+        continueError: const ProviderAuthException(
+          'AUTH_NETWORK_UNAVAILABLE',
+          httpStatus: 0,
+        ),
+      );
+      final coordinator = AuthCoordinator(
+        session: session,
+        providers: providers,
+        signIn: FakeProviderSignIn(),
+      );
+      final result = await coordinator.continueWithProvider(
+        AuthProviderKind.google,
+        localProgressProtected: false,
+      );
+      expect(result.outcome, AuthFlowOutcome.recoveryRequired);
+      final pending = PendingLinkRecovery.tryParse(store.pendingLink);
+      expect(pending?.kind, PendingAuthRecoveryKind.unifiedContinue);
+      expect(pending?.hasOperationBinding, isTrue);
+      expect(providers.lastContinueOperationId, pending?.operationId);
 
-    final recovered =
-        await coordinator.recoverPendingLink(AuthProviderKind.google);
-    expect(recovered.outcome, AuthFlowOutcome.loggedIn);
-    expect(providers.lastRecoverOperationId, pending?.operationId);
-  });
+      final recovered = await coordinator.recoverPendingLink(
+        AuthProviderKind.google,
+      );
+      expect(recovered.outcome, AuthFlowOutcome.loggedIn);
+      expect(providers.lastRecoverOperationId, pending?.operationId);
+    },
+  );
 
   test('session survives restart after existing-account login', () async {
     final store = _MemStore()..token = 'g' * 64;
@@ -718,10 +790,12 @@ void main() {
       origin: 'https://staging.puzzle-duel.app',
       credentials: store,
     );
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: _jwt(sub: guestId, accountType: 'guest'),
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
+    session.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: _jwt(sub: guestId, accountType: 'guest'),
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
     final providers = _ScriptedProviders(loginPlayerId: verifiedId);
     final coordinator = AuthCoordinator(
       session: session,
@@ -777,8 +851,9 @@ Future<_Harness> _pumpApp(
   Completer<void>? badgeDelay,
   int verifiedBadgeEarnedCount = 2,
 }) async {
-  final directory =
-      Directory.systemTemp.createTempSync('pzd27-login-logout-ux');
+  final directory = Directory.systemTemp.createTempSync(
+    'pzd27-login-logout-ux',
+  );
   addTearDown(() => directory.deleteSync(recursive: true));
 
   const guestId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -794,10 +869,12 @@ Future<_Harness> _pumpApp(
     origin: 'https://staging.puzzle-duel.app',
     credentials: store,
   );
-  session.debugSeedAccess(GuestAccess.parse(
-    accessToken: token,
-    expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-  ));
+  session.debugSeedAccess(
+    GuestAccess.parse(
+      accessToken: token,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ),
+  );
 
   final scripted = providers ?? _ScriptedProviders();
   final guestSession = GuestAuthClient(
@@ -834,10 +911,12 @@ Future<_Harness> _pumpApp(
     }
     return (status: 404, body: <String, dynamic>{'error': 'NOT_FOUND'});
   };
-  guestSession.debugSeedAccess(GuestAccess.parse(
-    accessToken: token,
-    expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-  ));
+  guestSession.debugSeedAccess(
+    GuestAccess.parse(
+      accessToken: token,
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ),
+  );
 
   final coordinator = AuthCoordinator(
     session: guestSession,
@@ -877,8 +956,7 @@ Future<_Harness> _pumpApp(
         'boardRevision': 1,
       });
     }
-    if (path == '/v1/profile/me/badges' ||
-        path == '/v1/tournament/me/badges') {
+    if (path == '/v1/profile/me/badges' || path == '/v1/tournament/me/badges') {
       harness.badgeRequests++;
       final delay = badgeDelay;
       if (delay != null && !firstBadgeDelayed) {
@@ -900,8 +978,7 @@ Future<_Harness> _pumpApp(
           ],
         });
       }
-      final showVerifiedBadges =
-          guestSession.cachedAccess?.isVerified == true;
+      final showVerifiedBadges = guestSession.cachedAccess?.isVerified == true;
       return UatHttpResult(200, {
         'playerScoped': true,
         'catalogVersion': 1,

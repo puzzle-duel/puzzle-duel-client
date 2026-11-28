@@ -12,13 +12,17 @@ String _jwt({required String sub, required String accountType}) {
       .encode(utf8.encode(jsonEncode({'alg': 'none'})))
       .replaceAll('=', '');
   final payload = base64Url
-      .encode(utf8.encode(jsonEncode({
-        'iss': 'https://staging.puzzle-duel.app',
-        'aud': 'puzzle-duel-api',
-        'sub': sub,
-        'account_type': accountType,
-        'fid': 'test-fid',
-      })))
+      .encode(
+        utf8.encode(
+          jsonEncode({
+            'iss': 'https://staging.puzzle-duel.app',
+            'aud': 'puzzle-duel-api',
+            'sub': sub,
+            'account_type': accountType,
+            'fid': 'test-fid',
+          }),
+        ),
+      )
       .replaceAll('=', '');
   return '$header.$payload.sig';
 }
@@ -45,6 +49,7 @@ final class _MemStore implements GuestCredentialStore {
   Future<void> writePendingLinkProvider(String provider) async {
     pendingLink = provider;
   }
+
   @override
   Future<void> clearPendingLinkProvider() async => pendingLink = null;
   String? identityBinding;
@@ -54,6 +59,7 @@ final class _MemStore implements GuestCredentialStore {
   Future<void> writeIdentityBinding(String encoded) async {
     identityBinding = encoded;
   }
+
   @override
   Future<void> clearIdentityBinding() async => identityBinding = null;
   String? vaultJournal;
@@ -63,6 +69,7 @@ final class _MemStore implements GuestCredentialStore {
   Future<void> writeVaultJournal(String encoded) async {
     vaultJournal = encoded;
   }
+
   @override
   Future<void> clearVaultJournal() async {
     vaultJournal = null;
@@ -98,10 +105,12 @@ void main() {
       credentials: store,
     );
     final token = _jwt(sub: guestId, accountType: 'guest');
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: token,
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
+    session.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: token,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
     final api = _RecordingApi(
       baseUrl: 'https://staging.puzzle-duel.app',
       bearer: token,
@@ -123,7 +132,10 @@ void main() {
     await controller.beginLocal();
     await controller.loadDay(presentHome: true);
     expect(controller.rankedAuthRequired, isTrue);
-    expect(controller.tournamentNoticeCode, 'RANKED_AUTH_REQUIRED');
+    // Guest Home CTA explains auth; no automatic Top Banner notice.
+    expect(controller.tournamentNoticeCode, isNull);
+    expect(controller.day, isNull);
+    expect(controller.results, isEmpty);
     expect(api.posts, isEmpty);
     controller.dispose();
   });
@@ -137,10 +149,12 @@ void main() {
       credentials: _MemStore()..token = 'guest-refresh',
     );
     final token = _jwt(sub: guestId, accountType: 'guest');
-    session.debugSeedAccess(GuestAccess.parse(
-      accessToken: token,
-      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-    ));
+    session.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: token,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
     var authRequested = 0;
     final api = _RecordingApi(
       baseUrl: 'https://staging.puzzle-duel.app',

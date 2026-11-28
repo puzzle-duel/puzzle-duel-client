@@ -5,6 +5,8 @@ import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
+import 'package:puzzle_duel_mobile/badges/presentation/badge_collection_item.dart';
+import 'package:puzzle_duel_mobile/badges/presentation/badge_detail_content.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
 import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
@@ -301,9 +303,28 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         return;
       }
       if (result.status == 401 || result.status == 403) {
+        if (!_isVerifiedAccount) {
+          final local = await _mergeLocalGuestBadges(
+            BadgeCollectionSnapshot.lockedCatalog(
+              status: BadgeCollectionStatus.ready,
+            ),
+          );
+          if (_isStaleLoad(
+            expectedEpoch: expectedEpoch,
+            generation: generation,
+            currentGeneration: _badgeLoadGeneration,
+          )) {
+            return;
+          }
+          setState(() {
+            _loadingBadges = false;
+            _badges = local;
+          });
+          return;
+        }
         setState(() {
           _loadingBadges = false;
-          // Do not claim "locked / not earned" on auth failure.
+          // Do not claim "locked / not earned" on auth failure for verified.
           _badges = BadgeCollectionSnapshot(
             badges: const [],
             status: BadgeCollectionStatus.unauthorized,
@@ -354,7 +375,10 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         );
         return;
       }
-      final snapshot = BadgeCollectionSnapshot.fromServerPayload(result.map);
+      var snapshot = BadgeCollectionSnapshot.fromServerPayload(result.map);
+      if (!_isVerifiedAccount) {
+        snapshot = await _mergeLocalGuestBadges(snapshot);
+      }
       if (cacheKey != null) {
         _badgeCacheByPlayer[cacheKey] = snapshot;
       }
@@ -640,13 +664,54 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     );
   }
 
+  Future<BadgeCollectionSnapshot> _mergeLocalGuestBadges(
+    BadgeCollectionSnapshot base,
+  ) async {
+    final counts = await widget.controller.localBadgeLedger.earnedCounts();
+    return BadgeCollectionSnapshot(
+      status: base.status == BadgeCollectionStatus.loading
+          ? BadgeCollectionStatus.ready
+          : base.status,
+      errorCode: base.errorCode,
+      catalogVersion: base.catalogVersion,
+      badges: [
+        for (final badge in base.badges)
+          if (badge.definition.id.guestEligible)
+            BadgeProgress(
+              definition: badge.definition,
+              earnedCount: (() {
+                final local = counts[badge.definition.id] ?? 0;
+                // Prefer the higher of local ledger vs any server-reported count.
+                return local > badge.earnedCount ? local : badge.earnedCount;
+              })(),
+              repeatable: true,
+              provenance: BadgeProvenance.localGuest,
+              verified: true,
+            )
+          else
+            // Keep server-reported tournament badges; do not invent zeros over them.
+            badge,
+      ],
+    );
+  }
+
   void _showBadgeDetail(
     BuildContext context,
     BadgeProgress badge,
     TournamentCopy copy,
   ) {
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'profile_badge_detail_opened',
+        ),
+      ),
+    );
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: GameTokens.surfaceHigh,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -654,75 +719,33 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         ),
       ),
       builder: (context) {
+        final height = MediaQuery.sizeOf(context).height * 0.85;
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: SizedBox(
+            height: height,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  badge.definition.name(copy),
-                  key: const Key('badge-detail-title'),
-                  style: Theme.of(context).textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  badge.definition.description(copy),
-                  style: const TextStyle(
-                    color: GameTokens.textSecondary,
-                    height: 1.4,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          badge.definition.name(copy),
+                          key: const Key('badge-detail-title'),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      TextButton(
+                        key: const Key('badge-detail-close'),
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(copy.back),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  badge.definition.rule(copy),
-                  style: const TextStyle(
-                    color: GameTokens.textPrimary,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  badge.earned
-                      ? copy.badgeEarnedCount(badge.earnedCount)
-                      : copy.badgeLocked,
-                  style: TextStyle(
-                    color: badge.earned
-                        ? GameTokens.success
-                        : GameTokens.textMuted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (badge.lastEarnedAt != null && badge.earned) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    copy.badgeLastEarned(badge.lastEarnedAt!),
-                    style: const TextStyle(color: GameTokens.textSecondary),
-                  ),
-                ],
-                const SizedBox(height: 6),
-                Text(
-                  copy.badgeProvenanceLabel(
-                    badge.provenance == BadgeProvenance.f2bPublication
-                        ? BadgeProvenanceLabel.f2bPublication
-                        : BadgeProvenanceLabel.unavailable,
-                  ),
-                  style: const TextStyle(
-                    color: GameTokens.textMuted,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    key: const Key('badge-detail-close'),
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(copy.back),
-                  ),
-                ),
+                Expanded(child: BadgeDetailContent(badge: badge, copy: copy)),
               ],
             ),
           ),
@@ -1153,7 +1176,7 @@ final class _BadgeGrid extends StatelessWidget {
               for (final badge in snapshot.badges)
                 SizedBox(
                   width: tileWidth,
-                  child: _BadgeTile(
+                  child: BadgeCollectionItem(
                     badge: badge,
                     copy: copy,
                     onTap: () => onSelect(badge),
@@ -1167,85 +1190,3 @@ final class _BadgeGrid extends StatelessWidget {
   }
 }
 
-final class _BadgeTile extends StatelessWidget {
-  const _BadgeTile({
-    required this.badge,
-    required this.copy,
-    required this.onTap,
-  });
-
-  final BadgeProgress badge;
-  final TournamentCopy copy;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final earned = badge.earned;
-    final name = badge.definition.name(copy);
-    return Semantics(
-      button: true,
-      label: earned
-          ? '$name, ${copy.badgeEarnedCount(badge.earnedCount)}'
-          : '$name, ${copy.badgeLocked}',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: Key('badge-tile-${badge.definition.id.wire}'),
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-          child: Ink(
-            decoration: BoxDecoration(
-              color: earned ? GameTokens.surfaceHigh : GameTokens.surface,
-              borderRadius: BorderRadius.circular(GameTokens.radiusMd),
-              border: Border.all(
-                color: earned
-                    ? GameTokens.success.withValues(alpha: 0.5)
-                    : GameTokens.border,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.schedule_rounded,
-                    size: 28,
-                    color: earned ? GameTokens.success : GameTokens.textMuted,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    name,
-                    textAlign: TextAlign.center,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: earned
-                          ? GameTokens.textPrimary
-                          : GameTokens.textMuted,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    earned
-                        ? copy.badgeEarnedCount(badge.earnedCount)
-                        : copy.badgeLocked,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: earned ? GameTokens.accent : GameTokens.textMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
