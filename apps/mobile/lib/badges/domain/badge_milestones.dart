@@ -8,14 +8,19 @@ final class BadgeSevenDayWindow {
 
   final String startUtcDate;
   final String endUtcDate;
-
-  String get evidenceKey => 'unstoppable:window:$startUtcDate:$endUtcDate';
 }
 
 final class BadgeMilestones {
   const BadgeMilestones._();
 
   static final _utcDate = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+  static const supportedPracticeRules = {
+    'core-001.v1',
+    'core-001.v2',
+    'core-001.v3',
+  };
+  static const supportedPracticeGenerators = {'gen-001.v1'};
 
   static String assertUtcDate(String value) {
     if (!_utcDate.hasMatch(value)) {
@@ -45,7 +50,7 @@ final class BadgeMilestones {
     return completedGames ~/ 10;
   }
 
-  /// Non-overlapping seven-day consecutive windows from distinct active UTC dates.
+  /// Non-overlapping seven-day consecutive windows (for counting only).
   static List<BadgeSevenDayWindow> nonOverlappingSevenDayWindows(
     Iterable<String> distinctActiveUtcDates,
   ) {
@@ -74,6 +79,12 @@ final class BadgeMilestones {
     return windows;
   }
 
+  /// Stable lifetime award count — not window-boundary identities.
+  static int totalCompleteSevenDayWindows(
+    Iterable<String> distinctActiveUtcDates,
+  ) =>
+      nonOverlappingSevenDayWindows(distinctActiveUtcDates).length;
+
   static String loyaltyEvidenceKey(String utcDate) =>
       'loyalty:utc:${assertUtcDate(utcDate)}';
 
@@ -81,6 +92,17 @@ final class BadgeMilestones {
     if (occurrence < 1) throw ArgumentError.value(occurrence, 'occurrence');
     return 'practice_master:occurrence:$occurrence';
   }
+
+  static String unstoppableOccurrenceEvidenceKey(int occurrence) {
+    if (occurrence < 1) throw ArgumentError.value(occurrence, 'occurrence');
+    return 'unstoppable:occurrence:$occurrence';
+  }
+
+  static bool isUnstoppableOccurrenceKey(String key) =>
+      key.startsWith('unstoppable:occurrence:');
+
+  static bool isLegacyUnstoppableWindowKey(String key) =>
+      key.startsWith('unstoppable:window:');
 
   static const practiceBadgeSyncMaxCompletions = 40;
 }

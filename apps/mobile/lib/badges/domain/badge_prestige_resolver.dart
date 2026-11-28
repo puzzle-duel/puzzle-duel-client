@@ -110,11 +110,9 @@ final class BadgePrestigeResolver {
   static int practiceMasterOccurrences(int completedPracticeGames) =>
       BadgeMilestones.practiceMasterOccurrences(completedPracticeGames);
 
-  /// Lifetime Unstoppable awards from non-overlapping 7-day windows.
+  /// Lifetime Unstoppable awards from total complete non-overlapping windows.
   static int unstoppableOccurrencesFromActiveDates(
     Iterable<String> distinctActiveUtcDates,
   ) =>
-      BadgeMilestones.nonOverlappingSevenDayWindows(
-        distinctActiveUtcDates,
-      ).length;
+      BadgeMilestones.totalCompleteSevenDayWindows(distinctActiveUtcDates);
 }

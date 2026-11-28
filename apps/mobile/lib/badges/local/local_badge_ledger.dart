@@ -8,10 +8,24 @@ import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 
+/// Authorization for one guest→verified badge adoption.
+///
+/// Must be produced only after successful guest-to-verified linking that
+/// preserves the expected guest identity — never from a bare verified token.
+final class BadgeGuestAdoptionAuthorization {
+  const BadgeGuestAdoptionAuthorization({
+    required this.sourceGuestLocalId,
+    required this.targetPlayerId,
+  });
+
+  final String sourceGuestLocalId;
+  final String targetPlayerId;
+}
+
 /// Durable practice completion evidence for guest-compatible badges.
 ///
-/// Account isolation: every async op captures immutable [PracticeIdentityScope]
-/// + generation at start and refuses to write if scope/generation changed.
+/// Single-file journal (v3): completions + ack set + evidence + adoption
+/// stamp written atomically so crash between steps cannot orphan sync work.
 final class LocalBadgeLedger {
   LocalBadgeLedger({
     required this.store,
@@ -22,12 +36,11 @@ final class LocalBadgeLedger {
   final PracticeIdentityStore identity;
 
   static const _filePrefix = 'badge-ledger';
-  static const _pendingPrefix = 'badge-pending-sync';
+  static const _legacyPendingPrefix = 'badge-pending-sync';
 
   int _generation = 0;
   final Map<String, Future<void>> _scopeLocks = {};
 
-  /// Bump on logout / account switch — in-flight ops must abort.
   void fence() {
     _generation++;
     unawaited(
@@ -46,8 +59,8 @@ final class LocalBadgeLedger {
   String _ledgerFile(PracticeIdentityScope scope) =>
       '$_filePrefix-${scope.storageKey}.json';
 
-  String _pendingFile(PracticeIdentityScope scope) =>
-      '$_pendingPrefix-${scope.storageKey}.json';
+  String _legacyPendingFile(PracticeIdentityScope scope) =>
+      '$_legacyPendingPrefix-${scope.storageKey}.json';
 
   bool _stillActive(PracticeIdentityScope scope, int generation) {
     return generation == _generation && identity.activeScope == scope;
@@ -72,16 +85,9 @@ final class LocalBadgeLedger {
     }
   }
 
-  Future<Map<String, Object?>> _readFile(String name) async {
+  Future<Map<String, Object?>> _readRaw(String name) async {
     final raw = await store.read(name);
-    if (raw == null || raw.isEmpty) {
-      return {
-        'version': 2,
-        'evidence': <String, Object?>{},
-        'activeUtcDates': <String>[],
-        'practiceCompletions': <Object>[],
-      };
-    }
+    if (raw == null || raw.isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, Object?>) return Map<String, Object?>.from(decoded);
@@ -89,16 +95,11 @@ final class LocalBadgeLedger {
         return decoded.map((k, v) => MapEntry(k.toString(), v));
       }
     } catch (_) {}
-    return {
-      'version': 2,
-      'evidence': <String, Object?>{},
-      'activeUtcDates': <String>[],
-      'practiceCompletions': <Object>[],
-    };
+    return {};
   }
 
   Future<_LedgerSnapshot> _loadSnapshot(PracticeIdentityScope scope) async {
-    final data = await _readFile(_ledgerFile(scope));
+    final data = await _readRaw(_ledgerFile(scope));
     final evidence = <String, String>{};
     final evidenceRaw = data['evidence'];
     if (evidenceRaw is Map) {
@@ -124,12 +125,39 @@ final class LocalBadgeLedger {
         }
       }
     }
-    // Migrate v1 practiceCompletionIds → empty structured list (ids only lost
-    // milestone identity is rebuilt from surviving evidence keys).
+    final synced = <String>{};
+    final syncedRaw = data['syncedCompletionIds'];
+    if (syncedRaw is List) {
+      for (final id in syncedRaw) {
+        synced.add(id.toString());
+      }
+    }
+    // Recover orphaned legacy pending file into synced/pending model once.
+    if (data['version'] is! num || (data['version'] as num).toInt() < 3) {
+      final legacy = await _readRaw(_legacyPendingFile(scope));
+      final legacyList = legacy['completions'];
+      if (legacyList is List) {
+        for (final item in legacyList) {
+          final parsed = _PracticeCompletionEvidence.tryParse(item);
+          if (parsed != null && seenIds.add(parsed.completionId)) {
+            completions.add(parsed);
+          }
+        }
+      }
+    }
+    BadgeGuestAdoptionRecord? adoption;
+    final adoptionRaw = data['guestAdoption'];
+    if (adoptionRaw is Map) {
+      adoption = BadgeGuestAdoptionRecord.tryParse(adoptionRaw);
+    }
+    final exportedTo = data['exportedToPlayerId']?.toString();
     return _LedgerSnapshot(
       evidence: evidence,
       activeUtcDates: dates,
       practiceCompletions: completions,
+      syncedCompletionIds: synced,
+      guestAdoption: adoption,
+      exportedToPlayerId: exportedTo,
     );
   }
 
@@ -153,12 +181,17 @@ final class LocalBadgeLedger {
     await store.writeAtomic(
       _ledgerFile(scope),
       jsonEncode({
-        'version': 2,
+        'version': 3,
         'evidence': snap.evidence,
         'activeUtcDates': snap.activeUtcDates.toList()..sort(),
         'practiceCompletions': [
           for (final c in snap.practiceCompletions) c.toJson(),
         ],
+        'syncedCompletionIds': snap.syncedCompletionIds.toList()..sort(),
+        if (snap.guestAdoption != null)
+          'guestAdoption': snap.guestAdoption!.toJson(),
+        if (snap.exportedToPlayerId != null)
+          'exportedToPlayerId': snap.exportedToPlayerId,
       }),
     );
   }
@@ -174,16 +207,32 @@ final class LocalBadgeLedger {
       if (!_stillActive(scope, generation)) {
         return {for (final id in BadgeId.values) id: 0};
       }
-      final counts = <BadgeId, int>{
-        for (final id in BadgeId.values) id: 0,
-      };
-      for (final entry in snap.evidence.entries) {
-        final badgeId = BadgeId.tryParse(entry.value);
-        if (badgeId == null || !badgeId.guestEligible) continue;
-        counts[badgeId] = (counts[badgeId] ?? 0) + 1;
-      }
-      return counts;
+      return _countsFromEvidence(snap.evidence);
     });
+  }
+
+  Map<BadgeId, int> _countsFromEvidence(Map<String, String> evidence) {
+    final counts = <BadgeId, int>{
+      for (final id in BadgeId.values) id: 0,
+    };
+    var unstoppableOcc = 0;
+    var unstoppableWindow = 0;
+    for (final entry in evidence.entries) {
+      final badgeId = BadgeId.tryParse(entry.value);
+      if (badgeId == null || !badgeId.guestEligible) continue;
+      if (badgeId == BadgeId.unstoppable) {
+        if (BadgeMilestones.isUnstoppableOccurrenceKey(entry.key)) {
+          unstoppableOcc += 1;
+        } else if (BadgeMilestones.isLegacyUnstoppableWindowKey(entry.key)) {
+          unstoppableWindow += 1;
+        }
+        continue;
+      }
+      counts[badgeId] = (counts[badgeId] ?? 0) + 1;
+    }
+    counts[BadgeId.unstoppable] =
+        unstoppableOcc > 0 ? unstoppableOcc : unstoppableWindow;
+    return counts;
   }
 
   /// Record an eligible Practice completion using the actual UTC completion day.
@@ -211,21 +260,25 @@ final class LocalBadgeLedger {
         rulesVersion: rulesVersion,
         generatorVersion: generatorVersion,
       );
-      final existed = snap.practiceCompletions.any(
+      final existingIndex = snap.practiceCompletions.indexWhere(
         (c) => c.completionId == completionId,
       );
-      if (!existed) {
+      if (existingIndex >= 0) {
+        final prior = snap.practiceCompletions[existingIndex];
+        if (prior.completedAtMs != completedAtMs || prior.utcDate != utcDate) {
+          // Conflicting replay — keep first durable payload.
+          return;
+        }
+      } else {
         snap.practiceCompletions.add(evidence);
       }
       snap.activeUtcDates.add(utcDate);
+      // New completion is pending until acknowledged (not in synced set).
       _rebuildDerivedEvidence(snap);
       await _persist(scope, generation, snap);
-      if (!_stillActive(scope, generation)) return;
-      await _enqueuePending(scope, generation, evidence);
     });
   }
 
-  /// Tournament activity day = UTC day of actual completion (not manifest date).
   Future<void> recordTournamentActivityDay({
     required String activityUtcDate,
   }) async {
@@ -243,14 +296,12 @@ final class LocalBadgeLedger {
   }
 
   void _rebuildDerivedEvidence(_LedgerSnapshot snap) {
-    // Loyalty
     for (final day in snap.activeUtcDates) {
       snap.evidence.putIfAbsent(
         BadgeMilestones.loyaltyEvidenceKey(day),
         () => BadgeId.loyalty.wire,
       );
     }
-    // Practice Master
     final occurrences = BadgeMilestones.practiceMasterOccurrences(
       snap.practiceCompletions.length,
     );
@@ -260,44 +311,17 @@ final class LocalBadgeLedger {
         () => BadgeId.practiceMaster.wire,
       );
     }
-    // Unstoppable — lifetime non-overlapping windows (never revoke).
-    for (final window
-        in BadgeMilestones.nonOverlappingSevenDayWindows(snap.activeUtcDates)) {
+    final total = BadgeMilestones.totalCompleteSevenDayWindows(
+      snap.activeUtcDates,
+    );
+    for (var i = 1; i <= total; i++) {
       snap.evidence.putIfAbsent(
-        window.evidenceKey,
+        BadgeMilestones.unstoppableOccurrenceEvidenceKey(i),
         () => BadgeId.unstoppable.wire,
       );
     }
   }
 
-  Future<void> _enqueuePending(
-    PracticeIdentityScope scope,
-    int generation,
-    _PracticeCompletionEvidence evidence,
-  ) async {
-    if (!_stillActive(scope, generation)) return;
-    final data = await _readFile(_pendingFile(scope));
-    final list = <Map<String, Object?>>[];
-    final raw = data['completions'];
-    if (raw is List) {
-      for (final item in raw) {
-        if (item is Map) {
-          list.add(item.map((k, v) => MapEntry(k.toString(), v)));
-        }
-      }
-    }
-    if (list.any((e) => e['completionId'] == evidence.completionId)) {
-      return;
-    }
-    list.add(evidence.toJson());
-    if (!_stillActive(scope, generation)) return;
-    await store.writeAtomic(
-      _pendingFile(scope),
-      jsonEncode({'version': 1, 'completions': list}),
-    );
-  }
-
-  /// Pending completions for verified sync (bounded batches, never discard silently).
   Future<List<Map<String, Object?>>> peekPendingCompletions({
     int limit = BadgeMilestones.practiceBadgeSyncMaxCompletions,
   }) async {
@@ -305,17 +329,13 @@ final class LocalBadgeLedger {
     final scope = identity.activeScope;
     return _withScopeLock(scope, () async {
       if (!_stillActive(scope, generation)) return const [];
-      final data = await _readFile(_pendingFile(scope));
+      final snap = await _loadSnapshot(scope);
       if (!_stillActive(scope, generation)) return const [];
       final out = <Map<String, Object?>>[];
-      final raw = data['completions'];
-      if (raw is List) {
-        for (final item in raw) {
-          if (out.length >= limit) break;
-          if (item is Map) {
-            out.add(item.map((k, v) => MapEntry(k.toString(), v)));
-          }
-        }
+      for (final c in snap.practiceCompletions) {
+        if (snap.syncedCompletionIds.contains(c.completionId)) continue;
+        out.add(c.toJson());
+        if (out.length >= limit) break;
       }
       return out;
     });
@@ -326,56 +346,72 @@ final class LocalBadgeLedger {
     final scope = identity.activeScope;
     return _withScopeLock(scope, () async {
       if (!_stillActive(scope, generation)) return 0;
-      final data = await _readFile(_pendingFile(scope));
-      final raw = data['completions'];
-      return raw is List ? raw.length : 0;
+      final snap = await _loadSnapshot(scope);
+      return snap.practiceCompletions
+          .where((c) => !snap.syncedCompletionIds.contains(c.completionId))
+          .length;
     });
   }
 
-  Future<void> acknowledgeSyncedCompletions(
-    Set<String> completionIds,
-  ) async {
+  Future<void> acknowledgeSyncedCompletions(Set<String> completionIds) async {
     if (completionIds.isEmpty) return;
     final generation = _generation;
     final scope = identity.activeScope;
     await _withScopeLock(scope, () async {
       if (!_stillActive(scope, generation)) return;
-      final data = await _readFile(_pendingFile(scope));
+      final snap = await _loadSnapshot(scope);
       if (!_stillActive(scope, generation)) return;
-      final remaining = <Map<String, Object?>>[];
-      final raw = data['completions'];
-      if (raw is List) {
-        for (final item in raw) {
-          if (item is! Map) continue;
-          final map = item.map((k, v) => MapEntry(k.toString(), v));
-          final id = map['completionId']?.toString();
-          if (id == null || !completionIds.contains(id)) {
-            remaining.add(map);
-          }
-        }
-      }
-      if (!_stillActive(scope, generation)) return;
-      await store.writeAtomic(
-        _pendingFile(scope),
-        jsonEncode({'version': 1, 'completions': remaining}),
-      );
+      snap.syncedCompletionIds.addAll(completionIds);
+      await _persist(scope, generation, snap);
     });
   }
 
-  /// After guest→verified link, adopt guest-scope completion evidence into the
-  /// active player scope so pending sync and local counts survive. Guest files
-  /// remain untouched (idempotent union). Call before [BadgeSyncRepository].
-  Future<void> adoptGuestProgressIntoActivePlayer() async {
+  /// Authorized guest→verified adoption. Idempotent per (guest, player) pair.
+  Future<bool> adoptGuestProgressIntoActivePlayer(
+    BadgeGuestAdoptionAuthorization authorization,
+  ) async {
     final generation = _generation;
     final scope = identity.activeScope;
-    if (scope.kind != PracticeIdentityKind.player) return;
-    final guestScope = PracticeIdentityScope.guest(identity.guestLocalId);
+    if (scope.kind != PracticeIdentityKind.player) return false;
+    if (scope.id != authorization.targetPlayerId.trim().toLowerCase()) {
+      return false;
+    }
+    final guestId = authorization.sourceGuestLocalId.trim().toLowerCase();
+    if (guestId.isEmpty || guestId != identity.guestLocalId) return false;
+    final guestScope = PracticeIdentityScope.guest(guestId);
 
-    await _withScopeLock(scope, () async {
-      if (!_stillActive(scope, generation)) return;
-      final guestSnap = await _loadSnapshot(guestScope);
+    return _withScopeLock(scope, () async {
+      if (!_stillActive(scope, generation)) return false;
       final playerSnap = await _loadSnapshot(scope);
-      if (!_stillActive(scope, generation)) return;
+      if (!_stillActive(scope, generation)) return false;
+
+      final prior = playerSnap.guestAdoption;
+      if (prior != null &&
+          prior.sourceGuestLocalId == guestId &&
+          prior.targetPlayerId == scope.id) {
+        // Already adopted this guest into this player — do not re-import.
+        return true;
+      }
+      if (prior != null && prior.targetPlayerId == scope.id) {
+        // Different guest already adopted into this player scope.
+        return false;
+      }
+
+      final guestSnap = await _loadSnapshot(guestScope);
+      if (guestSnap.exportedToPlayerId != null &&
+          guestSnap.exportedToPlayerId != scope.id) {
+        // Guest already exported to another verified account.
+        return false;
+      }
+      if (guestSnap.exportedToPlayerId == scope.id) {
+        playerSnap.guestAdoption = BadgeGuestAdoptionRecord(
+          sourceGuestLocalId: guestId,
+          targetPlayerId: scope.id,
+          completedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
+        );
+        await _persist(scope, generation, playerSnap);
+        return true;
+      }
 
       final seen = {
         for (final c in playerSnap.practiceCompletions) c.completionId,
@@ -384,37 +420,85 @@ final class LocalBadgeLedger {
         if (seen.add(c.completionId)) {
           playerSnap.practiceCompletions.add(c);
         }
+        // Keep unsynced guest completions pending on the player until ack.
+        if (!guestSnap.syncedCompletionIds.contains(c.completionId)) {
+          playerSnap.syncedCompletionIds.remove(c.completionId);
+        } else {
+          playerSnap.syncedCompletionIds.add(c.completionId);
+        }
       }
       playerSnap.activeUtcDates.addAll(guestSnap.activeUtcDates);
-      // Preserve already-earned evidence keys (never revoke).
       for (final entry in guestSnap.evidence.entries) {
+        if (BadgeMilestones.isLegacyUnstoppableWindowKey(entry.key)) {
+          continue; // rebuild occurrence keys below
+        }
         playerSnap.evidence.putIfAbsent(entry.key, () => entry.value);
       }
       _rebuildDerivedEvidence(playerSnap);
-      await _persist(scope, generation, playerSnap);
-      if (!_stillActive(scope, generation)) return;
-
-      // Merge pending sync queues.
-      final guestPending = await _readFile(_pendingFile(guestScope));
-      final playerPending = await _readFile(_pendingFile(scope));
-      if (!_stillActive(scope, generation)) return;
-      final merged = <Map<String, Object?>>[];
-      final pendingSeen = <String>{};
-      for (final source in [playerPending['completions'], guestPending['completions']]) {
-        if (source is! List) continue;
-        for (final item in source) {
-          if (item is! Map) continue;
-          final map = item.map((k, v) => MapEntry(k.toString(), v));
-          final id = map['completionId']?.toString() ?? '';
-          if (id.isEmpty || !pendingSeen.add(id)) continue;
-          merged.add(map);
-        }
-      }
-      await store.writeAtomic(
-        _pendingFile(scope),
-        jsonEncode({'version': 1, 'completions': merged}),
+      playerSnap.guestAdoption = BadgeGuestAdoptionRecord(
+        sourceGuestLocalId: guestId,
+        targetPlayerId: scope.id,
+        completedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
       );
+      await _persist(scope, generation, playerSnap);
+      if (!_stillActive(scope, generation)) return false;
+
+      // Mark guest exported without deleting progress.
+      guestSnap.exportedToPlayerId = scope.id;
+      await store.writeAtomic(
+        _ledgerFile(guestScope),
+        jsonEncode({
+          'version': 3,
+          'evidence': guestSnap.evidence,
+          'activeUtcDates': guestSnap.activeUtcDates.toList()..sort(),
+          'practiceCompletions': [
+            for (final c in guestSnap.practiceCompletions) c.toJson(),
+          ],
+          'syncedCompletionIds': guestSnap.syncedCompletionIds.toList()..sort(),
+          'exportedToPlayerId': scope.id,
+        }),
+      );
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'badge_guest_adoption_completed',
+          ),
+        ),
+      );
+      return true;
     });
+  }
+}
+
+final class BadgeGuestAdoptionRecord {
+  const BadgeGuestAdoptionRecord({
+    required this.sourceGuestLocalId,
+    required this.targetPlayerId,
+    required this.completedAtMs,
+  });
+
+  final String sourceGuestLocalId;
+  final String targetPlayerId;
+  final int completedAtMs;
+
+  Map<String, Object?> toJson() => {
+    'sourceGuestLocalId': sourceGuestLocalId,
+    'targetPlayerId': targetPlayerId,
+    'completedAtMs': completedAtMs,
+  };
+
+  static BadgeGuestAdoptionRecord? tryParse(Map raw) {
+    final guest = raw['sourceGuestLocalId']?.toString() ?? '';
+    final player = raw['targetPlayerId']?.toString() ?? '';
+    final ms = raw['completedAtMs'];
+    if (guest.isEmpty || player.isEmpty || ms is! num) return null;
+    return BadgeGuestAdoptionRecord(
+      sourceGuestLocalId: guest,
+      targetPlayerId: player,
+      completedAtMs: ms.toInt(),
+    );
   }
 }
 
@@ -476,9 +560,15 @@ final class _LedgerSnapshot {
     required this.evidence,
     required this.activeUtcDates,
     required this.practiceCompletions,
+    required this.syncedCompletionIds,
+    this.guestAdoption,
+    this.exportedToPlayerId,
   });
 
   final Map<String, String> evidence;
   final Set<String> activeUtcDates;
   final List<_PracticeCompletionEvidence> practiceCompletions;
+  final Set<String> syncedCompletionIds;
+  BadgeGuestAdoptionRecord? guestAdoption;
+  String? exportedToPlayerId;
 }

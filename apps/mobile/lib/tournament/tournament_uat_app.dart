@@ -281,7 +281,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       if (result == null) return;
       if (result.outcome == AuthFlowOutcome.linked ||
           result.outcome == AuthFlowOutcome.loggedIn) {
-        await controller.completeRankedAuthAndEnter();
+        await controller.completeRankedAuthAndEnter(
+          authorizeGuestBadgeAdoption:
+              result.outcome == AuthFlowOutcome.linked,
+        );
         _showAuthFeedback(controller, success: true);
       } else if (result.outcome == AuthFlowOutcome.failed) {
         _showAuthFeedback(controller, success: false);
