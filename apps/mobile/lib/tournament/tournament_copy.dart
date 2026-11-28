@@ -78,12 +78,19 @@ final class TournamentCopy {
   String get playerFallback => pick('Player', 'Oyuncu');
   String get personalRecordsTitle =>
       pick('Personal records', 'Kişisel rekorlar');
+  /// Guest / logged-out profile — Practice-only list (no All/Tournament segments).
+  String get practiceRecordsTitle =>
+      pick('Practice records', 'Pratik rekorları');
   String get personalRecordsSegmentAll => pick('All', 'Tümü');
   String get personalRecordsSegmentPractice => pick('Practice', 'Pratik');
   String get personalRecordsSegmentTournament => pick('Tournament', 'Turnuva');
   String get personalRecordsBlurb => pick(
     'Best scores on this device and your verified account. Tournament rows come from official results.',
     'Bu cihaz ve doğrulanmış hesabındaki en iyi skorlar. Turnuva satırları resmi sonuçlardandır.',
+  );
+  String get practiceRecordsBlurb => pick(
+    'Your best scores from completed practice games on this device.',
+    'Bu cihazda tamamladığın pratik oyunlarındaki en iyi skorlar.',
   );
   String get personalRecordsSourcePractice => pick('Practice', 'Pratik');
   String get personalRecordsSourceTournament => pick('Tournament', 'Turnuva');

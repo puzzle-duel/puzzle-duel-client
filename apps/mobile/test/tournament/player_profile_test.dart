@@ -1,15 +1,72 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
+import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_identity.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 
 import 'tournament_command_test.dart' show ScriptedUatApi;
+
+String _jwt({required String sub, required String accountType}) {
+  final header = base64Url
+      .encode(utf8.encode(jsonEncode({'alg': 'none'})))
+      .replaceAll('=', '');
+  final payload = base64Url
+      .encode(
+        utf8.encode(
+          jsonEncode({
+            'iss': 'https://staging.puzzle-duel.app',
+            'aud': 'puzzle-duel-api',
+            'sub': sub,
+            'account_type': accountType,
+            'fid': 'fid',
+          }),
+        ),
+      )
+      .replaceAll('=', '');
+  return '$header.$payload.sig';
+}
+
+final class _MemStore implements GuestCredentialStore {
+  String? token;
+  @override
+  Future<String?> readRefreshToken() async => token;
+  @override
+  Future<void> writeRefreshToken(String value) async => token = value;
+  @override
+  Future<void> clearRefreshToken() async => token = null;
+  @override
+  Future<String?> readPendingRotationId() async => null;
+  @override
+  Future<void> writePendingRotationId(String id) async {}
+  @override
+  Future<void> clearPendingRotationId() async {}
+  @override
+  Future<String?> readPendingLinkProvider() async => null;
+  @override
+  Future<void> writePendingLinkProvider(String provider) async {}
+  @override
+  Future<void> clearPendingLinkProvider() async {}
+  @override
+  Future<String?> readIdentityBinding() async => null;
+  @override
+  Future<void> writeIdentityBinding(String encoded) async {}
+  @override
+  Future<void> clearIdentityBinding() async {}
+  @override
+  Future<String?> readVaultJournal() async => null;
+  @override
+  Future<void> writeVaultJournal(String encoded) async {}
+  @override
+  Future<void> clearVaultJournal() async {}
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -57,24 +114,44 @@ void main() {
     expect(find.byKey(const Key('profile-header')), findsNothing);
   });
 
-  testWidgets('personal records segment control switches without refetch', (
+  testWidgets('PR01 guest profile has no segmented control (Practice-only)', (
     tester,
   ) async {
     final directory = Directory.systemTemp.createTempSync(
-      'pzd53-profile-segment',
+      'pzd53-profile-guest-segments',
     );
     await _pumpHome(tester, _api(), directory);
     await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
-    expect(find.byKey(const Key('profile-records-segment')), findsOneWidget);
-    expect(find.text('Personal records'), findsOneWidget);
-    await tester.tap(find.text('Tournament'));
+    expect(find.byKey(const Key('profile-records-segment')), findsNothing);
+    expect(find.text('Practice records'), findsOneWidget);
+    expect(
+      find.text(
+        'Your best scores from completed practice games on this device.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Personal records'), findsNothing);
+    expect(find.byKey(const Key('profile-best-easy')), findsOneWidget);
+    expect(find.byKey(const Key('profile-best-medium')), findsOneWidget);
+    expect(find.byKey(const Key('profile-best-hard')), findsOneWidget);
+  });
+
+  testWidgets('PR04 guest TR title and description for practice records', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'pzd53-profile-guest-tr',
+    );
+    await _pumpHome(tester, _api(), directory, locale: const Locale('tr'));
+    await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
-    expect(find.text('Tournament'), findsWidgets);
-    await tester.tap(find.text('Practice'));
-    await _pumpProfile(tester);
-    await tester.tap(find.text('All'));
-    await _pumpProfile(tester);
+    expect(find.byKey(const Key('profile-records-segment')), findsNothing);
+    expect(find.text('Pratik rekorları'), findsOneWidget);
+    expect(
+      find.text('Bu cihazda tamamladığın pratik oyunlarındaki en iyi skorlar.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows personal bests, locked badge, and offline badge retry', (
@@ -351,9 +428,98 @@ void main() {
       expect(find.textContaining('77'), findsWidgets);
     },
   );
+
+  testWidgets('PR05 verified profile shows All/Practice/Tournament segments', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'pzd53-profile-verified-segments',
+    );
+    await _pumpHome(
+      tester,
+      _api(
+        personalRecords: const UatHttpResult(200, {
+          'schemaReady': true,
+          'records': [
+            {
+              'difficulty': 'easy',
+              'source': 'tournament',
+              'score': 5500,
+              'rulesVersion': 'core-001.v3',
+              'generatorVersion': 'gen-001.v1',
+              'achievedAt': '2026-11-20T10:00:00.000Z',
+              'provenance': 'tournament_f2b_verified_subgame',
+            },
+          ],
+        }),
+      ),
+      directory,
+      verified: true,
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await _pumpProfile(tester);
+    expect(find.byKey(const Key('profile-records-segment')), findsOneWidget);
+    expect(find.text('Personal records'), findsOneWidget);
+    expect(find.text('All'), findsWidgets);
+    expect(find.text('Practice'), findsWidgets);
+    expect(find.text('Tournament'), findsWidgets);
+    // groupedScore inserts locale thousands separators (EN: 5,500).
+    expect(find.textContaining('5,500'), findsWidgets);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('profile-records-segment')),
+        matching: find.text('Tournament'),
+      ),
+    );
+    await _pumpProfile(tester);
+    expect(find.textContaining('5,500'), findsWidgets);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('profile-records-segment')),
+        matching: find.text('Practice'),
+      ),
+    );
+    await _pumpProfile(tester);
+    expect(find.text('No record yet.'), findsWidgets);
+  });
+
+  testWidgets('PR15 HTTP 503 does not show false empty on Tournament', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'pzd53-profile-503',
+    );
+    await _pumpHome(
+      tester,
+      _api(
+        personalRecords: const UatHttpResult(503, {
+          'error': 'AUTH_UNAVAILABLE',
+        }),
+      ),
+      directory,
+      verified: true,
+    );
+    await tester.tap(find.byKey(const Key('profile')));
+    await _pumpProfile(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('profile-records-segment')),
+        matching: find.text('Tournament'),
+      ),
+    );
+    await _pumpProfile(tester);
+    expect(find.text('Could not refresh records.'), findsWidgets);
+    // Must not present genuine empty copy for failed tournament fetch.
+    expect(find.text('No record yet.'), findsNothing);
+  });
 }
 
-ScriptedUatApi _api() {
+ScriptedUatApi _api({
+  UatHttpResult personalRecords = const UatHttpResult(200, {
+    'records': <Object>[],
+    'schemaReady': true,
+  }),
+}) {
   return ScriptedUatApi((method, path, body) async {
     if (path == '/v1/tournament/session' && method == 'POST') {
       return const UatHttpResult(201, {
@@ -395,9 +561,13 @@ ScriptedUatApi _api() {
       });
     }
     if (path == '/v1/profile/me/personal-records' && method == 'GET') {
+      return personalRecords;
+    }
+    if (path.endsWith('/personal-records/practice/sync') && method == 'POST') {
       return const UatHttpResult(200, {
         'records': <Object>[],
         'schemaReady': true,
+        'acknowledgements': <Object>[],
       });
     }
     return const UatHttpResult(404, {'error': 'NOT_FOUND'});
@@ -418,16 +588,40 @@ Future<void> _pumpHome(
   Locale? locale,
   TextScaler? textScaler,
   Size surfaceSize = const Size(390, 844),
+  bool verified = false,
 }) async {
   tester.view.physicalSize = surfaceSize;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+
+  GuestAuthClient? sessionAuth;
+  if (verified) {
+    const playerId = '11111111-1111-4111-8111-111111111111';
+    final token = _jwt(sub: playerId, accountType: 'verified');
+    final store = _MemStore()..token = 'v' * 64;
+    sessionAuth = GuestAuthClient(
+      origin: 'https://staging.puzzle-duel.app',
+      credentials: store,
+    );
+    sessionAuth.debugSeedAccess(
+      GuestAccess.parse(
+        accessToken: token,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+    );
+    final identity = PracticeIdentityStore(directory);
+    await identity.load();
+    await identity.bindAuthenticatedPlayer(playerId);
+  }
+
   await tester.pumpWidget(
     TournamentUatApp(
-      config: const UatConfig(
-        baseUrl: 'http://127.0.0.1',
-        bearer: 'Bearer test',
+      config: UatConfig(
+        baseUrl: verified
+            ? 'https://staging.puzzle-duel.app'
+            : 'http://127.0.0.1',
+        bearer: verified ? 'Bearer verified' : 'Bearer test',
         playerLabel: 'profile',
       ),
       api: api,
@@ -435,6 +629,7 @@ Future<void> _pumpHome(
       haptics: const SilentTournamentHaptics(),
       locale: locale,
       textScaler: textScaler,
+      sessionAuth: sessionAuth,
     ),
   );
   await tester.pump();

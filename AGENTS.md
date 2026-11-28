@@ -36,6 +36,22 @@ Before planning or editing any screen, route, API call, error handling, CI, Fire
 Before code: cite feature ID, impacted blueprint rules, ADRs and test plan. Make minimum scoped diff. Provide unit tests for each ruleset change, widget/e2e tests for relevant UX, and contract/golden fixture parity with backend. Run formatting/lint/tests and report exact results; do not claim unrun tests passed.
 Do NOT push to main, merge PR, modify organization settings, deploy or publish without explicit approval. Ask before adding dependencies, analytics SDKs, IAP or changing auth/privacy.
 
+## RC PRE-FLIGHT — every feature (owner 2026-11-28)
+Binding for every development milestone. Record completion in `docs/DEVELOPMENT-HISTORY.md`. Device-only checks stay NOT_RUN until owner UAT; never auto-PASS them. Happy-path-only delivery is forbidden.
+
+1. Mandatory MD gate completed (ledger, SERVER-CONFIG, observability, feature ADR/specs).
+2. Full relevant regression matrix (auth, Practice, Tournament, Profile, notifications, observability, gameplay invariants when in scope).
+3. Client/backend contract parity for any new/changed event, errorCode, route, or schema field.
+4. Database migration + runtime grant parity when persistence changes (plan/verify via authorized Actions only; no direct Oracle SSH).
+5. Authentication lifecycle: guest, verified login, logout, switch, kill/relaunch, stale response fencing.
+6. Logging compatibility: Log Gönder HTTP 201 + reportId, Inspector correlation, Crashlytics breadcrumbs; schema allowlist intact.
+7. Account isolation: no cross-account presentation or pending-sync leakage.
+8. CI status on the final source SHA (skipped ≠ PASS).
+9. Staging verification via authorized Actions/Inspector when applicable.
+10. Existing feature behavior verified; no gameplay/animation regressions under non-gameplay tasks.
+11. RC review: races, async ownership, stale responses, error handling, missing permissions, schema drift, offline/network, security boundaries, observability/UX regressions.
+12. Ledger updated with evidence; Turkish development summary delivered to owner + Jira.
+
 ## Mandatory post-development summary (GOLDEN RULE)
 After every meaningful milestone, implementation, bug fix, refactor, or review remediation, deliver a development summary to the owner **in Turkish** (keep file names and technical identifiers in English) and record the same summary on the corresponding Jira issue. The summary must cover: what changed, why, how it works, files, impact, decisions, executed tests with actual results, GitHub branch/SHA/PR/CI, Jira status/comments, remaining work, next step, and whether owner action is required. Do not treat a milestone as complete until this summary is delivered. Providing a summary does not by itself require stopping for approval unless a real approval gate was reached. All future agents must read and follow this rule before starting development.
 
