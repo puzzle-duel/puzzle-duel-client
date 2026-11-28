@@ -3,6 +3,14 @@
 ## MANDATORY FIRST STEP — project action ledger (owner 2026-11-28)
 Before ANY Puzzle Duel action (including read-only review, user-facing build commands, troubleshooting, Jira or GitHub operations), read `docs/DEVELOPMENT-HISTORY.md`, `docs/staging/SERVER-CONFIG.md` and relevant accepted decisions from the actual target ref. After each meaningful action append its outcome, evidence, decisions, tests and next step to the ledger. This is mandatory for all agents, including ChatGPT and Cursor. Verify existing approved UX and regressions before changing anything; do not resurrect removed behaviors. Staging transport is **https://84-13-66-211.sslip.io** (Oracle **84.13.66.211**); **https://staging.puzzle-duel.app is the JWT issuer, not the API transport**. Never give build instructions without the runbook's trusted TLS health preflight and complete OAuth/Firebase flags. No direct Oracle SSH, unapproved merge/deploy, destructive reset or data wipe.
 
+### Mandatory ordered workflow — GOLDEN RULE 0
+1. Read `docs/DEVELOPMENT-HISTORY.md`.
+2. Read `docs/staging/SERVER-CONFIG.md`.
+3. Check prior product decisions and developments, including the observability contract.
+4. Verify the planned action does not regress accepted behavior.
+5. **ABSOLUTE NO-REGRESSION — Log Gönder (UAT):** No action or change may negatively impact manual diagnostic upload, its visibility, authorized guest/verified-account operation, HTTP 201 + reportId delivery, or Request ID / Report ID Inspector correlation. Before every change assess impact; after every development run applicable regression tests and verify end-to-end on staging before merge/release/Done. FAIL or NOT_RUN blocks acceptance; green CI alone is insufficient. Never bypass authentication, redaction, or production isolation; never fake success. If a regression is found, prioritize restoring diagnostics before unrelated work.
+6. Record outcomes, changes, tests and decisions in the ledger after the action.
+
 ## Authority and scope
 Read `BLUEPRINT.md`, relevant `docs/features/` and `docs/adr/` before modifying code. This repo is ONLY the iOS/Android client; the backend belongs to `puzzle-duel-backend`.
 Priority: explicit owner instructions > accepted product blueprint/ADRs > feature spec > code conventions. If contradictory, STOP and ask; **never silently choose**.
