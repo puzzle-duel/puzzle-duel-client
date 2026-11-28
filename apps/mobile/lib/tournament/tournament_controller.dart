@@ -12,6 +12,7 @@ import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
+import 'package:puzzle_duel_mobile/badges/local/local_badge_ledger.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
@@ -194,6 +195,11 @@ final class TournamentController extends ChangeNotifier {
         sessionAuth: sessionAuth,
         practiceStore: practiceStore,
       );
+
+  late final LocalBadgeLedger localBadgeLedger = LocalBadgeLedger(
+    store: _kv,
+    identity: identity,
+  );
 
   TournamentRoute route = const TournamentRoute();
   TournamentDay? day;

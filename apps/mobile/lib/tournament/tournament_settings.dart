@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/badges/presentation/badge_evolution_studio.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
@@ -173,6 +174,20 @@ final class _TournamentSettingsScreenState
                         if (approved == true) {
                           await FirebaseDiagnostics.forceTestCrash();
                         }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      key: const Key('settings-badge-evolution-studio'),
+                      leading: const Icon(Icons.military_tech_outlined),
+                      title: Text(copy.badgeEvolutionStudioTitle),
+                      subtitle: Text(copy.badgeEvolutionStudioBlurb),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const BadgeEvolutionStudioScreen(),
+                          ),
+                        );
                       },
                     ),
                   ],

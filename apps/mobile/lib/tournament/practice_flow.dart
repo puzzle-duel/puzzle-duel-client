@@ -163,6 +163,14 @@ final class _PracticeFlowState extends State<PracticeFlow> {
       record: record,
       improved: improved,
     ));
+    // Guest-compatible badge ledger (loyalty / practice_master / unstoppable).
+    // Does not touch gameplay scoring or tournament On-Time awards.
+    unawaited(
+      widget.controller.localBadgeLedger.recordEligibleCompletion(
+        utcDate: when.substring(0, 10),
+        practiceCompletionId: record.sessionId,
+      ),
+    );
     final best = await _store.bestScore(
       profile.wire,
       rulesVersion: state.rulesVersion.id,

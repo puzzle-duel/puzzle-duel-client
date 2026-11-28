@@ -1,7 +1,8 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:puzzle_duel_mobile/badges/domain/badge_prestige.dart';
 import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
 
-enum BadgeProvenanceLabel { f2bPublication, unavailable }
+enum BadgeProvenanceLabel { f2bPublication, serverAward, localGuest, unavailable }
 
 /// English and Turkish copy for the tournament UAT.
 ///
@@ -120,13 +121,13 @@ final class TournamentCopy {
   String get badgeCollectionTitle =>
       pick('Badge collection', 'Rozet koleksiyonu');
   String get badgeCollectionBlurb => pick(
-    'Verified tournament achievements only. Practice cannot unlock these.',
-    'Yalnızca doğrulanmış turnuva başarıları. Pratik bunları açmaz.',
+    'Achievements evolve with prestige frames. Some require a verified account.',
+    'Başarılar prestij çerçeveleriyle gelişir. Bazıları doğrulanmış hesap ister.',
   );
   String get badgeLoading => pick('Loading badges…', 'Rozetler yükleniyor…');
   String get badgeEmpty => pick(
-    'No verified badges yet. Finish a daily tournament on time to earn On-Time.',
-    'Henüz doğrulanmış rozet yok. Zamanında rozeti için günlük turnuvayı zamanında bitir.',
+    'No badges earned yet. Complete practice or tournament games to start evolving.',
+    'Henüz rozet yok. Gelişmeye başlamak için pratik veya turnuva oyunu tamamla.',
   );
   String get badgeOffline => pick(
     'Offline. Practice records stay available; badges update when you reconnect.',
@@ -151,6 +152,83 @@ final class TournamentCopy {
     'Server-authoritative. Device clock and practice scores never grant this badge.',
     'Sunucu otoritesindedir. Cihaz saati ve pratik skorları bu rozeti vermez.',
   );
+  String get loyaltyBadgeName => pick('Loyal Player', 'Sadakat');
+  String get loyaltyBadgeDescription => pick(
+    'One award for each UTC day with at least one completed Practice or Tournament game.',
+    'En az bir tamamlanmış Pratik veya Turnuva oyunu olan her UTC günü için bir ödül.',
+  );
+  String get loyaltyBadgeUnlock => pick(
+    'Complete a Practice or Tournament game on a UTC day.',
+    'Bir UTC gününde Pratik veya Turnuva oyunu tamamla.',
+  );
+  String get practiceMasterBadgeName =>
+      pick('Practice Master', 'Pratik Ustası');
+  String get practiceMasterBadgeDescription => pick(
+    'One award for every 10 distinct completed Practice games.',
+    'Her 10 ayrı tamamlanmış Pratik oyunu için bir ödül.',
+  );
+  String get practiceMasterBadgeUnlock => pick(
+    'Complete 10 Practice games.',
+    '10 Pratik oyunu tamamla.',
+  );
+  String get tournamentGuruBadgeName =>
+      pick('Tournament Guru', 'Turnuva Gurusu');
+  String get tournamentGuruBadgeDescription => pick(
+    'Complete every required official challenge of an eligible tournament week.',
+    'Uygun bir turnuva haftasının tüm zorunlu resmi mücadelelerini tamamla.',
+  );
+  String get tournamentGuruBadgeUnlock => pick(
+    'Verified account required. Finish a full tournament week.',
+    'Doğrulanmış hesap gerekir. Tam bir turnuva haftasını bitir.',
+  );
+  String get championBadgeName => pick('Champion', 'Şampiyon');
+  String get championBadgeDescription => pick(
+    'Finish first in your weekly league group after official finalization.',
+    'Resmi sonuçlandıktan sonra haftalık lig grubunda birinci ol.',
+  );
+  String get championBadgeUnlock => pick(
+    'Verified account required. Win a finalized weekly league group.',
+    'Doğrulanmış hesap gerekir. Sonuçlanmış haftalık lig grubunu kazan.',
+  );
+  String get risingStarBadgeName => pick('Rising Star', 'Yükselen Yıldız');
+  String get risingStarBadgeDescription => pick(
+    'Awarded for each finalized promotion to a higher league.',
+    'Daha yüksek lige her resmi terfi için verilir.',
+  );
+  String get risingStarBadgeUnlock => pick(
+    'Verified account required. Earn a finalized league promotion.',
+    'Doğrulanmış hesap gerekir. Resmi bir lig terfisi kazan.',
+  );
+  String get unstoppableBadgeName => pick('Unstoppable', 'Durdurulamaz');
+  String get unstoppableBadgeDescription => pick(
+    'One award for every seven consecutive UTC days with a completed game.',
+    'Tamamlanmış oyun içeren her yedi ardışık UTC günü için bir ödül.',
+  );
+  String get unstoppableBadgeUnlock => pick(
+    'Complete a game on seven consecutive UTC days.',
+    'Yedi ardışık UTC gününde oyun tamamla.',
+  );
+  String get badgeNextPrestige => pick('Next prestige', 'Sonraki prestij');
+  String get badgeMaxPrestige =>
+      pick('Maximum prestige', 'Azami prestij');
+  String badgeRemainingToNext(int remaining) => pick(
+    '$remaining more to next prestige',
+    'Sonraki prestije $remaining kaldı',
+  );
+  String get badgeEvolutionStudioTitle =>
+      pick('Badge Evolution Studio', 'Rozet Evrim Stüdyosu');
+  String get badgeEvolutionStudioBlurb => pick(
+    'Staging preview only. Does not change real achievements.',
+    'Yalnızca staging önizlemesi. Gerçek başarıları değiştirmez.',
+  );
+  String badgePrestigeName(BadgePrestige prestige) => switch (prestige) {
+    BadgePrestige.bronze => pick('Bronze', 'Bronz'),
+    BadgePrestige.silver => pick('Silver', 'Gümüş'),
+    BadgePrestige.gold => pick('Gold', 'Altın'),
+    BadgePrestige.platinum => pick('Platinum', 'Platin'),
+    BadgePrestige.diamond => pick('Diamond', 'Elmas'),
+    BadgePrestige.mythic => pick('Mythic', 'Efsanevi'),
+  };
   String get profileNoActivity => pick(
     'No completed practice games on this device yet.',
     'Bu cihazda henüz tamamlanmış pratik oyunu yok.',
@@ -170,6 +248,14 @@ final class TournamentCopy {
         BadgeProvenanceLabel.f2bPublication => pick(
           'Source: verified tournament publication',
           'Kaynak: doğrulanmış turnuva yayını',
+        ),
+        BadgeProvenanceLabel.serverAward => pick(
+          'Source: server-verified award',
+          'Kaynak: sunucu doğrulamalı ödül',
+        ),
+        BadgeProvenanceLabel.localGuest => pick(
+          'Source: local guest progress',
+          'Kaynak: yerel misafir ilerlemesi',
         ),
         BadgeProvenanceLabel.unavailable => pick(
           'Source: not verified on this device',

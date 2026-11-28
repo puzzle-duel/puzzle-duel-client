@@ -155,19 +155,40 @@ void main() {
     );
     expect(find.text('Locked', skipOffstage: false), findsWidgets);
 
-    await tester.tap(find.byKey(const Key('badge-tile-on_time')));
-    await _pumpProfile(tester);
-    expect(find.byKey(const Key('badge-detail-title')), findsOneWidget);
-    expect(find.textContaining('Server-authoritative'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('badge-detail-close')));
-    await _pumpProfile(tester);
-
+    final onTimeTile = find.byKey(
+      const Key('badge-tile-on_time'),
+      skipOffstage: false,
+    );
     await tester.scrollUntilVisible(
-      find.byKey(const Key('badge-retry'), skipOffstage: false),
+      onTimeTile,
+      120,
+      scrollable: find.byType(Scrollable).hitTestable(),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(onTimeTile, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    // Detail sheet may require a second frame after modal route push.
+    for (var i = 0; i < 20 && find.byKey(const Key('badge-detail-title')).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(
+      find.byKey(const Key('badge-detail-title'), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Server-authoritative', skipOffstage: false),
+      findsWidgets,
+    );
+    await tester.tap(find.byKey(const Key('badge-detail-close')));
+    await tester.pumpAndSettle();
+
+    final retry = find.byKey(const Key('badge-retry'), skipOffstage: false);
+    await tester.scrollUntilVisible(
+      retry,
       200,
       scrollable: find.byType(Scrollable).hitTestable(),
     );
-    await tester.tap(find.byKey(const Key('badge-retry')));
+    await tester.tap(retry, warnIfMissed: false);
     await _pumpProfile(tester);
     expect(
       find.byKey(const Key('badge-status-banner'), skipOffstage: false),
@@ -226,6 +247,12 @@ void main() {
     await tester.tap(find.byKey(const Key('profile')));
     await _pumpProfile(tester);
     expect(find.text('Profil'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('badge-tile-on_time'), skipOffstage: false),
+      200,
+      scrollable: find.byType(Scrollable).hitTestable(),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('2 kez kazanıldı', skipOffstage: false), findsOneWidget);
     expect(find.text('Henüz rekorun yok.', skipOffstage: false), findsWidgets);
   });
