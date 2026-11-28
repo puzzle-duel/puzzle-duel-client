@@ -103,6 +103,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.start();
+    await controller.resume();
     controller.setAppForeground(false);
     controller.setAppForeground(true);
     // Foreground refresh runs off the input path.
@@ -209,6 +210,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.start();
+    await controller.resume();
     expect(controller.tournamentReady, isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 180));
     await controller.advance();

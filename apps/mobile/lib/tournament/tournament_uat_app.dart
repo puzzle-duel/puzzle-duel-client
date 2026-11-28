@@ -808,6 +808,64 @@ final class _Loading extends StatelessWidget {
   }
 }
 
+/// True only when live gameplay identity is the Home-selected manifest.
+///
+/// Active gameplay score/badge/pips/ordinal may paint Home only when:
+/// - personal presentation is allowed (verified account scope),
+/// - overview is account-scoped,
+/// - active manifest date == selected date,
+/// - series identity matches selected + controller series,
+/// - [day] is non-empty (cleared on generation/epoch fence).
+@visibleForTesting
+bool activeGameplayMatchesSelection({
+  required bool hidePersonal,
+  required bool accountScoped,
+  required String? selectedDate,
+  required WeeklyTournamentDay? selected,
+  required String? activeManifestUtcDate,
+  required String? activeSeriesId,
+  required TournamentDay? day,
+}) {
+  if (hidePersonal || !accountScoped) return false;
+  if (selectedDate == null ||
+      activeManifestUtcDate == null ||
+      selectedDate != activeManifestUtcDate) {
+    return false;
+  }
+  if (day == null || day.seriesId.isEmpty) return false;
+  final selectedSeries = selected?.seriesId;
+  if (selectedSeries != null &&
+      selectedSeries.isNotEmpty &&
+      selectedSeries != day.seriesId) {
+    return false;
+  }
+  if (activeSeriesId != null &&
+      activeSeriesId.isNotEmpty &&
+      activeSeriesId != day.seriesId) {
+    return false;
+  }
+  return true;
+}
+
+// Keep a short private alias for the Home screen call site.
+bool _activeGameplayMatchesSelection({
+  required bool hidePersonal,
+  required bool accountScoped,
+  required String? selectedDate,
+  required WeeklyTournamentDay? selected,
+  required String? activeManifestUtcDate,
+  required String? activeSeriesId,
+  required TournamentDay? day,
+}) => activeGameplayMatchesSelection(
+  hidePersonal: hidePersonal,
+  accountScoped: accountScoped,
+  selectedDate: selectedDate,
+  selected: selected,
+  activeManifestUtcDate: activeManifestUtcDate,
+  activeSeriesId: activeSeriesId,
+  day: day,
+);
+
 final class _HomeScreen extends StatelessWidget {
   const _HomeScreen({required this.controller, this.crashReporter});
 
@@ -828,26 +886,40 @@ final class _HomeScreen extends StatelessWidget {
     final selected = selectedDate == null
         ? null
         : overview?.dayFor(selectedDate);
-    final day = hidePersonalTournament ? null : controller.day;
-    final phase = day?.phase ?? DayPhase.ready;
+    // Active gameplay may paint Home only when it is the selected manifest.
+    final activeMatchesSelected = _activeGameplayMatchesSelection(
+      hidePersonal: hidePersonalTournament,
+      accountScoped: overview?.accountScoped == true,
+      selectedDate: selectedDate,
+      selected: selected,
+      activeManifestUtcDate: controller.activeManifestUtcDate,
+      activeSeriesId: controller.seriesId,
+      day: controller.day,
+    );
+    final day = activeMatchesSelected ? controller.day : null;
+    final phase = day?.phase ??
+        switch (selected?.status) {
+          WeeklyDayStatus.completed => DayPhase.completed,
+          WeeklyDayStatus.inProgress => DayPhase.inProgress,
+          _ => DayPhase.ready,
+        };
     final syncing = controller.tournamentSync == TournamentSyncState.syncing;
     final stale =
         !hidePersonalTournament &&
         controller.homeSnapshotStale &&
         !controller.tournamentReady;
     final connectivityLost = controller.tournamentConnectivityLost;
-    final selectedScore = hidePersonalTournament
-        ? null
-        : selected?.verifiedScore;
-    final verified = hidePersonalTournament
-        ? null
-        : tournamentInt(controller.results['all']);
+    final verified = activeMatchesSelected
+        ? tournamentInt(controller.results['all'])
+        : null;
     final score = hidePersonalTournament
         ? null
-        : selectedScore ??
-              (phase == DayPhase.completed
-                  ? verified ?? day?.seriesScore
-                  : day?.seriesScore);
+        : selected?.verifiedScore ??
+              (activeMatchesSelected
+                  ? (phase == DayPhase.completed
+                        ? verified ?? day?.seriesScore
+                        : day?.seriesScore)
+                  : null);
     final scoreLabel = hidePersonalTournament
         ? copy.scoreUnavailable
         : (selected?.status == WeeklyDayStatus.completed && score != null)
@@ -861,7 +933,9 @@ final class _HomeScreen extends StatelessWidget {
         ? copy.onTime
         : selected?.completionTiming == CompletionTiming.late
         ? copy.onTimeMissing
-        : phase == DayPhase.completed && controller.results.isNotEmpty
+        : (activeMatchesSelected &&
+              phase == DayPhase.completed &&
+              controller.results.isNotEmpty)
         ? (controller.results['onTimeAwarded'] == true
               ? copy.onTime
               : copy.onTimeMissing)
@@ -1020,8 +1094,18 @@ final class _HomeScreen extends StatelessWidget {
                         completedDayCount: overview?.completedDayCount ?? 0,
                         playablePastDayCount:
                             overview?.playablePastDayCount ?? 0,
-                        selectedBoardCount: selected?.completedBoardCount,
-                        selectedTotalBoards: selected?.totalBoardCount,
+                        selectedBoardCount: hidePersonalTournament
+                            ? null
+                            : (activeMatchesSelected
+                                  ? day?.completedGames
+                                  : selected?.completedBoardCount),
+                        selectedTotalBoards: hidePersonalTournament
+                            ? null
+                            : (selected?.totalBoardCount ?? 6),
+                        selectedOrdinal: hidePersonalTournament
+                            ? null
+                            : (activeMatchesSelected ? day?.ordinal : null),
+                        selectedStatus: selected?.status,
                       ),
                       const SizedBox(height: 32),
                       _HomeActions(controller: controller),
@@ -1174,6 +1258,8 @@ final class _DailyCard extends StatelessWidget {
     required this.playablePastDayCount,
     this.selectedBoardCount,
     this.selectedTotalBoards,
+    this.selectedOrdinal,
+    this.selectedStatus,
   });
 
   final TournamentCopy copy;
@@ -1195,26 +1281,39 @@ final class _DailyCard extends StatelessWidget {
   final int playablePastDayCount;
   final int? selectedBoardCount;
   final int? selectedTotalBoards;
+  final int? selectedOrdinal;
+  final WeeklyDayStatus? selectedStatus;
 
   @override
   Widget build(BuildContext context) {
-    final label = day?.label ?? 'E1';
+    final label = day?.label ?? '';
     final tone = guestMode
         ? GameTokens.diamondFill
-        : phase == DayPhase.completed ||
-              (overview?.dayFor(selectedDate ?? '')?.status ==
-                  WeeklyDayStatus.completed)
-        ? GameTokens.success
-        : _tone(label);
+        : switch (selectedStatus) {
+            WeeklyDayStatus.completed => GameTokens.success,
+            WeeklyDayStatus.availablePast => GameTokens.scoreGlow,
+            WeeklyDayStatus.lockedFuture ||
+            WeeklyDayStatus.closed ||
+            WeeklyDayStatus.unavailable ||
+            WeeklyDayStatus.unknown => GameTokens.textMuted,
+            WeeklyDayStatus.inProgress ||
+            WeeklyDayStatus.availableToday ||
+            null => GameTokens.accent,
+          };
     final title = guestMode
         ? copy.weeklyTournament.toUpperCase()
         : copy.dailyChallenge.toUpperCase();
     final body =
         bodyOverride ??
-        switch (phase) {
-          DayPhase.completed => copy.completedBody,
-          DayPhase.ready when day?.original == false => copy.alreadyClaimed,
-          DayPhase.inProgress || DayPhase.betweenGames => label,
+        switch (selectedStatus) {
+          WeeklyDayStatus.completed => copy.completedBody,
+          WeeklyDayStatus.inProgress =>
+            label.isEmpty
+                ? copy.progressHeadline
+                : label,
+          WeeklyDayStatus.availablePast => copy.latePlayExplanation,
+          WeeklyDayStatus.lockedFuture => copy.notAvailableYet,
+          _ when day?.original == false => copy.alreadyClaimed,
           _ => copy.readyBody,
         };
     final progressLine = guestMode || overview == null
@@ -1223,7 +1322,8 @@ final class _DailyCard extends StatelessWidget {
     final pastLine = guestMode || playablePastDayCount <= 0
         ? null
         : copy.playablePastChallenges(playablePastDayCount);
-    final pipCompleted = selectedBoardCount ?? day?.completedGames ?? 0;
+    final pipCompleted = guestMode ? 0 : (selectedBoardCount ?? 0);
+    final showPips = !guestMode;
     final showScore = !guestMode;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1290,15 +1390,17 @@ final class _DailyCard extends StatelessWidget {
                     accountScoped: !guestMode && overview!.accountScoped,
                   ),
                 ],
-                const SizedBox(height: 14),
-                _Pips(
-                  completed: pipCompleted,
-                  current: phase == DayPhase.completed ||
-                          (selectedTotalBoards != null &&
-                              pipCompleted >= (selectedTotalBoards ?? 0))
-                      ? null
-                      : day?.ordinal,
-                ),
+                if (showPips) ...[
+                  const SizedBox(height: 14),
+                  _Pips(
+                    completed: pipCompleted,
+                    current: phase == DayPhase.completed ||
+                            (selectedTotalBoards != null &&
+                                pipCompleted >= (selectedTotalBoards ?? 0))
+                        ? null
+                        : selectedOrdinal,
+                  ),
+                ],
                 if (showScore) ...[
                   const SizedBox(height: 14),
                   Text(

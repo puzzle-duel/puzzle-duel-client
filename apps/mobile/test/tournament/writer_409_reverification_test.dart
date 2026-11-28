@@ -88,8 +88,10 @@ void main() {
       await pumpEventQueue();
       expect(commands, 1); // No blind replay, regardless of outcome.
       expect(opened, 1); // Existing session reused; no takeover.
-      expect(claims, 2); // Exactly one server recheck.
-      expect(reads, greaterThanOrEqualTo(3)); // Explicit writer revalidation.
+      // Initial selected-manifest claim only; 409 recheck uses board GET, not
+      // a second silent claim (PZD-55 identity fence).
+      expect(claims, 1);
+      expect(reads, greaterThanOrEqualTo(2)); // Explicit writer revalidation.
       expect(controller.session.applyMoveCallCount, 0);
       expect(controller.rankedWriterLocked, !verifiedAfterRefresh);
     });

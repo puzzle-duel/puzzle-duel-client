@@ -92,6 +92,7 @@ void main() {
       );
       final identity = PracticeIdentityStore(directory);
       await identity.load();
+      await identity.bindAuthenticatedPlayer(playerId);
       final controller = TournamentController(
         config: UatConfig(
           baseUrl: 'http://127.0.0.1',
@@ -104,6 +105,7 @@ void main() {
         haptics: const SilentTournamentHaptics(),
       );
       await controller.start();
+      await controller.resume();
       return controller;
     }
 
@@ -273,6 +275,9 @@ void main() {
     });
     final identity = PracticeIdentityStore(directory);
     await identity.load();
+    await identity.bindAuthenticatedPlayer(
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    );
     final controller = TournamentController(
       config: const UatConfig(
         baseUrl: 'http://127.0.0.1',
@@ -285,6 +290,7 @@ void main() {
       haptics: const SilentTournamentHaptics(),
     );
     await controller.start();
+    await controller.resume();
     expect(controller.seriesId, 'series-b');
     // Board/claim succeed for the series owner even when this session is not
     // the active writer — mutation is what the fence blocks.

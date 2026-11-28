@@ -109,6 +109,50 @@ void main() {
           )
           .controller;
 
+      // Verified personal presentation requires account-scoped overview +
+      // matching active/selected manifest identity (PZD-55 isolation).
+      live.weeklyOverview = WeeklyTournamentOverview.tryParse({
+        'weekStartUtc': '2026-11-23',
+        'weekEndUtc': '2026-11-29',
+        'serverNowMs': 1,
+        'currentTournamentDate': '2026-11-28',
+        'completedDayCount': 1,
+        'playablePastDayCount': 0,
+        'accountScoped': true,
+        'days': [
+          for (final date in [
+            '2026-11-23',
+            '2026-11-24',
+            '2026-11-25',
+            '2026-11-26',
+            '2026-11-27',
+            '2026-11-28',
+            '2026-11-29',
+          ])
+            {
+              'date': date,
+              'status': date == '2026-11-29'
+                  ? 'LOCKED_FUTURE'
+                  : date == '2026-11-28'
+                  ? 'COMPLETED'
+                  : 'AVAILABLE_PAST',
+              'isToday': date == '2026-11-28',
+              'canStart': false,
+              'canResume': false,
+              'canViewResults': date == '2026-11-28',
+              'completedBoardCount': date == '2026-11-28' ? 6 : 0,
+              'totalBoardCount': 6,
+              if (date == '2026-11-28') ...{
+                'seriesId': 'series-a',
+                'verifiedScore': 10200,
+                'completionTiming': 'ON_TIME',
+              },
+            },
+        ],
+      });
+      live.selectedTournamentDate = '2026-11-28';
+      live.activeManifestUtcDate = '2026-11-28';
+      live.seriesId = 'series-a';
       live.day = const TournamentDay(
         seriesId: 'series-a',
         original: true,

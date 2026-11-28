@@ -86,12 +86,17 @@ void main() {
       );
 
       await controller.start();
+      await controller.resume();
       expect(controller.seriesId, 'series-active');
       expect(controller.day?.seriesScore, 12);
       final activeEpoch = claimPosts;
 
       // Simulate an in-flight response from a superseded refresh epoch.
-      final stale = controller.loadDay(presentHome: true, epoch: 0);
+      final stale = controller.loadDay(
+        presentHome: true,
+        epoch: 0,
+        originalUtcDate: controller.selectedTournamentDate,
+      );
       staleBoard.complete(
         const UatHttpResult(200, {
           'ordinal': 3,
@@ -267,6 +272,7 @@ void main() {
       );
 
       await controller.start();
+      await controller.resume();
       expect(controller.seriesId, 'series-ranked');
       expect(controller.day?.seriesScore, 0);
       expect(controller.results, isEmpty);

@@ -815,14 +815,11 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
     }
-    // Prefer explicit / Home-selected / server current date. Client `_today()` is
-    // only a last resort when no weekly overview is loaded (legacy resume paths).
-    // [startSelectedManifest] never relies on that fallback.
+    // Explicit selected/active date only — never invent client-local `_today()`.
     final claimDate =
         originalUtcDate ??
         selectedTournamentDate ??
-        weeklyOverview?.currentTournamentDate ??
-        (weeklyOverview == null ? _today() : null);
+        weeklyOverview?.currentTournamentDate;
     if (claimDate == null ||
         !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(claimDate)) {
       busy = false;
@@ -1367,16 +1364,16 @@ final class TournamentController extends ChangeNotifier {
         preserveRoute: true,
       );
     }
-    // Calendar ready ≠ claimed series. Claim/resume selected eligible day when
-    // an explicit resume still needs gameplay identity.
+    // Calendar ready ≠ claimed series. Claim/resume only the selected eligible
+    // day — never invent `_today()` when selection/identity is missing.
+    // Writer-locked resume still re-enters loadDay so same-device recovery can
+    // be retried after refresh (server fence remains authoritative).
     final needsSeries =
         day == null || seriesId == null || seriesId!.isEmpty;
-    if (needsSeries && !rankedWriterLocked && !rankedAuthRequired) {
+    if (!rankedAuthRequired && (needsSeries || rankedWriterLocked)) {
       final selected = selectedWeeklyDay;
       if (selected != null && (selected.canStart || selected.canResume)) {
         await loadDay(presentHome: false, originalUtcDate: selected.date);
-      } else if (weeklyOverview == null) {
-        await loadDay(presentHome: false);
       }
     }
     if (!tournamentReady ||
@@ -1745,6 +1742,18 @@ final class TournamentController extends ChangeNotifier {
       }
       InteractionPerf.mark('tournament.session.renew.before_command');
       await refreshTournament(preserveRoute: true);
+      // After session rotation, re-bind the selected/active manifest writer.
+      // Never invent client `_today()` — only explicit selected or active date.
+      final reclaimDate =
+          selectedWeeklyDay != null &&
+              (selectedWeeklyDay!.canStart || selectedWeeklyDay!.canResume)
+          ? selectedWeeklyDay!.date
+          : activeManifestUtcDate;
+      if (reclaimDate != null &&
+          RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(reclaimDate) &&
+          !rankedAuthRequired) {
+        await loadDay(presentHome: false, originalUtcDate: reclaimDate);
+      }
       final ready =
           tournamentReady && !rankedWriterLocked && api.sessionSecret != null;
       if (!ready && route.place == TournamentPlace.playing) {
