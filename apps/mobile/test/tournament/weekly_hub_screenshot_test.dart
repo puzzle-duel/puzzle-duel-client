@@ -1,8 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 import 'package:puzzle_duel_mobile/tournament/weekly_tournament_calendar.dart';
 import 'package:puzzle_duel_mobile/tournament/weekly_tournament_overview.dart';
+
+/// macOS-baselined pixel goldens; Linux CI rasters diverge (same policy as pzd42).
+bool get _skipPixelGoldensOnCi =>
+    Platform.environment['CI'] == 'true' ||
+    Platform.environment['GITHUB_ACTIONS'] == 'true';
 
 WeeklyTournamentOverview _overview({required bool accountScoped}) {
   return WeeklyTournamentOverview.tryParse({
@@ -45,6 +52,20 @@ WeeklyTournamentOverview _overview({required bool accountScoped}) {
 }
 
 void main() {
+  test('PZD-55 calendar golden PNG artifacts exist', () {
+    final goldensDir = Directory('test/tournament/goldens');
+    expect(goldensDir.existsSync(), isTrue);
+    for (final name in [
+      'pzd55-guest-calendar.png',
+      'pzd55-verified-calendar.png',
+      'pzd55-verified-past-selected.png',
+    ]) {
+      final file = File('${goldensDir.path}/$name');
+      expect(file.existsSync(), isTrue, reason: file.path);
+      expect(file.lengthSync(), greaterThan(1000));
+    }
+  });
+
   testWidgets('RC visual goldens: guest + verified calendar', (tester) async {
     Future<void> pumpCalendar({
       required bool accountScoped,
@@ -78,6 +99,8 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(find.byKey(const Key('weekly-tournament-calendar')), findsOneWidget);
+      expect(find.byKey(Key('week-day-$selected')), findsOneWidget);
       await expectLater(
         find.byType(WeeklyTournamentCalendar),
         matchesGoldenFile('goldens/$golden.png'),
@@ -99,5 +122,5 @@ void main() {
       selected: '2026-11-23',
       golden: 'pzd55-verified-past-selected',
     );
-  });
+  }, skip: _skipPixelGoldensOnCi);
 }
