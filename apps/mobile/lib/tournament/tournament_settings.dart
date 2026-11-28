@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/diagnostics/crash_reporter.dart';
 import 'package:puzzle_duel_mobile/diagnostics/diagnostic_runtime.dart';
 import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_session_recovery.dart';
@@ -91,31 +92,37 @@ final class _TournamentSettingsScreenState
                           ? null
                           : () async {
                               setState(() => _diagnosticUploadInFlight = true);
-                              final messenger = ScaffoldMessenger.of(context);
                               try {
                                 final result =
                                     await sendStagingManualDiagnostics(
-                                  operation: 'settings_manual_report',
-                                  requestId: controller
-                                      .activeSessionRecovery?.lastRequestId,
-                                  errorCode: controller.tournamentNoticeCode,
-                                  crashReporter: crashReporter,
-                                  api: controller.api,
-                                );
+                                      operation: 'settings_manual_report',
+                                      requestId: controller
+                                          .activeSessionRecovery
+                                          ?.lastRequestId,
+                                      errorCode:
+                                          controller.tournamentNoticeCode,
+                                      crashReporter: crashReporter,
+                                      api: controller.api,
+                                    );
                                 if (!context.mounted) return;
-                                messenger.showSnackBar(SnackBar(
-                                  content: Text(result.userMessage),
-                                  action: result.serverDelivered
-                                      ? SnackBarAction(
-                                          label: 'Kopyala',
-                                          onPressed: () {
-                                            Clipboard.setData(ClipboardData(
-                                              text: result.serverReportId!,
-                                            ));
-                                          },
-                                        )
-                                      : null,
-                                ));
+                                final message =
+                                    result.serverDelivered &&
+                                        result.serverReportId != null
+                                    ? '${result.userMessage} (${result.serverReportId})'
+                                    : result.userMessage;
+                                if (result.serverDelivered &&
+                                    result.serverReportId != null) {
+                                  await Clipboard.setData(
+                                    ClipboardData(text: result.serverReportId!),
+                                  );
+                                }
+                                controller.presentAppFeedback(
+                                  kind: result.serverDelivered
+                                      ? AppFeedbackKind.success
+                                      : AppFeedbackKind.warning,
+                                  message: message,
+                                  semanticsKey: 'settings-diagnostics-feedback',
+                                );
                               } finally {
                                 if (mounted) {
                                   setState(
@@ -132,14 +139,14 @@ final class _TournamentSettingsScreenState
                       title: const Text('Crash Test (STAGING)'),
                       subtitle: Text(FirebaseDiagnostics.readinessMessage),
                       onTap: () async {
-                        final messenger = ScaffoldMessenger.of(context);
                         if (!FirebaseDiagnostics.enabled ||
                             !FirebaseDiagnostics.stagingDiagnosticsEnabled) {
-                          messenger.showSnackBar(SnackBar(
-                            content: Text(
-                              'Crash testi kullanılamıyor: ${FirebaseDiagnostics.readinessMessage}',
-                            ),
-                          ));
+                          controller.presentAppFeedback(
+                            kind: AppFeedbackKind.warning,
+                            message:
+                                'Crash testi kullanılamıyor: ${FirebaseDiagnostics.readinessMessage}',
+                            semanticsKey: 'settings-crash-test-unavailable',
+                          );
                           return;
                         }
                         final approved = await showDialog<bool>(
@@ -147,7 +154,8 @@ final class _TournamentSettingsScreenState
                           builder: (dialogContext) => AlertDialog(
                             title: const Text('Staging Crash Test'),
                             content: const Text(
-                                'Bu işlem uygulamayı bilerek kapatır. Devam edilsin mi?'),
+                              'Bu işlem uygulamayı bilerek kapatır. Devam edilsin mi?',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () =>

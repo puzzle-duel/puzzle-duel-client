@@ -11,6 +11,7 @@ import 'package:puzzle_duel_mobile/application/game_constants.dart';
 import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
 import 'package:puzzle_duel_mobile/tournament/local_settings.dart';
@@ -216,6 +217,32 @@ final class TournamentController extends ChangeNotifier {
   TournamentHomeSnapshot? homeSnapshot;
   bool homeSnapshotStale = false;
 
+  /// Test-only: awaited at the start of [_hydrateHomeSnapshot] before disk I/O.
+  @visibleForTesting
+  Future<void> Function()? debugBeforeHomeSnapshotLoad;
+
+  /// Test-only entry for delayed-hydration isolation regressions.
+  @visibleForTesting
+  Future<void> debugHydrateHomeSnapshot() => _hydrateHomeSnapshot();
+
+  /// Test-only: whether same-device registration succeeded for this restore.
+  @visibleForTesting
+  bool get debugSameDeviceRegistered => _sameDeviceRegistered;
+
+  /// True when [tournamentEpoch]/[accountEpoch] still own presentation mutations.
+  bool _ownsAccountPresentation({
+    required int tournamentEpoch,
+    required int accountEpoch,
+    String? scopeKey,
+  }) {
+    if (tournamentEpoch != _tournamentEpoch) return false;
+    if (accountEpoch != accountStateEpoch) return false;
+    if (scopeKey != null && scopeKey != identity.activeScope.storageKey) {
+      return false;
+    }
+    return true;
+  }
+
   bool booting = true;
   bool busy = false;
   bool moveInFlight = false;
@@ -297,6 +324,10 @@ final class TournamentController extends ChangeNotifier {
   /// Bumps when account type / player scope changes so Profile can refresh.
   int accountStateEpoch = 0;
 
+  /// Centralized Top Banner feedback (exclusive transient notification channel).
+  AppFeedbackNotice? appFeedback;
+  int _appFeedbackGeneration = 0;
+
   void setAuthUiBusy(bool value) {
     if (authUiBusy == value) return;
     authUiBusy = value;
@@ -305,6 +336,12 @@ final class TournamentController extends ChangeNotifier {
 
   void markAccountStateUpdated() {
     accountStateEpoch++;
+    // Drop feedback tied to the previous account scope.
+    final pendingFeedback = appFeedback;
+    if (pendingFeedback != null &&
+        pendingFeedback.accountEpoch < accountStateEpoch) {
+      appFeedback = null;
+    }
     // Fence before kick so in-flight work from the previous account cannot
     // mutate the newly published scope.
     personalRecords.fenceSync();
@@ -319,6 +356,141 @@ final class TournamentController extends ChangeNotifier {
     );
     _kickPersonalRecordsSync();
     notifyListeners();
+  }
+
+  /// Presents one transient Top Banner. Replaces any visible feedback.
+  void presentAppFeedback({
+    required AppFeedbackKind kind,
+    required String message,
+    String? semanticsKey,
+  }) {
+    final generation = ++_appFeedbackGeneration;
+    appFeedback = AppFeedbackNotice(
+      generation: generation,
+      accountEpoch: accountStateEpoch,
+      kind: kind,
+      message: message,
+      semanticsKey: semanticsKey,
+    );
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: 'app_feedback_presented',
+          errorCode: switch (kind) {
+            AppFeedbackKind.info => 'INFO',
+            AppFeedbackKind.warning => 'WARNING',
+            AppFeedbackKind.success => 'SUCCESS',
+          },
+        ),
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// Clears feedback only when [generation] still owns the active notice.
+  void clearAppFeedback(int generation) {
+    if (appFeedback?.generation != generation) return;
+    appFeedback = null;
+    notifyListeners();
+  }
+
+  /// User/gesture/auto dismiss of feedback [generation] only (idempotent).
+  ///
+  /// Stale callbacks must pass the generation they own — never clear a newer
+  /// [appFeedback] instance that replaced the original.
+  void dismissAppFeedback({required String reason, required int generation}) {
+    final current = appFeedback;
+    if (current == null || current.generation != generation) return;
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.screenOpened,
+          operation: reason == 'gesture'
+              ? 'app_feedback_dismissed_gesture'
+              : 'app_feedback_dismissed_auto',
+          errorCode: switch (current.kind) {
+            AppFeedbackKind.info => 'INFO',
+            AppFeedbackKind.warning => 'WARNING',
+            AppFeedbackKind.success => 'SUCCESS',
+          },
+        ),
+      ),
+    );
+    clearAppFeedback(generation);
+  }
+
+  void _clearPersonalTournamentFields({bool resetWriterLock = false}) {
+    _cancelPendingResolutionNav();
+    _resolutionHold?.cancel();
+    _resolutionHold = null;
+    day = null;
+    board = const {};
+    results = const {};
+    leaderboard = const {};
+    nextCursor = null;
+    seriesId = null;
+    category = 'ALL';
+    weekStart = null;
+    weeks = const [];
+    weeklyFinal = false;
+    homeSnapshot = null;
+    homeSnapshotStale = false;
+    resultsError = null;
+    errorCode = null;
+    noticeCode = null;
+    tournamentNoticeCode = null;
+    scoreDelta = null;
+    deadlineMs = null;
+    serverNowMs = null;
+    syncedAt = null;
+    _claim = null;
+    _pending = null;
+    _pendingKey = null;
+    _pendingPreState = null;
+    _pendingOfferIndex = null;
+    _pendingTap = null;
+    if (resetWriterLock) {
+      rankedWriterLocked = false;
+    }
+    busy = false;
+    moveInFlight = false;
+  }
+
+  /// Guest / unverified gate: clear personal fields, no auto auth warning banner.
+  /// Preserves [rankedWriterLocked] so recovery gates remain authoritative.
+  void _applyRankedAuthRequiredGate({required bool presentHome}) {
+    _tournamentEpoch++;
+    _clearPersonalTournamentFields();
+    rankedAuthRequired = true;
+    booting = false;
+    tournamentSync = TournamentSyncState.degraded;
+    if (presentHome) route = const TournamentRoute();
+    notifyListeners();
+  }
+
+  /// Clears in-memory account-scoped tournament presentation and fences async
+  /// completions. Does not wipe Practice, device settings, or server history.
+  void invalidateAccountScopedPresentation({required String reason}) {
+    _tournamentEpoch++;
+    _clearPersonalTournamentFields(resetWriterLock: true);
+    tournamentSync = TournamentSyncState.idle;
+    // Authenticated-only routes must not linger under the next account scope.
+    if (route.place != TournamentPlace.home) {
+      route = const TournamentRoute();
+    }
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'account_scoped_state_invalidated',
+          errorCode: reason.toUpperCase(),
+        ),
+      ),
+    );
   }
 
   void _kickPersonalRecordsSync() {
@@ -444,6 +616,7 @@ final class TournamentController extends ChangeNotifier {
     notifyListeners();
     if (sessionRecoveryRequired) {
       final recovered = await _tryClearTransientSessionRecovery();
+      if (activeEpoch != _tournamentEpoch) return;
       if (!recovered) {
         rankedWriterLocked = true;
         busy = false;
@@ -460,6 +633,7 @@ final class TournamentController extends ChangeNotifier {
     if (sessionAuth != null) {
       try {
         final access = await sessionAuth!.authenticate();
+        if (activeEpoch != _tournamentEpoch) return;
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           unawaited(
@@ -471,20 +645,15 @@ final class TournamentController extends ChangeNotifier {
               ),
             ),
           );
-          rankedAuthRequired = true;
-          busy = false;
-          booting = false;
-          errorCode = null;
-          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
-          tournamentSync = TournamentSyncState.degraded;
-          if (presentHome) route = const TournamentRoute();
-          notifyListeners();
+          _applyRankedAuthRequiredGate(presentHome: presentHome);
           return;
         }
         rankedAuthRequired = false;
       } on GuestAuthException catch (error) {
+        if (activeEpoch != _tournamentEpoch) return;
         if (GuestSessionRecovery.isRecoverableStartup(error.code)) {
           await enterSessionRecovery(error.code);
+          if (activeEpoch != _tournamentEpoch) return;
           if (presentHome) route = const TournamentRoute();
           return;
         }
@@ -508,14 +677,7 @@ final class TournamentController extends ChangeNotifier {
           ),
         ),
       );
-      rankedAuthRequired = true;
-      busy = false;
-      booting = false;
-      errorCode = null;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
-      tournamentSync = TournamentSyncState.degraded;
-      if (presentHome) route = const TournamentRoute();
-      notifyListeners();
+      _applyRankedAuthRequiredGate(presentHome: presentHome);
       return;
     }
     if (!_accepted(claim, const {200, 201}, degradedOnFailure: true)) return;
@@ -579,11 +741,13 @@ final class TournamentController extends ChangeNotifier {
     if (!needsRecovery || recoveryDenial != null) {
       _applyBoard(view.map, reveal: false);
     }
+    if (activeEpoch != _tournamentEpoch) return;
     if (day?.phase == DayPhase.completed) {
-      await _loadResults();
+      await _loadResults(stillCurrent: () => activeEpoch == _tournamentEpoch);
     }
     if (activeEpoch != _tournamentEpoch) return;
     await _persistHomeSnapshot();
+    if (activeEpoch != _tournamentEpoch) return;
     homeSnapshotStale = false;
     busy = false;
     booting = false;
@@ -673,7 +837,10 @@ final class TournamentController extends ChangeNotifier {
     if (!access.isVerified) {
       _pendingRankedEntryOnce = true;
       rankedAuthRequired = true;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      // Sheet presentation is the feedback; avoid a redundant Top Banner.
+      if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
+        tournamentNoticeCode = null;
+      }
       notifyListeners();
       onRequestRankedAuth?.call();
       return;
@@ -683,15 +850,16 @@ final class TournamentController extends ChangeNotifier {
   }
 
   /// Applies post-logout guest credentials without starting a claim.
+  ///
+  /// Guest mode after logout is expected — do not emit a RANKED_AUTH_REQUIRED
+  /// Top Banner; the Home CTA already explains sign-in is required.
   void applyGuestSessionAfterLogout({required bool rankedAuthRequired}) {
+    invalidateAccountScopedPresentation(reason: 'logout');
     this.rankedAuthRequired = rankedAuthRequired;
     activeSessionRecovery = null;
     sessionRecoveryRequired = false;
     unawaited(invalidateTournamentGameplaySession(reason: 'logout'));
-    homeSnapshot = null;
-    homeSnapshotStale = false;
     if (rankedAuthRequired) {
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
       tournamentSync = TournamentSyncState.degraded;
     }
     unawaited(
@@ -700,6 +868,15 @@ final class TournamentController extends ChangeNotifier {
           level: LogLevel.info,
           code: LogCode.sessionRestored,
           operation: 'auth_account_scope_cleared',
+        ),
+      ),
+    );
+    unawaited(
+      DiagnosticRuntime.logger.log(
+        LogEvent(
+          level: LogLevel.info,
+          code: LogCode.sessionRestored,
+          operation: 'guest_home_state_initialized',
         ),
       ),
     );
@@ -768,9 +945,12 @@ final class TournamentController extends ChangeNotifier {
       tournamentNoticeCode = null;
     } else if (resolved != null) {
       rankedAuthRequired = true;
-      tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
+      // Guest after recovery: CTA only — no automatic auth warning banner.
+      if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
+        tournamentNoticeCode = null;
+      }
       tournamentSync = TournamentSyncState.degraded;
-    } else if (tournamentNoticeCode != 'RANKED_AUTH_REQUIRED') {
+    } else if (tournamentNoticeCode == 'RANKED_AUTH_REQUIRED') {
       tournamentNoticeCode = null;
     }
     unawaited(
@@ -829,10 +1009,11 @@ final class TournamentController extends ChangeNotifier {
         final access = await sessionAuth!.authenticate();
         // Invalidate previous tournament session before publishing account.
         await invalidateTournamentGameplaySession(reason: 'account_transition');
+        // Never flash previous account personal data under the new identity.
+        invalidateAccountScopedPresentation(reason: 'account_transition');
         api.bearer = UatApi.normalizeBearer(access.accessToken);
         if (!access.isVerified) {
           rankedAuthRequired = true;
-          tournamentNoticeCode = 'RANKED_AUTH_REQUIRED';
           await clearAuthenticatedPracticeScope();
           markAccountStateUpdated();
           unawaited(
@@ -1438,6 +1619,7 @@ final class TournamentController extends ChangeNotifier {
         session.showServerRejection('WRITER_NOT_AUTHORIZED');
         rankedWriterLocked = true;
         noticeCode = 'WRITER_NOT_AUTHORIZED';
+        tournamentNoticeCode = 'WRITER_NOT_AUTHORIZED';
         errorCode = null;
         // Once only: ask the server to restore/verify this session and the
         // writer binding, then explicitly re-read writerSessionMatches.
@@ -1707,6 +1889,8 @@ final class TournamentController extends ChangeNotifier {
     bool preserveReturn = false,
     bool fromHome = false,
   }) async {
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     _cancelPendingResolutionNav();
     if (fromHome) category = 'ALL';
     final opened = preserveReturn
@@ -1730,6 +1914,12 @@ final class TournamentController extends ChangeNotifier {
 
     if (weekly && weeks.isEmpty) {
       final listed = await api.get('/v1/tournament/leaderboards/weeks');
+      if (!_ownsAccountPresentation(
+        tournamentEpoch: tournamentEpoch,
+        accountEpoch: accountEpoch,
+      )) {
+        return;
+      }
       if (!_accepted(listed, const {200}, degradedOnFailure: true)) {
         busy = false;
         notifyListeners();
@@ -1740,6 +1930,12 @@ final class TournamentController extends ChangeNotifier {
           item.toString(),
       ];
       weekStart ??= weeks.isEmpty ? null : weeks.first;
+    }
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
     }
     if (weekly && fromHome && weeks.isNotEmpty) weekStart = weeks.first;
     final selectedWeek = week ?? weekStart;
@@ -1753,6 +1949,12 @@ final class TournamentController extends ChangeNotifier {
     }
     final path = _leaderboardPath(weekly: weekly, week: selectedWeek);
     final response = await api.get(path);
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (!_accepted(response, const {200}, degradedOnFailure: true)) {
       busy = false;
       notifyListeners();
@@ -1770,12 +1972,21 @@ final class TournamentController extends ChangeNotifier {
   Future<void> loadMoreLeaderboard() async {
     final cursor = nextCursor;
     if (cursor == null || busy) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     final weekly = route.place == TournamentPlace.weekly;
+    final week = weekStart;
     busy = true;
     notifyListeners();
     final response = await api.get(
-      _leaderboardPath(weekly: weekly, week: weekStart, cursor: cursor),
+      _leaderboardPath(weekly: weekly, week: week, cursor: cursor),
     );
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (!_accepted(response, const {200}, degradedOnFailure: true)) return;
     final existing = leaderboard['rows'];
     final more = response.map['rows'];
@@ -1810,8 +2021,16 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _loadResults({bool Function()? stillCurrent}) async {
     final id = seriesId;
     if (id == null) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
     final response = await api.get('/v1/tournament/series/$id/results');
     if (stillCurrent != null && !stillCurrent()) return;
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    )) {
+      return;
+    }
     if (response.status == 200) {
       results = response.map;
       resultsError = null;
@@ -1902,6 +2121,12 @@ final class TournamentController extends ChangeNotifier {
 
   /// Returns true only when a usable session secret is ready for ranked calls.
   Future<bool> _restoreSession({bool degradedOnFailure = false}) async {
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    bool stillOwns() => _ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+    );
     final binding =
         config.stagingSessionBinding ?? UatApi.authBinding(config.bearer);
     final origin = UatApi.apiOrigin(config.baseUrl);
@@ -1920,6 +2145,7 @@ final class TournamentController extends ChangeNotifier {
     if (saved != null) {
       api.sessionSecret = saved;
       final current = await api.get('/v1/tournament/session');
+      if (!stillOwns()) return false;
       _diagSession(
         operation: 'GET',
         endpoint: '/v1/tournament/session',
@@ -1933,17 +2159,20 @@ final class TournamentController extends ChangeNotifier {
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-          _sameDeviceRegistered = await _deviceRecovery.register(
+          final registered = await _deviceRecovery.register(
             api: api,
             playerId: _verifiedSessionPlayerId!,
             sessionId: _verifiedSessionId!,
             origin: origin,
           );
+          if (!stillOwns()) return false;
+          _sameDeviceRegistered = registered;
         }
         InteractionPerf.mark('tournament.session.restore.hit');
         await _bindPlayerId(current.map['playerId']?.toString());
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
-        return true;
+        return stillOwns();
       }
       if (current.status == 0) {
         // Bound session + network failure: keep practice scope, do not POST.
@@ -1958,7 +2187,11 @@ final class TournamentController extends ChangeNotifier {
       api.sessionSecret = null;
       if (current.status == 401) {
         await identity.clearAuthenticatedPlayer();
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
+        // Fence before falling through to POST — stale 401 recovery must not
+        // open a fresh writer under a newer account scope.
+        if (!stillOwns()) return false;
       }
       InteractionPerf.mark('tournament.session.restore.rejected');
     } else {
@@ -1974,6 +2207,7 @@ final class TournamentController extends ChangeNotifier {
     }
 
     final opened = await api.post('/v1/tournament/session');
+    if (!stillOwns()) return false;
     _diagSession(
       operation: 'POST',
       endpoint: '/v1/tournament/session',
@@ -1984,7 +2218,9 @@ final class TournamentController extends ChangeNotifier {
     if (opened.status != 201) {
       if (opened.status == 401) {
         await identity.clearAuthenticatedPlayer();
+        if (!stillOwns()) return false;
         await _hydrateHomeSnapshot();
+        if (!stillOwns()) return false;
         _fail('UNAUTHENTICATED', degradedOnFailure: degradedOnFailure);
         return false;
       }
@@ -2010,15 +2246,19 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
     if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-      _sameDeviceRegistered = await _deviceRecovery.register(
+      final registered = await _deviceRecovery.register(
         api: api,
         playerId: _verifiedSessionPlayerId!,
         sessionId: _verifiedSessionId!,
         origin: origin,
       );
+      if (!stillOwns()) return false;
+      _sameDeviceRegistered = registered;
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
+    if (!stillOwns()) return false;
     await _hydrateHomeSnapshot();
+    if (!stillOwns()) return false;
     _persistBoundSession(
       secret: api.sessionSecret,
       binding: binding,
@@ -2114,7 +2354,21 @@ final class TournamentController extends ChangeNotifier {
   }
 
   Future<void> _hydrateHomeSnapshot() async {
-    final snap = await _homeSnapshots.load(identity.activeScope);
+    final scope = identity.activeScope;
+    final scopeKey = scope.storageKey;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    final beforeLoad = debugBeforeHomeSnapshotLoad;
+    if (beforeLoad != null) await beforeLoad();
+    final snap = await _homeSnapshots.load(scope);
+    // Scope equality alone is insufficient for A → Guest → A; fence generation.
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+      scopeKey: scopeKey,
+    )) {
+      return;
+    }
     homeSnapshot = snap;
     if (snap == null) {
       homeSnapshotStale = false;
@@ -2145,14 +2399,24 @@ final class TournamentController extends ChangeNotifier {
   Future<void> _persistHomeSnapshot() async {
     final current = day;
     if (current == null) return;
+    final tournamentEpoch = _tournamentEpoch;
+    final accountEpoch = accountStateEpoch;
+    final scope = identity.activeScope;
     final snap = TournamentHomeSnapshot.fromLive(
-      scope: identity.activeScope,
+      scope: scope,
       day: current,
       originalUtcDate: _today(),
       capturedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
       results: results,
     );
     if (snap == null) return;
+    if (!_ownsAccountPresentation(
+      tournamentEpoch: tournamentEpoch,
+      accountEpoch: accountEpoch,
+      scopeKey: scope.storageKey,
+    )) {
+      return;
+    }
     final previous = homeSnapshot;
     if (previous != null &&
         previous.scopeKey == snap.scopeKey &&

@@ -6,6 +6,7 @@ import 'package:puzzle_duel_mobile/diagnostics/firebase_crashlytics_adapter.dart
 import 'package:puzzle_duel_mobile/diagnostics/puzzle_duel_logger.dart';
 import 'package:puzzle_duel_mobile/presentation/widgets/arcade_backdrop.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
 import 'package:puzzle_duel_mobile/tournament/badge_catalog.dart';
 import 'package:puzzle_duel_mobile/tournament/personal_records_repository.dart';
 import 'package:puzzle_duel_mobile/tournament/practice_store.dart';
@@ -42,6 +43,12 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   var _localLoadGeneration = 0;
   var _badgeLoadGeneration = 0;
   String? _activeBadgeCacheKey;
+
+  /// Verified remote GET in flight after local paint (All/Tournament empty label).
+  var _awaitingVerifiedRemote = false;
+
+  /// True after at least one settled verified remote attempt for this account scope.
+  var _verifiedRemoteSettled = false;
 
   bool get _isVerifiedAccount =>
       widget.controller.sessionAuth?.cachedAccess?.isVerified == true;
@@ -95,6 +102,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   void _clearAccountScopedUi() {
     _stats = const PracticeStats(completedCount: 0, difficultyCounts: {});
     _recordsViewModel = null;
+    _awaitingVerifiedRemote = false;
+    _verifiedRemoteSettled = false;
     _loadingBadges = true;
     _activeBadgeCacheKey = _verifiedPlayerCacheKey;
     final cached = _activeBadgeCacheKey == null
@@ -116,9 +125,19 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     final badgeGeneration = ++_badgeLoadGeneration;
     if (clearImmediately) {
       _clearAccountScopedUi();
+      // New verified scope defaults to All; guest has no segment UI.
+      _recordsSegment = PersonalRecordSegment.all;
     }
     setState(() {});
-    unawaited(_reloadLocal(expectedEpoch: epoch, generation: localGeneration));
+    // Verified account transitions must remote-refresh; guest stays local-only.
+    final remote = _isVerifiedAccount;
+    unawaited(
+      _reloadLocal(
+        expectedEpoch: epoch,
+        generation: localGeneration,
+        remote: remote,
+      ),
+    );
     unawaited(_loadBadges(expectedEpoch: epoch, generation: badgeGeneration));
   }
 
@@ -169,6 +188,9 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     setState(() {
       _stats = localView.practiceStats;
       _recordsViewModel = localView;
+      if (remote && _isVerifiedAccount) {
+        _awaitingVerifiedRemote = true;
+      }
     });
 
     if (!remote || !_isVerifiedAccount) return;
@@ -205,7 +227,24 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     setState(() {
       _stats = remoteView.practiceStats;
       _recordsViewModel = remoteView;
+      _awaitingVerifiedRemote = false;
+      _verifiedRemoteSettled = true;
     });
+    if (!mounted) return;
+    final status = remoteView.syncStatus;
+    if (status == PersonalRecordsSyncStatus.serverError ||
+        status == PersonalRecordsSyncStatus.unauthorized) {
+      final message = TournamentCopy.of(
+        context,
+      ).personalRecordsSyncStatus(status);
+      if (message.isNotEmpty) {
+        widget.controller.presentAppFeedback(
+          kind: AppFeedbackKind.warning,
+          message: message,
+          semanticsKey: 'profile-records-fetch-failed',
+        );
+      }
+    }
   }
 
   Future<void> _loadBadges({
@@ -411,12 +450,18 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     ]);
   }
 
+  /// Guest presentation is always Practice-only regardless of retained segment.
+  PersonalRecordSegment get _effectiveRecordsSegment {
+    if (!_isVerifiedAccount) return PersonalRecordSegment.practice;
+    return _recordsSegment;
+  }
+
   Map<String, PersonalRecordCardModel?> get _visibleRecords {
     final view = _recordsViewModel;
     if (view == null) {
       return const {'easy': null, 'medium': null, 'hard': null};
     }
-    return view.forSegment(_recordsSegment);
+    return view.forSegment(_effectiveRecordsSegment);
   }
 
   String? get _recordsSyncCaption {
@@ -425,6 +470,44 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
         _recordsViewModel?.syncStatus ?? PersonalRecordsSyncStatus.idle;
     final text = TournamentCopy.of(context).personalRecordsSyncStatus(status);
     return text.isEmpty ? null : text;
+  }
+
+  /// All/Tournament empty cards must not look like genuine "no record" before a
+  /// settled successful remote snapshot (or after server/offline/auth failure).
+  /// Practice segment remains local-first and may show genuine empty.
+  String _emptyRecordLabel(TournamentCopy copy) {
+    if (!_isVerifiedAccount) return copy.noPersonalBest;
+    final segment = _effectiveRecordsSegment;
+    if (segment == PersonalRecordSegment.practice) {
+      return copy.noPersonalBest;
+    }
+
+    final status =
+        _recordsViewModel?.syncStatus ?? PersonalRecordsSyncStatus.idle;
+    final loading = _awaitingVerifiedRemote ||
+        status == PersonalRecordsSyncStatus.syncing ||
+        (!_verifiedRemoteSettled && status == PersonalRecordsSyncStatus.idle);
+    if (loading) {
+      final text = copy.personalRecordsSyncStatus(
+        PersonalRecordsSyncStatus.syncing,
+      );
+      return text.isEmpty ? copy.personalRecordsLoading : text;
+    }
+
+    switch (status) {
+      case PersonalRecordsSyncStatus.serverError:
+      case PersonalRecordsSyncStatus.offline:
+      case PersonalRecordsSyncStatus.unauthorized:
+        final text = copy.personalRecordsSyncStatus(status);
+        return text.isEmpty ? copy.noPersonalBest : text;
+      case PersonalRecordsSyncStatus.idle:
+      case PersonalRecordsSyncStatus.syncing:
+      case PersonalRecordsSyncStatus.pendingUpload:
+      case PersonalRecordsSyncStatus.upToDate:
+        // Genuine empty only after a successful remote settle (upToDate /
+        // pendingUpload). Idle/syncing are handled above.
+        return copy.noPersonalBest;
+    }
   }
 
   @override
@@ -498,36 +581,38 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  copy.personalRecordsTitle,
+                  verified ? copy.personalRecordsTitle : copy.practiceRecordsTitle,
                   style: Theme.of(context).textTheme.titleMedium
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  copy.personalRecordsBlurb,
+                  verified ? copy.personalRecordsBlurb : copy.practiceRecordsBlurb,
                   style: const TextStyle(
                     color: GameTokens.textSecondary,
                     height: 1.35,
                   ),
                 ),
-                const SizedBox(height: 12),
-                _PersonalRecordsSegmentedControl(
-                  segment: _recordsSegment,
-                  copy: copy,
-                  onChanged: (segment) =>
-                      setState(() => _recordsSegment = segment),
-                ),
-                if (_recordsSyncCaption != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    _recordsSyncCaption!,
-                    key: const Key('profile-records-sync'),
-                    style: const TextStyle(
-                      color: GameTokens.textMuted,
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
+                if (verified) ...[
+                  const SizedBox(height: 12),
+                  _PersonalRecordsSegmentedControl(
+                    segment: _recordsSegment,
+                    copy: copy,
+                    onChanged: (segment) =>
+                        setState(() => _recordsSegment = segment),
                   ),
+                  if (_recordsSyncCaption != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _recordsSyncCaption!,
+                      key: const Key('profile-records-sync'),
+                      style: const TextStyle(
+                        color: GameTokens.textMuted,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 12),
                 _PersonalBestCard(
@@ -537,6 +622,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   accent: GameTokens.easyAccent,
                   cardColor: GameTokens.easyCard,
                   record: _visibleRecords['easy'],
+                  emptyLabel: _emptyRecordLabel(copy),
                   copy: copy,
                 ),
                 const SizedBox(height: 10),
@@ -547,6 +633,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   accent: GameTokens.mediumAccent,
                   cardColor: GameTokens.mediumCard,
                   record: _visibleRecords['medium'],
+                  emptyLabel: _emptyRecordLabel(copy),
                   copy: copy,
                 ),
                 const SizedBox(height: 10),
@@ -557,6 +644,7 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
                   accent: GameTokens.hardAccent,
                   cardColor: GameTokens.hardCard,
                   record: _visibleRecords['hard'],
+                  emptyLabel: _emptyRecordLabel(copy),
                   copy: copy,
                 ),
                 const SizedBox(height: 24),
@@ -959,6 +1047,7 @@ final class _PersonalBestCard extends StatelessWidget {
     required this.cardColor,
     required this.record,
     required this.copy,
+    this.emptyLabel,
   });
 
   final String title;
@@ -967,13 +1056,15 @@ final class _PersonalBestCard extends StatelessWidget {
   final Color cardColor;
   final PersonalRecordCardModel? record;
   final TournamentCopy copy;
+  final String? emptyLabel;
 
   @override
   Widget build(BuildContext context) {
     final empty = record == null;
+    final emptyText = emptyLabel ?? copy.noPersonalBest;
     return Semantics(
       label: empty
-          ? '$title $boardLabel, ${copy.noPersonalBest}'
+          ? '$title $boardLabel, $emptyText'
           : '$title $boardLabel, ${copy.groupedScore(record!.score)}',
       child: Container(
         width: double.infinity,
@@ -1019,7 +1110,7 @@ final class _PersonalBestCard extends StatelessWidget {
             const SizedBox(height: 8),
             if (empty)
               Text(
-                copy.noPersonalBest,
+                emptyText,
                 style: const TextStyle(color: GameTokens.textSecondary),
               )
             else ...[

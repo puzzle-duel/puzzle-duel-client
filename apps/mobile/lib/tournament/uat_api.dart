@@ -91,16 +91,91 @@ class UatApi {
         category: UatFailureCategory.client,
       );
     }
-    final events = (await DiagnosticRuntime.snapshot())
-        .where((event) => event.code != LogCode.httpStarted && event.code != LogCode.screenOpened)
-        .toList();
-    return post('/v1/diagnostics/reports', {
-      'events': events.length <= 64
-          ? events.map((event) => event.toJson()).toList()
-          : events.skip(events.length - 64)
-              .map((event) => event.toJson()).toList(),
-    });
+    final events = diagnosticReportEvents(await DiagnosticRuntime.snapshot());
+    return post('/v1/diagnostics/reports', {'events': events});
   }
+
+  /// Project local breadcrumbs onto the deployed staging report contract.
+  /// Local/Crashlytics events retain their original metadata.
+  static List<Map<String, Object>> diagnosticReportEvents(
+    Iterable<LogEvent> snapshot,
+  ) {
+    final events = snapshot
+        .where((event) =>
+            event.code != LogCode.httpStarted &&
+            event.code != LogCode.screenOpened)
+        .toList();
+    final selected = events.length <= 64
+        ? events
+        : events.skip(events.length - 64);
+    final correlationId = RegExp(r'^[a-f0-9]{32}$');
+    final sqlState = RegExp(r'^AUTH_SQLSTATE_\d{5}$');
+    return selected.map((event) {
+      final json = event.toJson();
+      final error = event.errorCode;
+      if (error != null &&
+          !_reportErrorCodes.contains(error) &&
+          !sqlState.hasMatch(error)) {
+        json.remove('errorCode');
+      }
+      for (final key in ['requestId', 'traceId']) {
+        final value = json[key];
+        if (value is String && !correlationId.hasMatch(value)) {
+          json.remove(key);
+        }
+      }
+      return json;
+    }).toList();
+  }
+
+  // Mirrors backend src/diagnostics/http-correlation.mts SAFE_ERROR_CODES.
+  // Never expand server validation to accept arbitrary local values.
+  static const _reportErrorCodes = {
+    'UNAUTHENTICATED',
+    'NOT_FOUND',
+    'MALFORMED_REQUEST',
+    'RATE_LIMITED',
+    'AUTH_UNAVAILABLE',
+    'TOURNAMENT_UNAVAILABLE',
+    'STALE_WRITER',
+    'WRITER_NOT_AUTHORIZED',
+    'WRITER_STILL_ACTIVE',
+    'SERIES_NOT_OWNED',
+    'SERIES_STATE_INCONSISTENT',
+    'SERIES_STATE_CORRUPT',
+    'SERIES_TERMINAL',
+    'RECOVERY_NOT_ELIGIBLE',
+    'RECOVERY_PROOF_INVALID',
+    'PLAYER_MISMATCH',
+    'IDLE_EXPIRED',
+    'HARD_CUTOFF_EXPIRED',
+    'SNAPSHOT_CHANGED',
+    'INVALID_REFRESH',
+    'REFRESH_REPLAY',
+    'REFRESH_EXPIRED',
+    'TOKEN_FORMAT_INVALID',
+    'TOKEN_NOT_FOUND',
+    'FAMILY_REVOKED',
+    'FAMILY_MISSING',
+    'GUEST_LOGOUT_REVOKED',
+    'RANKED_AUTH_REQUIRED',
+    'ACCOUNT_CONFLICT',
+    'GUEST_PROOF_REQUIRED',
+    'INVALID_PROVIDER_ASSERTION',
+    'INVALID_PROVIDER_CHALLENGE',
+    'PROVIDER_CONFIG_MISSING',
+    'AUTH_CHALLENGE_ISSUED',
+    'AUTH_LOGIN_SUCCESS',
+    'AUTH_LINK_SUCCESS',
+    'PROVIDER_KEYS_UNAVAILABLE',
+    'ACCOUNT_SWITCH_CONFIRMATION_REQUIRED',
+    'INVALID_CONTINUATION',
+    'AUTH_CONTINUE_SUCCESS',
+    'AUTH_CONTINUE_CONFIRMED',
+    'RECOVERY_NOT_LINKED',
+    'RECOVERY_OPERATION_INCOMPLETE',
+    'SCHEMA_NOT_READY',
+  };
 
   Future<UatHttpResult> get(String path) => _send('GET', path, null);
 

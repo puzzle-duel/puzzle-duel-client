@@ -1,4 +1,16 @@
 # AGENTS.md — Puzzle Duel Client (binding for coding agents)
+
+## MANDATORY FIRST STEP — project action ledger (owner 2026-11-28)
+Before ANY Puzzle Duel action (including read-only review, user-facing build commands, troubleshooting, Jira or GitHub operations), read `docs/DEVELOPMENT-HISTORY.md`, `docs/staging/SERVER-CONFIG.md` and relevant accepted decisions from the actual target ref. After each meaningful action append its outcome, evidence, decisions, tests and next step to the ledger. This is mandatory for all agents, including ChatGPT and Cursor. Verify existing approved UX and regressions before changing anything; do not resurrect removed behaviors. Staging transport is **https://84-13-66-211.sslip.io** (Oracle **84.13.66.211**); **https://staging.puzzle-duel.app is the JWT issuer, not the API transport**. Never give build instructions without the runbook's trusted TLS health preflight and complete OAuth/Firebase flags. No direct Oracle SSH, unapproved merge/deploy, destructive reset or data wipe.
+
+### Mandatory ordered workflow — GOLDEN RULE 0
+1. Read `docs/DEVELOPMENT-HISTORY.md`.
+2. Read `docs/staging/SERVER-CONFIG.md`.
+3. Check prior product decisions and developments, including the observability contract.
+4. Verify the planned action does not regress accepted behavior.
+5. **ABSOLUTE NO-REGRESSION — Log Gönder (UAT):** No action or change may negatively impact manual diagnostic upload, its visibility, authorized guest/verified-account operation, HTTP 201 + reportId delivery, or Request ID / Report ID Inspector correlation. Before every change assess impact; after every development run applicable regression tests and verify end-to-end on staging before merge/release/Done. FAIL or NOT_RUN blocks acceptance; green CI alone is insufficient. Never bypass authentication, redaction, or production isolation; never fake success. If a regression is found, prioritize restoring diagnostics before unrelated work.
+6. Record outcomes, changes, tests and decisions in the ledger after the action.
+
 ## Authority and scope
 Read `BLUEPRINT.md`, relevant `docs/features/` and `docs/adr/` before modifying code. This repo is ONLY the iOS/Android client; the backend belongs to `puzzle-duel-backend`.
 Priority: explicit owner instructions > accepted product blueprint/ADRs > feature spec > code conventions. If contradictory, STOP and ask; **never silently choose**.
@@ -24,5 +36,29 @@ Before planning or editing any screen, route, API call, error handling, CI, Fire
 Before code: cite feature ID, impacted blueprint rules, ADRs and test plan. Make minimum scoped diff. Provide unit tests for each ruleset change, widget/e2e tests for relevant UX, and contract/golden fixture parity with backend. Run formatting/lint/tests and report exact results; do not claim unrun tests passed.
 Do NOT push to main, merge PR, modify organization settings, deploy or publish without explicit approval. Ask before adding dependencies, analytics SDKs, IAP or changing auth/privacy.
 
+## RC PRE-FLIGHT — every feature (owner 2026-11-28)
+Binding for every development milestone. Record completion in `docs/DEVELOPMENT-HISTORY.md`. Device-only checks stay NOT_RUN until owner UAT; never auto-PASS them. Happy-path-only delivery is forbidden.
+
+1. Mandatory MD gate completed (ledger, SERVER-CONFIG, observability, feature ADR/specs).
+2. Full relevant regression matrix (auth, Practice, Tournament, Profile, notifications, observability, gameplay invariants when in scope).
+3. Client/backend contract parity for any new/changed event, errorCode, route, or schema field.
+4. Database migration + runtime grant parity when persistence changes (plan/verify via authorized Actions only; no direct Oracle SSH).
+5. Authentication lifecycle: guest, verified login, logout, switch, kill/relaunch, stale response fencing.
+6. Logging compatibility: Log Gönder HTTP 201 + reportId, Inspector correlation, Crashlytics breadcrumbs; schema allowlist intact.
+7. Account isolation: no cross-account presentation or pending-sync leakage.
+8. CI status on the final source SHA (skipped ≠ PASS).
+9. Staging verification via authorized Actions/Inspector when applicable.
+10. Existing feature behavior verified; no gameplay/animation regressions under non-gameplay tasks.
+11. RC review: races, async ownership, stale responses, error handling, missing permissions, schema drift, offline/network, security boundaries, observability/UX regressions.
+12. Ledger updated with evidence; Turkish development summary delivered to owner + Jira.
+
 ## Mandatory post-development summary (GOLDEN RULE)
 After every meaningful milestone, implementation, bug fix, refactor, or review remediation, deliver a development summary to the owner **in Turkish** (keep file names and technical identifiers in English) and record the same summary on the corresponding Jira issue. The summary must cover: what changed, why, how it works, files, impact, decisions, executed tests with actual results, GitHub branch/SHA/PR/CI, Jira status/comments, remaining work, next step, and whether owner action is required. Do not treat a milestone as complete until this summary is delivered. Providing a summary does not by itself require stopping for approval unless a real approval gate was reached. All future agents must read and follow this rule before starting development.
+
+## GOLDEN RULES — Account isolation & notifications (PZD-54)
+Binding detail: `docs/architecture/PZD-54-ACCOUNT-ISOLATION-AND-NOTIFICATIONS.md`.
+
+1. **Single Notification Presenter** — All transient user feedback uses `AppTopBannerHost` / `presentAppFeedback` (info/warning/success). No SnackBar/Toast parallel channels. Banner lifecycle identity is generation/epoch, not message text.
+2. **Strict Account State Isolation** — Account-scoped tournament presentation and async completions must not cross logout or account-switch boundaries; fence with scope/generation.
+3. **Observability** — Auth transitions, invalidation, stale rejection, and banner lifecycle remain privacy-safe `LogEvent` diagnostics.
+4. **UX Copy Consistency** — User-facing messages must be concise, accurate, actionable, and reflect actual product behavior. Never imply restrictions, charges or entitlements that do not exist. Authentication requirements must not be presented as monetization requirements.
