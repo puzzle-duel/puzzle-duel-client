@@ -82,6 +82,7 @@ void main() {
           'awaitAdvance': true,
           'boardRevision': 4,
           'writerGeneration': 1,
+          'writerSessionMatches': true,
         });
       }
       if (path.endsWith('/commands')) {
@@ -131,9 +132,13 @@ void main() {
     var writerRecoveries = 0;
     var commandPosts = 0;
     var expiredCommandPosts = 0;
+    // Model server writer ownership: original session matches until expiry
+    // renewal; after recover-writer the new session must match explicitly.
+    var writerSessionMatches = true;
     final api = ScriptedUatApi((method, path, body) async {
       if (path == '/v1/tournament/session' && method == 'POST') {
         sessionsOpened++;
+        if (sessionsOpened > 1) writerSessionMatches = false;
         return UatHttpResult(201, {
           'playerId': '11111111-1111-4111-8111-111111111111',
           'sessionId': sessionsOpened == 1
@@ -172,6 +177,7 @@ void main() {
       }
       if (path.endsWith('/recover-writer')) {
         writerRecoveries++;
+        writerSessionMatches = true;
         return const UatHttpResult(200, {'writerGeneration': 2});
       }
       if (path.endsWith('/board')) {
@@ -184,6 +190,7 @@ void main() {
           'resultsPublished': false,
           'boardRevision': 4,
           'writerGeneration': sessionsOpened == 1 ? 1 : 2,
+          'writerSessionMatches': writerSessionMatches,
         });
       }
       if (path.endsWith('/commands')) {
@@ -221,6 +228,83 @@ void main() {
     expect(expiredCommandPosts, 0);
     expect(controller.tournamentReady, isTrue);
     expect(controller.rankedWriterLocked, isFalse);
+  });
+
+  test('recovered board omitting writerSessionMatches stays writer-locked',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('pzd-continuity-null-match-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(dir);
+    await identity.load();
+    var commands = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path == '/v1/tournament/session' && method == 'POST') {
+        return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
+          'sessionId': '55555555-5555-4555-8555-555555555555',
+          'sessionSecret': 'session-recovered',
+        });
+      }
+      if (path.endsWith('/devices/register')) {
+        return const UatHttpResult(200, {
+          'deviceCredentialId': '44444444-4444-4444-8444-444444444444',
+        });
+      }
+      if (path.endsWith('/claims/daily')) {
+        return const UatHttpResult(200, {
+          'seriesId': '22222222-2222-4222-8222-222222222222',
+          'status': 'ACTIVE',
+          'original': false,
+        });
+      }
+      if (path.endsWith('/recovery-challenge')) {
+        return const UatHttpResult(200, {
+          'challengeId': '66666666-6666-4666-8666-666666666666',
+          'deviceCredentialId': '44444444-4444-4444-8444-444444444444',
+          'nonce': 'abcdefghijklmnopqrstuvwxyzABCDEF0123456789',
+          'expectedWriterGeneration': 1,
+          'expiresAtMs': 1800000000000,
+        });
+      }
+      if (path.endsWith('/recover-writer')) {
+        return const UatHttpResult(200, {'writerGeneration': 2});
+      }
+      if (path.endsWith('/board')) {
+        // Intentionally omit writerSessionMatches — security gate must deny.
+        return const UatHttpResult(200, {
+          'ordinal': 1,
+          'awaitAdvance': true,
+          'boardRevision': 4,
+          'writerGeneration': 2,
+          'seriesScore': 100,
+          'score': 100,
+        });
+      }
+      if (path.endsWith('/commands')) {
+        commands++;
+        return const UatHttpResult(200, {'ok': true});
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer test',
+        playerLabel: 'continuity',
+      ),
+      api: api,
+      deviceRecovery: const SameDeviceRecovery(isSupportedDevice: _yes),
+      stateDirectory: dir,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    await controller.resume();
+    expect(controller.rankedWriterLocked, isTrue);
+    expect(controller.tournamentNoticeCode, 'WRITER_NOT_AUTHORIZED');
+    await controller.advance();
+    expect(commands, 0);
   });
 }
 
