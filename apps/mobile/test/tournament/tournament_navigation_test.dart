@@ -12,9 +12,52 @@ void main() {
 
   testWidgets('completed day stays on home and leaderboard back returns to results', (tester) async {
     final directory = Directory.systemTemp.createTempSync('pzd42-nav');
+    final now = DateTime.now().toUtc();
+    final dayStart = DateTime.utc(now.year, now.month, now.day);
+    final monday = dayStart.subtract(Duration(days: (dayStart.weekday + 6) % 7));
+    final today = dayStart.toIso8601String().substring(0, 10);
     final api = ScriptedUatApi((method, path, body) async {
       if (method == 'POST' && path.endsWith('/session')) {
         return const UatHttpResult(201, {'sessionSecret': 'secret'});
+      }
+      if (path.endsWith('/calendar')) {
+        return UatHttpResult(200, {
+          'weekStartUtc': monday.toIso8601String().substring(0, 10),
+          'weekEndUtc': monday
+              .add(const Duration(days: 6))
+              .toIso8601String()
+              .substring(0, 10),
+          'serverNowMs': 1,
+          'currentTournamentDate': today,
+          'completedDayCount': 1,
+          'playablePastDayCount': 0,
+          'accountScoped': true,
+          'days': [
+            for (var i = 0; i < 7; i++)
+              () {
+                final date = monday.add(Duration(days: i));
+                final iso = date.toIso8601String().substring(0, 10);
+                final isToday = iso == today;
+                return {
+                  'date': iso,
+                  'status': isToday
+                      ? 'COMPLETED'
+                      : date.isAfter(dayStart)
+                      ? 'LOCKED_FUTURE'
+                      : 'AVAILABLE_PAST',
+                  'isToday': isToday,
+                  'canStart': !isToday && !date.isAfter(dayStart),
+                  'canResume': false,
+                  'canViewResults': isToday,
+                  if (isToday)
+                    'seriesId': '22222222-2222-4222-8222-222222222222',
+                  if (isToday) 'verifiedScore': 900,
+                  'completedBoardCount': isToday ? 6 : 0,
+                  'totalBoardCount': 6,
+                };
+              }(),
+          ],
+        });
       }
       if (path.endsWith('/claims/daily')) {
         return const UatHttpResult(200, {
@@ -94,13 +137,13 @@ void main() {
 
     expect(find.byKey(const Key('home-title')), findsOneWidget);
     expect(find.text('Tournament complete'), findsNothing);
-    expect(find.text('900'), findsWidgets);
-    expect(api.claimPosts, 1);
+    expect(find.textContaining('900'), findsWidgets);
+    expect(api.claimPosts, 0);
 
     await tester.tap(find.byKey(const Key('primary-action')));
     await _pumpFrames(tester);
     expect(find.byKey(const Key('results-score')), findsOneWidget);
-    expect(api.claimPosts, 1);
+    expect(api.claimPosts, 0);
 
     await tester.tap(find.byKey(const Key('leaderboard')));
     await _pumpFrames(tester);
@@ -125,7 +168,7 @@ void main() {
     await navigator.maybePop();
     await _pumpFrames(tester);
     expect(find.byKey(const Key('home-title')), findsOneWidget);
-    expect(api.claimPosts, 1);
+    expect(api.claimPosts, 0);
 
     await tester.scrollUntilVisible(find.byKey(const Key('leaderboard')), 120);
     await tester.tap(find.byKey(const Key('leaderboard')));
@@ -190,13 +233,13 @@ void main() {
 
     await pumpAt(const Size(320, 568), locale: const Locale('en'), scaler: const TextScaler.linear(1.6));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
-    expect(find.text("Play today's tournament"), findsOneWidget);
+    expect(find.text("Start tournament"), findsOneWidget);
     await pumpAt(const Size(390, 844), locale: const Locale('en'));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
     expect(tester.takeException(), isNull);
     await pumpAt(const Size(430, 932), locale: const Locale('tr'), scaler: const TextScaler.linear(1.3));
     await tester.scrollUntilVisible(find.byKey(const Key('primary-action')), 80);
-    expect(find.text('Bugünün turnuvasını oyna'), findsOneWidget);
+    expect(find.text('Turnuvaya başla'), findsOneWidget);
   });
 
   testWidgets('home opens the current weekly board in All', (tester) async {

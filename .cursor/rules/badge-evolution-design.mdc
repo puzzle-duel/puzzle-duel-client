@@ -1,0 +1,31 @@
+---
+description: Binding visual contract for Puzzle Duel Badge Evolution & Prestige artwork (PZD-56)
+globs:
+  - apps/mobile/lib/badges/**
+  - apps/mobile/lib/tournament/badge_catalog.dart
+  - apps/mobile/lib/tournament/player_profile_screen.dart
+  - apps/mobile/test/badges/**
+  - docs/design/BADGE_EVOLUTION_DESIGN_RULE.md
+alwaysApply: false
+---
+
+# Badge Evolution Design Rule
+
+Before modifying any badge-related implementation, **read** `docs/design/BADGE_EVOLUTION_DESIGN_RULE.md`.
+
+That Markdown file is the single canonical visual source of truth. The owner-approved Badge Evolution Studio geometry must be reproduced with Flutter `CustomPainter` vector primitives.
+
+## Required
+
+- Reuse the shared prestige frame + seven center artworks (42 combinations).
+- Preserve exact palette, gradients, radii, ornament counts, stroke widths, capsule and label placement.
+- Keep localization out of painters and domain math.
+- Extend golden tests when geometry or catalogue changes.
+
+## Forbidden without explicit owner approval
+
+- Redesigning, simplifying, or replacing badge artwork
+- Material Icons, emoji, AI-generated PNG medals, or generic achievement icons as substitutes
+- Cap earned counts at Mythic
+- Granting competitive advantages or purchasable prestige
+- Resetting existing badge progress or renaming incompatible persisted IDs (especially `on_time`)

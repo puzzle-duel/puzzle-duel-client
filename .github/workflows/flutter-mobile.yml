@@ -9,6 +9,14 @@ on:
       - "apps/mobile/**"
       - "packages/puzzle_duel_rules/**"
       - ".github/workflows/flutter-mobile.yml"
+  # PZD-55: stacked feature PRs base on other feature branches; allow SHA verification
+  # without retargeting away from the dependency PR.
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this manual Flutter gate run is needed"
+        required: false
+        default: "stacked-pr-ci"
 
 permissions:
   contents: read

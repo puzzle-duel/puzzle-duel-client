@@ -33,8 +33,8 @@ void main() {
       tr.guestTournamentBody,
       'Turnuvaya katılmak için Apple veya Google hesabınla oturum aç.',
     );
-    expect(en.guestTournamentHeadline, "Join today's tournament");
-    expect(tr.guestTournamentHeadline, 'Günün turnuvasına katıl');
+    expect(en.guestTournamentHeadline, 'Join tournament');
+    expect(tr.guestTournamentHeadline, 'Turnuvaya katıl');
   });
 
   test('auth gate copy map resolves RANKED_AUTH_REQUIRED to new strings', () {

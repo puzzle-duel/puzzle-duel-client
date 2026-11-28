@@ -62,3 +62,13 @@ Binding detail: `docs/architecture/PZD-54-ACCOUNT-ISOLATION-AND-NOTIFICATIONS.md
 2. **Strict Account State Isolation** — Account-scoped tournament presentation and async completions must not cross logout or account-switch boundaries; fence with scope/generation.
 3. **Observability** — Auth transitions, invalidation, stale rejection, and banner lifecycle remain privacy-safe `LogEvent` diagnostics.
 4. **UX Copy Consistency** — User-facing messages must be concise, accurate, actionable, and reflect actual product behavior. Never imply restrictions, charges or entitlements that do not exist. Authentication requirements must not be presented as monetization requirements.
+
+## GOLDEN RULES — Badge Evolution & Prestige (PZD-56)
+Binding visual contract: [`docs/design/BADGE_EVOLUTION_DESIGN_RULE.md`](docs/design/BADGE_EVOLUTION_DESIGN_RULE.md). Cursor rule: `.cursor/rules/badge-evolution-design.mdc`.
+
+**Every developer and AI coding agent MUST read the canonical badge design document before modifying any badge-related implementation** (catalogue, painters, profile badge UI, Studio, award logic, thresholds, golden tests).
+
+1. Owner-approved Badge Evolution Studio geometry is canonical — reproduce with shared vector medallion + center artwork; never redesign, simplify, replace, or substitute Material Icons / emoji / AI PNG medals.
+2. Preserve existing badge identities and earned progress (especially `on_time`); never reset counts or grant competitive advantages; prestige is earned, never purchased.
+3. Separate identity, eligibility, earned count, prestige resolution, palette, shared frame, and center artwork. Seven centers × six frames = 42 combinations; do not hand-maintain 42 bitmaps.
+4. Account isolation and guest sync follow PZD-54 / established linking; competitive badges remain backend-authoritative; Studio never mutates real achievement state.

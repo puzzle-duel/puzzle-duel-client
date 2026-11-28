@@ -33,6 +33,8 @@ import 'package:puzzle_duel_mobile/tournament/tournament_settings.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
+import 'package:puzzle_duel_mobile/tournament/weekly_tournament_calendar.dart';
+import 'package:puzzle_duel_mobile/tournament/weekly_tournament_overview.dart';
 import 'package:puzzle_duel_rules/puzzle_duel_rules.dart';
 
 export 'tournament_controller.dart';
@@ -281,7 +283,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       if (result == null) return;
       if (result.outcome == AuthFlowOutcome.linked ||
           result.outcome == AuthFlowOutcome.loggedIn) {
-        await controller.completeRankedAuthAndEnter();
+        await controller.completeRankedAuthAndEnter(
+          authorizeGuestBadgeAdoption:
+              result.outcome == AuthFlowOutcome.linked,
+        );
         _showAuthFeedback(controller, success: true);
       } else if (result.outcome == AuthFlowOutcome.failed) {
         _showAuthFeedback(controller, success: false);
@@ -433,6 +438,8 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
     }
     controller.setAuthUiBusy(true);
     try {
+      // Revoke server writer session while verified bearer+secret still apply.
+      await controller.revokeTournamentGameplaySession(reason: 'logout');
       final result = await coordinator.logoutAndStartGuest();
       if (!mounted) return;
       if (result.outcome != AuthFlowOutcome.loggedIn || result.access == null) {
@@ -455,6 +462,10 @@ final class _TournamentUatAppState extends State<TournamentUatApp>
       await controller.clearAuthenticatedPracticeScope();
       controller.applyGuestSessionAfterLogout(
         rankedAuthRequired: result.access!.isGuest,
+      );
+      // Reload public weekly calendar under the new guest scope.
+      await controller.refreshTournament(
+        origin: TournamentRefreshOrigin.background,
       );
       _showAuthFeedback(controller, success: true, logout: true);
     } catch (_) {
@@ -802,6 +813,64 @@ final class _Loading extends StatelessWidget {
   }
 }
 
+/// True only when live gameplay identity is the Home-selected manifest.
+///
+/// Active gameplay score/badge/pips/ordinal may paint Home only when:
+/// - personal presentation is allowed (verified account scope),
+/// - overview is account-scoped,
+/// - active manifest date == selected date,
+/// - series identity matches selected + controller series,
+/// - [day] is non-empty (cleared on generation/epoch fence).
+@visibleForTesting
+bool activeGameplayMatchesSelection({
+  required bool hidePersonal,
+  required bool accountScoped,
+  required String? selectedDate,
+  required WeeklyTournamentDay? selected,
+  required String? activeManifestUtcDate,
+  required String? activeSeriesId,
+  required TournamentDay? day,
+}) {
+  if (hidePersonal || !accountScoped) return false;
+  if (selectedDate == null ||
+      activeManifestUtcDate == null ||
+      selectedDate != activeManifestUtcDate) {
+    return false;
+  }
+  if (day == null || day.seriesId.isEmpty) return false;
+  final selectedSeries = selected?.seriesId;
+  if (selectedSeries != null &&
+      selectedSeries.isNotEmpty &&
+      selectedSeries != day.seriesId) {
+    return false;
+  }
+  if (activeSeriesId != null &&
+      activeSeriesId.isNotEmpty &&
+      activeSeriesId != day.seriesId) {
+    return false;
+  }
+  return true;
+}
+
+// Keep a short private alias for the Home screen call site.
+bool _activeGameplayMatchesSelection({
+  required bool hidePersonal,
+  required bool accountScoped,
+  required String? selectedDate,
+  required WeeklyTournamentDay? selected,
+  required String? activeManifestUtcDate,
+  required String? activeSeriesId,
+  required TournamentDay? day,
+}) => activeGameplayMatchesSelection(
+  hidePersonal: hidePersonal,
+  accountScoped: accountScoped,
+  selectedDate: selectedDate,
+  selected: selected,
+  activeManifestUtcDate: activeManifestUtcDate,
+  activeSeriesId: activeSeriesId,
+  day: day,
+);
+
 final class _HomeScreen extends StatelessWidget {
   const _HomeScreen({required this.controller, this.crashReporter});
 
@@ -816,72 +885,168 @@ final class _HomeScreen extends StatelessWidget {
     // Defense in depth: never paint authenticated personal tournament data
     // under a guest / recovery scope, even if a stale field briefly remains.
     final hidePersonalTournament = needsAuth || needsRecovery;
-    final day = hidePersonalTournament ? null : controller.day;
-    final phase = day?.phase ?? DayPhase.ready;
+    final overview = controller.weeklyOverview;
+    final overviewLoading = controller.weeklyOverviewLoading ||
+        (controller.booting && overview == null);
+    final overviewFailed = controller.weeklyOverviewFailed;
+    final overviewUnavailable = overview == null && overviewFailed;
+    final overviewPending = overview == null && overviewLoading;
+    final selectedDate =
+        controller.selectedTournamentDate ?? overview?.currentTournamentDate;
+    final selected = selectedDate == null
+        ? null
+        : overview?.dayFor(selectedDate);
+    // Active gameplay may paint Home only when it is the selected manifest.
+    final activeMatchesSelected = _activeGameplayMatchesSelection(
+      hidePersonal: hidePersonalTournament,
+      accountScoped: overview?.accountScoped == true,
+      selectedDate: selectedDate,
+      selected: selected,
+      activeManifestUtcDate: controller.activeManifestUtcDate,
+      activeSeriesId: controller.seriesId,
+      day: controller.day,
+    );
+    final day = activeMatchesSelected ? controller.day : null;
+    final phase = day?.phase ??
+        switch (selected?.status) {
+          WeeklyDayStatus.completed => DayPhase.completed,
+          WeeklyDayStatus.inProgress => DayPhase.inProgress,
+          _ => DayPhase.ready,
+        };
     final syncing = controller.tournamentSync == TournamentSyncState.syncing;
     final stale =
         !hidePersonalTournament &&
         controller.homeSnapshotStale &&
-        !controller.tournamentReady;
+        !controller.tournamentReady &&
+        overview != null;
     final connectivityLost = controller.tournamentConnectivityLost;
-    final verified = hidePersonalTournament
+    final verified = activeMatchesSelected
+        ? tournamentInt(controller.results['all'])
+        : null;
+    final score = hidePersonalTournament || overviewUnavailable || overviewPending
         ? null
-        : tournamentInt(controller.results['all']);
-    final score = hidePersonalTournament
-        ? null
-        : phase == DayPhase.completed
-        ? verified ?? day?.seriesScore
-        : day?.seriesScore;
-    final scoreLabel = hidePersonalTournament
+        : selected?.verifiedScore ??
+              (activeMatchesSelected
+                  ? (phase == DayPhase.completed
+                        ? verified ?? day?.seriesScore
+                        : day?.seriesScore)
+                  : null);
+    final scoreLabel = hidePersonalTournament ||
+            overviewUnavailable ||
+            overviewPending
         ? copy.scoreUnavailable
-        : phase == DayPhase.completed && verified != null
+        : (selected?.status == WeeklyDayStatus.completed && score != null)
         ? copy.verifiedScore
         : score == null
         ? copy.scoreUnavailable
         : copy.currentScore;
-    final badge = hidePersonalTournament
+    final badge = hidePersonalTournament ||
+            overviewUnavailable ||
+            overviewPending
         ? null
-        : phase == DayPhase.completed && controller.results.isNotEmpty
+        : selected?.completionTiming == CompletionTiming.onTime
+        ? copy.onTime
+        : selected?.completionTiming == CompletionTiming.late
+        ? copy.onTimeMissing
+        : (activeMatchesSelected &&
+              phase == DayPhase.completed &&
+              controller.results.isNotEmpty)
         ? (controller.results['onTimeAwarded'] == true
               ? copy.onTime
               : copy.onTimeMissing)
         : null;
-    final primary = syncing
-        ? copy.tournamentSyncing
-        : needsRecovery
+    final primary = needsRecovery
         ? copy.restoreSession
         : needsAuth
-        ? copy.signInToPlay
-        : switch (phase) {
-            DayPhase.completed => copy.viewResults,
-            DayPhase.betweenGames ||
-            DayPhase.inProgress => copy.continueTournament,
-            _ => copy.playToday,
-          };
-    final headline = stale
-        ? copy.cachedTournamentHeadline
-        : needsRecovery
+        ? copy.guestTournamentHeadline
+        : overviewPending || (syncing && overview == null)
+        ? copy.tournamentSyncing
+        : overviewUnavailable
+        ? copy.tryAgain
+        : syncing
+        ? copy.tournamentSyncing
+        : selected == null
+        ? copy.tryAgain
+        : selected.status == WeeklyDayStatus.lockedFuture ||
+              selected.status == WeeklyDayStatus.closed ||
+              selected.status == WeeklyDayStatus.unavailable ||
+              selected.status == WeeklyDayStatus.unknown
+        ? copy.notAvailableYet
+        : selected.status == WeeklyDayStatus.completed ||
+              selected.canViewResults
+        ? copy.viewResults
+        : selected.status == WeeklyDayStatus.inProgress ||
+              selected.canResume
+        ? copy.continueTournament
+        : selected.status == WeeklyDayStatus.availablePast
+        ? copy.startChallenge
+        : copy.playToday;
+    final headline = needsRecovery
         ? copy.sessionRecoveryRequired
         : needsAuth
         ? copy.guestTournamentHeadline
-        : switch (phase) {
-            DayPhase.completed => copy.completedHeadline,
-            DayPhase.inProgress ||
-            DayPhase.betweenGames => copy.progressHeadline,
-            _ => copy.readyHeadline,
-          };
-    final bodyOverride = needsAuth ? copy.guestTournamentBody : null;
+        : overviewPending || (syncing && overview == null)
+        ? copy.loading
+        : overviewUnavailable
+        ? copy.weeklyOverviewUnavailable
+        : stale
+        ? copy.cachedTournamentHeadline
+        : selected == null
+        ? copy.weeklyOverviewUnavailable
+        : selected.status == WeeklyDayStatus.completed &&
+              selected.isToday
+        ? copy.completedHeadline
+        : selected.status == WeeklyDayStatus.completed
+        ? copy.pastChallengeHeadline
+        : selected.status == WeeklyDayStatus.inProgress
+        ? copy.progressHeadline
+        : selected.status == WeeklyDayStatus.availablePast
+        ? copy.pastChallengeHeadline
+        : copy.readyHeadline;
+    final bodyOverride = needsAuth
+        ? copy.guestTournamentBody
+        : overviewUnavailable
+        ? null
+        : (!hidePersonalTournament &&
+              selected?.status == WeeklyDayStatus.availablePast)
+        ? copy.latePlayExplanation
+        : null;
+    final hasRankedEligibility = selected != null &&
+        !needsAuth &&
+        !needsRecovery &&
+        !overviewUnavailable &&
+        !overviewPending &&
+        (selected.canStart || selected.canResume || selected.canViewResults);
+    final selectedIneligible =
+        selected != null &&
+        !needsAuth &&
+        !needsRecovery &&
+        selected.status != WeeklyDayStatus.lockedFuture &&
+        !selected.canStart &&
+        !selected.canResume &&
+        !selected.canViewResults;
     VoidCallback? onPrimary;
-    if (syncing) {
-      onPrimary = null;
-    } else if (phase == DayPhase.completed && controller.tournamentReady) {
-      onPrimary = controller.openResults;
-    } else if (needsRecovery || needsAuth || controller.sessionAuth != null) {
+    if (needsRecovery || needsAuth) {
       onPrimary = () => unawaited(controller.requestRankedEntry());
+    } else if (overviewPending || (syncing && overview == null)) {
+      onPrimary = null;
+    } else if (overviewUnavailable || selected == null) {
+      onPrimary = () => unawaited(
+        controller.refreshTournament(
+          origin: TournamentRefreshOrigin.pullToRefresh,
+        ),
+      );
+    } else if (syncing) {
+      onPrimary = null;
+    } else if (selected.status == WeeklyDayStatus.lockedFuture ||
+        selected.status == WeeklyDayStatus.closed ||
+        selected.status == WeeklyDayStatus.unavailable ||
+        selected.status == WeeklyDayStatus.unknown ||
+        selectedIneligible ||
+        !hasRankedEligibility) {
+      onPrimary = null;
     } else {
-      // A degraded Home snapshot must offer a safe refresh/retry rather than
-      // showing a dead "Continue tournament" button.
-      onPrimary = controller.resume;
+      onPrimary = () => unawaited(controller.startSelectedManifest());
     }
     return Scaffold(
       backgroundColor: GameTokens.bgDeep,
@@ -898,76 +1063,98 @@ final class _HomeScreen extends StatelessWidget {
                 onRefresh: () => controller.refreshTournament(
                   origin: TournamentRefreshOrigin.pullToRefresh,
                 ),
-                child: ListView(
+                child: SingleChildScrollView(
                   key: const Key('home-scroll'),
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  children: [
-                    Row(
-                      key: const Key('home-header-row'),
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                copy.appTitle.toUpperCase(),
-                                key: const Key('home-title'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      letterSpacing: 1.6,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                              ),
-                              Text(
-                                copy.tagline,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: GameTokens.accent,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        key: const Key('home-header-row'),
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  copy.appTitle.toUpperCase(),
+                                  key: const Key('home-title'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(
+                                        letterSpacing: 1.6,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                 ),
-                              ),
-                            ],
+                                Text(
+                                  copy.tagline,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: GameTokens.accent,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          key: const Key('profile'),
-                          tooltip: copy.profile,
-                          onPressed: () => _openProfile(context, controller),
-                          icon: const Icon(Icons.person_rounded),
-                        ),
-                        IconButton(
-                          key: const Key('settings'),
-                          tooltip: copy.settingsTitle,
-                          onPressed: () => _openSettings(
-                            context,
-                            controller,
-                            crashReporter: crashReporter,
+                          IconButton(
+                            key: const Key('profile'),
+                            tooltip: copy.profile,
+                            onPressed: () => _openProfile(context, controller),
+                            icon: const Icon(Icons.person_rounded),
                           ),
-                          icon: const Icon(Icons.settings_rounded),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _DailyCard(
-                      key: const Key('home-daily-card'),
-                      copy: copy,
-                      day: day,
-                      score: score,
-                      scoreLabel: scoreLabel,
-                      phase: phase,
-                      badge: badge,
-                      headline: headline,
-                      bodyOverride: bodyOverride,
-                      action: primary,
-                      onAction: onPrimary,
-                      connectivityLost: connectivityLost,
-                    ),
-                    const SizedBox(height: 32),
-                    _HomeActions(controller: controller),
-                  ],
+                          IconButton(
+                            key: const Key('settings'),
+                            tooltip: copy.settingsTitle,
+                            onPressed: () => _openSettings(
+                              context,
+                              controller,
+                              crashReporter: crashReporter,
+                            ),
+                            icon: const Icon(Icons.settings_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _DailyCard(
+                        key: const Key('home-daily-card'),
+                        copy: copy,
+                        day: day,
+                        score: score,
+                        scoreLabel: scoreLabel,
+                        phase: phase,
+                        badge: badge,
+                        headline: headline,
+                        bodyOverride: bodyOverride,
+                        action: primary,
+                        onAction: onPrimary,
+                        connectivityLost: connectivityLost,
+                        overview: overview,
+                        selectedDate: controller.selectedTournamentDate,
+                        onSelectDay: controller.selectTournamentDay,
+                        guestMode: needsAuth,
+                        completedDayCount: overview?.completedDayCount ?? 0,
+                        playablePastDayCount:
+                            overview?.playablePastDayCount ?? 0,
+                        selectedBoardCount: hidePersonalTournament
+                            ? null
+                            : (activeMatchesSelected
+                                  ? day?.completedGames
+                                  : selected?.completedBoardCount),
+                        selectedTotalBoards: hidePersonalTournament
+                            ? null
+                            : (selected?.totalBoardCount ?? 6),
+                        selectedOrdinal: hidePersonalTournament
+                            ? null
+                            : (activeMatchesSelected ? day?.ordinal : null),
+                        selectedStatus: selected?.status,
+                      ),
+                      const SizedBox(height: 32),
+                      _HomeActions(controller: controller),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1107,6 +1294,16 @@ final class _DailyCard extends StatelessWidget {
     required this.action,
     required this.onAction,
     required this.connectivityLost,
+    required this.overview,
+    required this.selectedDate,
+    required this.onSelectDay,
+    required this.guestMode,
+    required this.completedDayCount,
+    required this.playablePastDayCount,
+    this.selectedBoardCount,
+    this.selectedTotalBoards,
+    this.selectedOrdinal,
+    this.selectedStatus,
   });
 
   final TournamentCopy copy;
@@ -1120,21 +1317,58 @@ final class _DailyCard extends StatelessWidget {
   final String action;
   final VoidCallback? onAction;
   final bool connectivityLost;
+  final WeeklyTournamentOverview? overview;
+  final String? selectedDate;
+  final ValueChanged<String> onSelectDay;
+  final bool guestMode;
+  final int completedDayCount;
+  final int playablePastDayCount;
+  final int? selectedBoardCount;
+  final int? selectedTotalBoards;
+  final int? selectedOrdinal;
+  final WeeklyDayStatus? selectedStatus;
 
   @override
   Widget build(BuildContext context) {
-    final label = day?.label ?? 'E1';
-    final tone = phase == DayPhase.completed
-        ? GameTokens.success
-        : _tone(label);
+    final label = day?.label ?? '';
+    final tone = guestMode
+        ? GameTokens.diamondFill
+        : switch (selectedStatus) {
+            WeeklyDayStatus.completed => GameTokens.success,
+            WeeklyDayStatus.availablePast => GameTokens.scoreGlow,
+            WeeklyDayStatus.lockedFuture ||
+            WeeklyDayStatus.closed ||
+            WeeklyDayStatus.unavailable ||
+            WeeklyDayStatus.unknown => GameTokens.textMuted,
+            WeeklyDayStatus.inProgress ||
+            WeeklyDayStatus.availableToday ||
+            null => GameTokens.accent,
+          };
+    final title = guestMode
+        ? copy.weeklyTournament.toUpperCase()
+        : copy.dailyChallenge.toUpperCase();
     final body =
         bodyOverride ??
-        switch (phase) {
-          DayPhase.completed => copy.completedBody,
-          DayPhase.ready when day?.original == false => copy.alreadyClaimed,
-          DayPhase.inProgress || DayPhase.betweenGames => label,
+        switch (selectedStatus) {
+          WeeklyDayStatus.completed => copy.completedBody,
+          WeeklyDayStatus.inProgress =>
+            label.isEmpty
+                ? copy.progressHeadline
+                : label,
+          WeeklyDayStatus.availablePast => copy.latePlayExplanation,
+          WeeklyDayStatus.lockedFuture => copy.notAvailableYet,
+          _ when day?.original == false => copy.alreadyClaimed,
           _ => copy.readyBody,
         };
+    final progressLine = guestMode || overview == null
+        ? null
+        : copy.weeklyProgressLabel(completedDayCount, 7);
+    final pastLine = guestMode || playablePastDayCount <= 0
+        ? null
+        : copy.playablePastChallenges(playablePastDayCount);
+    final pipCompleted = guestMode ? 0 : (selectedBoardCount ?? 0);
+    final showPips = !guestMode;
+    final showScore = !guestMode;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1163,7 +1397,7 @@ final class _DailyCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  copy.dailyChallenge.toUpperCase(),
+                  title,
                   style: TextStyle(
                     color: tone,
                     fontWeight: FontWeight.w800,
@@ -1174,38 +1408,79 @@ final class _DailyCard extends StatelessWidget {
                 Text(headline, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 6),
                 Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 14),
-                _Pips(
-                  completed: day?.completedGames ?? 0,
-                  current: phase == DayPhase.completed ? null : day?.ordinal,
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  scoreLabel,
-                  style: const TextStyle(color: GameTokens.textMuted),
-                ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    score == null ? '—' : copy.groupedScore(score!),
-                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: GameTokens.scoreGlow,
-                      fontWeight: FontWeight.w800,
+                if (progressLine != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    progressLine,
+                    style: const TextStyle(
+                      color: GameTokens.success,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-                if (badge != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                ],
+                if (pastLine != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    pastLine,
+                    style: const TextStyle(color: GameTokens.textSecondary),
+                  ),
+                ],
+                if (overview != null) ...[
+                  const SizedBox(height: 14),
+                  WeeklyTournamentCalendar(
+                    overview: overview!,
+                    selectedDate: selectedDate,
+                    onSelect: onSelectDay,
+                    accountScoped: !guestMode && overview!.accountScoped,
+                  ),
+                ],
+                if (showPips) ...[
+                  const SizedBox(height: 14),
+                  _Pips(
+                    completed: pipCompleted,
+                    current: phase == DayPhase.completed ||
+                            (selectedTotalBoards != null &&
+                                pipCompleted >= (selectedTotalBoards ?? 0))
+                        ? null
+                        : selectedOrdinal,
+                  ),
+                ],
+                if (showScore) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    scoreLabel,
+                    style: const TextStyle(color: GameTokens.textMuted),
+                  ),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
                     child: Text(
-                      badge!,
-                      style: TextStyle(
+                      score == null ? '—' : copy.groupedScore(score!),
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        color: GameTokens.scoreGlow,
                         fontWeight: FontWeight.w800,
-                        color: tone,
                       ),
                     ),
                   ),
+                  if (badge != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        badge!,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: tone,
+                        ),
+                      ),
+                    ),
+                ],
+                if (guestMode) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    copy.guestWeekInvite,
+                    style: const TextStyle(color: GameTokens.textSecondary),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,

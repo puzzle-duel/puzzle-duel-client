@@ -947,7 +947,11 @@ void main() {
     );
     expect(controller.rankedWriterLocked, isTrue);
     await controller.beginLocal();
-    await controller.loadDay(presentHome: true);
+    // Explicit claim date required — no silent `_today()` when overview is absent.
+    await controller.loadDay(
+      presentHome: true,
+      originalUtcDate: DateTime.now().toUtc().toIso8601String().substring(0, 10),
+    );
     expect(controller.sessionRecoveryRequired, isFalse);
     expect(controller.rankedAuthRequired, isFalse);
     // clearSessionRecoveryGate must not have unlocked the writer; loadDay

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:puzzle_duel_mobile/theme/game_tokens.dart';
+import 'package:puzzle_duel_mobile/presentation/feedback/app_top_banner.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_copy.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
@@ -226,7 +227,8 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(claims, 1);
+    // PZD-55: Home refresh loads calendar only — claims happen on CTA.
+    expect(claims, 0);
     expect(find.byKey(const Key('practice')), findsOneWidget);
   });
 
@@ -264,6 +266,17 @@ void main() {
       return _ok(method, path, seriesScore: 1200);
     });
     await _pumpHome(tester, api, directory);
+    await _waitFor(tester, find.byKey(const Key('primary-action')));
+    final live = tester
+        .widget<AppTopBannerHost>(
+          find.byKey(const Key('tournament-status-host')),
+        )
+        .controller;
+    final date =
+        live.selectedTournamentDate ??
+        live.weeklyOverview?.currentTournamentDate;
+    await live.loadDay(presentHome: true, originalUtcDate: date);
+    await tester.pump();
     await _waitFor(tester, find.textContaining('1,200'));
     online = false;
     await _pullToRefresh(tester);

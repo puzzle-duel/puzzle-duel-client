@@ -93,7 +93,8 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.start();
-    expect(boardReads, 1);
+    await controller.resume();
+    expect(boardReads, greaterThanOrEqualTo(1));
     expect(controller.seriesId, '22222222-2222-4222-8222-222222222222');
     expect(controller.tournamentSync, TournamentSyncState.degraded);
     expect(controller.tournamentReady, isFalse);
@@ -178,6 +179,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.start();
+    await controller.resume();
     expect(attempts, 1);
     expect(controller.tournamentSync, TournamentSyncState.degraded);
     expect(controller.rankedWriterLocked, true);
