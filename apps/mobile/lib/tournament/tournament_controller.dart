@@ -974,9 +974,11 @@ final class TournamentController extends ChangeNotifier {
     errorCode = null;
     route = const TournamentRoute();
     notifyListeners();
-    if (!tournamentReady && tournamentSync != TournamentSyncState.syncing) {
-      await refreshTournament(origin: TournamentRefreshOrigin.background);
-    }
+    // Always refresh calendar on Home return — even when tournamentReady.
+    // Completing a weekly day leaves ready=true with a stale overview until
+    // GET /v1/tournament/calendar runs. refreshTournament dedupes in-flight
+    // callers and fetchWeeklyTournamentOverview preserves selected date.
+    await refreshTournament(origin: TournamentRefreshOrigin.background);
   }
 
   /// Returns the shell to Home without starting a network refresh.
