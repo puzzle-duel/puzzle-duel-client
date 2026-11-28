@@ -220,7 +220,14 @@ final class TournamentController extends ChangeNotifier {
 
   /// PZD-55 account-scoped weekly hub (null until first successful fetch).
   WeeklyTournamentOverview? weeklyOverview;
+
+  /// Home calendar selection only — independent of active gameplay series date.
   String? selectedTournamentDate;
+
+  /// UTC date of the active claimed/resumed series (snapshot / resume identity).
+  /// Never inferred from Home selection alone; set only after a successful claim.
+  String? activeManifestUtcDate;
+
   bool weeklyOverviewLoading = false;
 
   /// Test-only: awaited at the start of [_hydrateHomeSnapshot] before disk I/O.
@@ -446,6 +453,7 @@ final class TournamentController extends ChangeNotifier {
     homeSnapshotStale = false;
     weeklyOverview = null;
     selectedTournamentDate = null;
+    activeManifestUtcDate = null;
     weeklyOverviewLoading = false;
     resultsError = null;
     errorCode = null;
@@ -629,6 +637,14 @@ final class TournamentController extends ChangeNotifier {
     // Best-effort gameplay session restore; weekly overview is Bearer-scoped.
     await _restoreSession(degradedOnFailure: true);
     if (epoch != _tournamentEpoch) return;
+    // Do not follow a rejected bearer with calendar (avoids request storms).
+    if (tournamentNoticeCode == 'UNAUTHENTICATED') {
+      busy = false;
+      booting = false;
+      if (!preserveRoute) route = const TournamentRoute();
+      notifyListeners();
+      return;
+    }
     await fetchWeeklyTournamentOverview(epoch: epoch);
     if (epoch != _tournamentEpoch) return;
     if (!preserveRoute) route = const TournamentRoute();
@@ -707,9 +723,20 @@ final class TournamentController extends ChangeNotifier {
       seriesId = null;
       results = const {};
       _claim = null;
+      activeManifestUtcDate = null;
     }
     tournamentSync = TournamentSyncState.ready;
-    tournamentNoticeCode = null;
+    // Keep session-auth failure banners; calendar success is independent.
+    const keepNotices = {
+      'TIMEOUT',
+      'UNAUTHENTICATED',
+      'AUTH_UNAVAILABLE',
+      'OFFLINE',
+    };
+    if (tournamentNoticeCode == null ||
+        !keepNotices.contains(tournamentNoticeCode)) {
+      tournamentNoticeCode = null;
+    }
     errorCode = null;
     syncedAt = DateTime.now().toUtc();
     unawaited(
@@ -788,11 +815,36 @@ final class TournamentController extends ChangeNotifier {
         return;
       }
     }
+    // Prefer explicit / Home-selected / server current date. Client `_today()` is
+    // only a last resort when no weekly overview is loaded (legacy resume paths).
+    // [startSelectedManifest] never relies on that fallback.
     final claimDate =
         originalUtcDate ??
         selectedTournamentDate ??
         weeklyOverview?.currentTournamentDate ??
-        _today();
+        (weeklyOverview == null ? _today() : null);
+    if (claimDate == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(claimDate)) {
+      busy = false;
+      booting = false;
+      tournamentNoticeCode = 'MALFORMED_REQUEST';
+      tournamentSync = TournamentSyncState.degraded;
+      notifyListeners();
+      return;
+    }
+    final overviewDay = weeklyOverview?.dayFor(claimDate);
+    if (overviewDay != null &&
+        originalUtcDate == null &&
+        !overviewDay.canStart &&
+        !overviewDay.canResume) {
+      // Server overview says this day is not claimable; do not silently claim.
+      busy = false;
+      booting = false;
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
+      tournamentSync = TournamentSyncState.degraded;
+      notifyListeners();
+      return;
+    }
     final claim = await api.post('/v1/tournament/claims/daily', {
       'originalUtcDate': claimDate,
     });
@@ -816,6 +868,8 @@ final class TournamentController extends ChangeNotifier {
     rankedAuthRequired = false;
     _claim = claim.map;
     seriesId = claim.map['seriesId']?.toString();
+    activeManifestUtcDate =
+        claim.map['originalUtcDate']?.toString() ?? claimDate;
     final id = seriesId;
     if (id == null || id.isEmpty) {
       _fail('MALFORMED_REQUEST', degradedOnFailure: true);
@@ -982,31 +1036,59 @@ final class TournamentController extends ChangeNotifier {
   }
 
   /// Starts, resumes, or opens results for the Home-selected tournament day.
+  ///
+  /// Server `canStart` / `canResume` / `canViewResults` are authoritative.
+  /// Never falls back to client `_today()` when selection/eligibility is missing.
   Future<void> startSelectedManifest() async {
+    if (rankedAuthRequired || sessionRecoveryRequired) {
+      await requestRankedEntry();
+      return;
+    }
     final selected = selectedWeeklyDay;
-    if (selected != null && selected.status == WeeklyDayStatus.lockedFuture) {
-      tournamentNoticeCode = 'CLAIM_WINDOW_CLOSED';
+    if (selected == null) {
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
       notifyListeners();
       return;
     }
-    if (selected != null && selected.status == WeeklyDayStatus.completed) {
+    if (selected.status == WeeklyDayStatus.lockedFuture ||
+        selected.status == WeeklyDayStatus.closed ||
+        selected.status == WeeklyDayStatus.unavailable ||
+        selected.status == WeeklyDayStatus.unknown) {
+      tournamentNoticeCode = selected.status == WeeklyDayStatus.lockedFuture
+          ? 'CLAIM_WINDOW_CLOSED'
+          : 'TOURNAMENT_UNAVAILABLE';
+      notifyListeners();
+      return;
+    }
+    if (selected.canViewResults &&
+        (selected.status == WeeklyDayStatus.completed ||
+            selected.seriesId != null)) {
       if (selected.seriesId != null && selected.seriesId!.isNotEmpty) {
         seriesId = selected.seriesId;
       }
+      unawaited(
+        DiagnosticRuntime.logger.log(
+          LogEvent(
+            level: LogLevel.info,
+            code: LogCode.screenOpened,
+            operation: 'viewManifestResults',
+          ),
+        ),
+      );
       await openResults();
       return;
     }
-    final date =
-        selected?.date ??
-        selectedTournamentDate ??
-        weeklyOverview?.currentTournamentDate ??
-        _today();
+    if (!selected.canStart && !selected.canResume) {
+      tournamentNoticeCode = 'TOURNAMENT_UNAVAILABLE';
+      notifyListeners();
+      return;
+    }
     unawaited(
       DiagnosticRuntime.logger.log(
         LogEvent(
           level: LogLevel.info,
           code: LogCode.screenOpened,
-          operation: selected?.canResume == true
+          operation: selected.canResume
               ? 'resumeSelectedManifest'
               : 'startSelectedManifest',
         ),
@@ -1014,7 +1096,7 @@ final class TournamentController extends ChangeNotifier {
     );
     await loadDay(
       presentHome: false,
-      originalUtcDate: date,
+      originalUtcDate: selected.date,
     );
     if (!tournamentReady || rankedWriterLocked) return;
     await resume();
@@ -1285,7 +1367,23 @@ final class TournamentController extends ChangeNotifier {
         preserveRoute: true,
       );
     }
-    if (!tournamentReady || rankedWriterLocked) {
+    // Calendar ready ≠ claimed series. Claim/resume selected eligible day when
+    // an explicit resume still needs gameplay identity.
+    final needsSeries =
+        day == null || seriesId == null || seriesId!.isEmpty;
+    if (needsSeries && !rankedWriterLocked && !rankedAuthRequired) {
+      final selected = selectedWeeklyDay;
+      if (selected != null && (selected.canStart || selected.canResume)) {
+        await loadDay(presentHome: false, originalUtcDate: selected.date);
+      } else if (weeklyOverview == null) {
+        await loadDay(presentHome: false);
+      }
+    }
+    if (!tournamentReady ||
+        rankedWriterLocked ||
+        day == null ||
+        seriesId == null ||
+        seriesId!.isEmpty) {
       // Never bypass the server-owned writer fence or attempt an unsafe move.
       tournamentNoticeCode = rankedWriterLocked
           ? (tournamentNoticeCode ?? 'WRITER_NOT_AUTHORIZED')
@@ -2554,6 +2652,9 @@ final class TournamentController extends ChangeNotifier {
     if (day == null) {
       day = snap.toDay();
       seriesId = snap.seriesId;
+      if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(snap.originalUtcDate)) {
+        activeManifestUtcDate = snap.originalUtcDate;
+      }
       if (snap.verifiedAll != null || snap.onTimeAwarded != null) {
         results = {
           if (snap.verifiedAll != null) 'all': snap.verifiedAll,
@@ -2573,10 +2674,18 @@ final class TournamentController extends ChangeNotifier {
     final tournamentEpoch = _tournamentEpoch;
     final accountEpoch = accountStateEpoch;
     final scope = identity.activeScope;
+    final manifestDate =
+        activeManifestUtcDate ??
+        _claim?['originalUtcDate']?.toString() ??
+        homeSnapshot?.originalUtcDate;
+    if (manifestDate == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(manifestDate)) {
+      return;
+    }
     final snap = TournamentHomeSnapshot.fromLive(
       scope: scope,
       day: current,
-      originalUtcDate: _today(),
+      originalUtcDate: manifestDate,
       capturedAtMs: DateTime.now().toUtc().millisecondsSinceEpoch,
       results: results,
     );

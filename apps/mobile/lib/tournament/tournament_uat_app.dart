@@ -871,10 +871,14 @@ final class _HomeScreen extends StatelessWidget {
         : needsRecovery
         ? copy.restoreSession
         : needsAuth
-        ? copy.signInToPlay
-        : selected?.status == WeeklyDayStatus.lockedFuture
+        ? copy.guestTournamentHeadline
+        : selected?.status == WeeklyDayStatus.lockedFuture ||
+              selected?.status == WeeklyDayStatus.closed ||
+              selected?.status == WeeklyDayStatus.unavailable ||
+              selected?.status == WeeklyDayStatus.unknown
         ? copy.notAvailableYet
-        : selected?.status == WeeklyDayStatus.completed
+        : selected?.status == WeeklyDayStatus.completed ||
+              selected?.canViewResults == true
         ? copy.viewResults
         : selected?.status == WeeklyDayStatus.inProgress ||
               selected?.canResume == true
@@ -904,12 +908,24 @@ final class _HomeScreen extends StatelessWidget {
               selected?.status == WeeklyDayStatus.availablePast)
         ? copy.latePlayExplanation
         : null;
+    final selectedIneligible =
+        selected != null &&
+        !needsAuth &&
+        !needsRecovery &&
+        selected.status != WeeklyDayStatus.lockedFuture &&
+        !selected.canStart &&
+        !selected.canResume &&
+        !selected.canViewResults;
     VoidCallback? onPrimary;
     if (syncing) {
       onPrimary = null;
-    } else if (selected?.status == WeeklyDayStatus.lockedFuture) {
+    } else if (selected?.status == WeeklyDayStatus.lockedFuture ||
+        selected?.status == WeeklyDayStatus.closed ||
+        selected?.status == WeeklyDayStatus.unavailable ||
+        selected?.status == WeeklyDayStatus.unknown ||
+        selectedIneligible) {
       onPrimary = null;
-    } else if (needsRecovery || needsAuth || controller.sessionAuth != null) {
+    } else if (needsRecovery || needsAuth) {
       onPrimary = () => unawaited(controller.requestRankedEntry());
     } else {
       onPrimary = () => unawaited(controller.startSelectedManifest());

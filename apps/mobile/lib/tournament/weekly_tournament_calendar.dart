@@ -101,6 +101,8 @@ final class _DayCard extends StatelessWidget {
     final locale = TournamentLocale.of(context);
     final style = _styleFor(day, accountScoped: accountScoped);
     final weekday = _weekdayShort(day.date, locale);
+    final dayNumber = _dayOfMonth(day.date);
+    final title = dayNumber == null ? weekday : '$weekday $dayNumber';
     final semantics = [
       _fullDateLabel(day.date, locale),
       style.label(copy),
@@ -122,7 +124,11 @@ final class _DayCard extends StatelessWidget {
               color: style.fill,
               borderRadius: BorderRadius.circular(GameTokens.radiusSm),
               border: Border.all(
-                color: selected ? GameTokens.accent : style.border,
+                color: selected
+                    ? GameTokens.accent
+                    : day.isToday
+                    ? GameTokens.accent.withValues(alpha: 0.85)
+                    : style.border,
                 width: selected || day.isToday ? 2 : 1.2,
               ),
             ),
@@ -135,9 +141,10 @@ final class _DayCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      weekday,
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: style.foreground,
                         fontWeight: FontWeight.w800,
@@ -146,18 +153,20 @@ final class _DayCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Icon(style.icon, size: 16, color: style.foreground),
-                    const SizedBox(height: 2),
-                    Text(
-                      style.shortLabel(copy, day),
-                      maxLines: 1,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: style.foreground,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 9,
+                    if (style.shortLabel != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        style.shortLabel!(copy, day),
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: style.foreground,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 9,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -176,7 +185,7 @@ final class _DayVisual {
     required this.foreground,
     required this.icon,
     required this.label,
-    required this.shortLabel,
+    this.shortLabel,
   });
 
   final Color border;
@@ -184,30 +193,55 @@ final class _DayVisual {
   final Color foreground;
   final IconData icon;
   final String Function(TournamentCopy copy) label;
-  final String Function(TournamentCopy copy, WeeklyTournamentDay day) shortLabel;
+  final String Function(TournamentCopy copy, WeeklyTournamentDay day)?
+  shortLabel;
 }
 
 _DayVisual _styleFor(
   WeeklyTournamentDay day, {
   required bool accountScoped,
 }) {
-  // Guest/public: never imply personal completion.
-  final status = (!accountScoped &&
-          (day.status == WeeklyDayStatus.completed ||
-              day.status == WeeklyDayStatus.inProgress))
-      ? (day.isToday
-            ? WeeklyDayStatus.availableToday
-            : WeeklyDayStatus.availablePast)
-      : day.status;
+  // Guest/public: never imply personal completion or catch-up playability.
+  if (!accountScoped) {
+    if (day.status == WeeklyDayStatus.lockedFuture) {
+      return _DayVisual(
+        border: GameTokens.border,
+        fill: GameTokens.surface.withValues(alpha: 0.55),
+        foreground: GameTokens.textMuted,
+        icon: Icons.lock_rounded,
+        label: (c) => c.notAvailableYet,
+        shortLabel: null,
+      );
+    }
+    if (day.isToday) {
+      return _DayVisual(
+        border: GameTokens.accent,
+        fill: GameTokens.accent.withValues(alpha: 0.14),
+        foreground: GameTokens.accent,
+        icon: Icons.play_circle_filled_rounded,
+        label: (c) => c.playDayLabel,
+        shortLabel: null,
+      );
+    }
+    // Past / open public days: neutral outline (not amber "Oyna").
+    return _DayVisual(
+      border: GameTokens.border,
+      fill: GameTokens.surface.withValues(alpha: 0.35),
+      foreground: GameTokens.textPrimary,
+      icon: Icons.radio_button_unchecked_rounded,
+      label: (c) => c.weeklyTournament,
+      shortLabel: null,
+    );
+  }
 
-  return switch (status) {
+  return switch (day.status) {
     WeeklyDayStatus.completed => _DayVisual(
       border: GameTokens.success,
       fill: GameTokens.success.withValues(alpha: 0.12),
       foreground: GameTokens.success,
       icon: Icons.check_rounded,
       label: (c) => c.completedDayLabel,
-      shortLabel: (c, _) => c.pick('Done', 'Tamam'),
+      shortLabel: (c, _) => c.completedDayLabel,
     ),
     WeeklyDayStatus.availablePast => _DayVisual(
       border: GameTokens.scoreGlow,
@@ -261,6 +295,11 @@ String _weekdayShort(String date, Locale locale) {
   const en = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   final labels = locale.languageCode == 'tr' ? tr : en;
   return labels[(parsed.weekday + 6) % 7];
+}
+
+int? _dayOfMonth(String date) {
+  final parsed = DateTime.tryParse('${date}T00:00:00.000Z');
+  return parsed?.day;
 }
 
 String _fullDateLabel(String date, Locale locale) {

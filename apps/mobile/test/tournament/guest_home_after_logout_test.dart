@@ -7,6 +7,7 @@ import 'package:puzzle_duel_mobile/presentation/feedback/app_top_banner.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_nav.dart';
 import 'package:puzzle_duel_mobile/tournament/tournament_uat_app.dart';
 import 'package:puzzle_duel_mobile/tournament/uat_api.dart';
+import 'package:puzzle_duel_mobile/tournament/weekly_tournament_overview.dart';
 
 import 'tournament_command_test.dart' show ScriptedUatApi;
 
@@ -127,17 +128,60 @@ void main() {
 
       live.applyGuestSessionAfterLogout(rankedAuthRequired: true);
       await tester.pump();
+      expect(find.textContaining('10,200'), findsNothing);
+      expect(live.day, isNull);
+      expect(live.results, isEmpty);
+
+      // Mimic post-logout public calendar refresh (logout handler calls refreshTournament).
+      live.weeklyOverview = WeeklyTournamentOverview.tryParse({
+        'weekStartUtc': '2026-11-23',
+        'weekEndUtc': '2026-11-29',
+        'serverNowMs': 1,
+        'currentTournamentDate': '2026-11-28',
+        'completedDayCount': 0,
+        'playablePastDayCount': 0,
+        'accountScoped': false,
+        'days': [
+          for (final date in [
+            '2026-11-23',
+            '2026-11-24',
+            '2026-11-25',
+            '2026-11-26',
+            '2026-11-27',
+            '2026-11-28',
+            '2026-11-29',
+          ])
+            {
+              'date': date,
+              'status': date == '2026-11-29'
+                  ? 'LOCKED_FUTURE'
+                  : date == '2026-11-28'
+                  ? 'AVAILABLE_TODAY'
+                  : 'AVAILABLE_PAST',
+              'isToday': date == '2026-11-28',
+              'canStart': false,
+              'canResume': false,
+              'canViewResults': false,
+              'completedBoardCount': 0,
+              'totalBoardCount': 6,
+            },
+        ],
+      });
+      live.selectedTournamentDate = '2026-11-28';
+      live.notifyListeners();
+      await tester.pump();
 
       expect(find.textContaining('10,200'), findsNothing);
       expect(find.textContaining('On-Time'), findsNothing);
       expect(find.textContaining("Today's tournament completed"), findsNothing);
-      expect(find.text('Join tournament'), findsOneWidget);
+      expect(find.text('Join tournament'), findsWidgets);
       expect(
         find.text('Sign in with Apple or Google to enter the tournament.'),
         findsOneWidget,
       );
-      expect(find.text('Sign in to play tournament'), findsOneWidget);
-      expect(find.byKey(const Key('weekly-tournament-calendar')), findsNothing);
+      expect(find.byKey(const Key('primary-action')), findsOneWidget);
+      expect(find.byKey(const Key('weekly-tournament-calendar')), findsOneWidget);
+      expect(find.text('Oyna'), findsNothing);
       expect(live.day, isNull);
       expect(live.results, isEmpty);
       expect(live.tournamentNoticeCode, isNull);
