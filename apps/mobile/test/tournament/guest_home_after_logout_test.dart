@@ -42,6 +42,9 @@ void main() {
             'sessionSecret': 'secret',
           });
         }
+        if (path.endsWith('/calendar') && method == 'GET') {
+          return UatHttpResult(200, _guestCalendarFixture());
+        }
         if (path.endsWith('/claims/daily')) {
           return const UatHttpResult(201, {
             'seriesId': 'series-1',
@@ -128,12 +131,13 @@ void main() {
       expect(find.textContaining('10,200'), findsNothing);
       expect(find.textContaining('On-Time'), findsNothing);
       expect(find.textContaining("Today's tournament completed"), findsNothing);
-      expect(find.text("Join today's tournament"), findsOneWidget);
+      expect(find.text('Join tournament'), findsOneWidget);
       expect(
         find.text('Sign in with Apple or Google to enter the tournament.'),
         findsOneWidget,
       );
       expect(find.text('Sign in to play tournament'), findsOneWidget);
+      expect(find.byKey(const Key('weekly-tournament-calendar')), findsNothing);
       expect(live.day, isNull);
       expect(live.results, isEmpty);
       expect(live.tournamentNoticeCode, isNull);
@@ -159,4 +163,42 @@ String _jwt({required String sub, required String accountType}) {
       )
       .replaceAll('=', '');
   return '$header.$payload.sig';
+}
+
+Map<String, Object?> _guestCalendarFixture() {
+  final today = DateTime.now().toUtc();
+  final dayStart = DateTime.utc(today.year, today.month, today.day);
+  final mondayOffset = (dayStart.weekday + 6) % 7;
+  final monday = dayStart.subtract(Duration(days: mondayOffset));
+  final days = <Map<String, Object?>>[];
+  for (var i = 0; i < 7; i++) {
+    final date = monday.add(Duration(days: i));
+    final iso = date.toIso8601String().substring(0, 10);
+    final isToday = date == dayStart;
+    final isFuture = date.isAfter(dayStart);
+    days.add({
+      'date': iso,
+      'status': isFuture
+          ? 'LOCKED_FUTURE'
+          : isToday
+          ? 'AVAILABLE_TODAY'
+          : 'AVAILABLE_PAST',
+      'isToday': isToday,
+      'canStart': false,
+      'canResume': false,
+      'canViewResults': false,
+      'completedBoardCount': 0,
+      'totalBoardCount': 6,
+    });
+  }
+  return {
+    'weekStartUtc': monday.toIso8601String().substring(0, 10),
+    'weekEndUtc': monday.add(const Duration(days: 6)).toIso8601String().substring(0, 10),
+    'serverNowMs': DateTime.now().toUtc().millisecondsSinceEpoch,
+    'currentTournamentDate': dayStart.toIso8601String().substring(0, 10),
+    'completedDayCount': 0,
+    'playablePastDayCount': 0,
+    'accountScoped': false,
+    'days': days,
+  };
 }

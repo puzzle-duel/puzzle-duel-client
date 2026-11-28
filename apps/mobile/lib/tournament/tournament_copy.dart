@@ -46,27 +46,64 @@ final class TournamentCopy {
     'Şekilleri eşleştir. Satırları temizle.',
   );
   String get dailyChallenge => pick('Daily challenge', 'Günlük mücadele');
+  String get weeklyTournament =>
+      pick('Weekly tournament', 'Haftalık turnuva');
   String get sixGames => pick('Six games', 'Altı oyun');
   String get playToday =>
-      pick("Play today's tournament", 'Bugünün turnuvasını oyna');
+      pick('Start tournament', 'Turnuvaya başla');
+  String get startChallenge =>
+      pick('Start challenge', 'Mücadeleye başla');
   String get continueTournament =>
       pick('Continue tournament', 'Turnuvaya devam et');
   String get resume => pick('Resume tournament', 'Turnuvaya devam et');
+  String get notAvailableYet =>
+      pick('Not available yet', 'Henüz açılmadı');
+  String get playDayLabel => pick('Play', 'Oyna');
+  String get completedDayLabel => pick('Completed', 'Tamamlandı');
   String get readyHeadline =>
       pick('Today’s tournament is open', 'Bugünün turnuvası açık');
   String get guestTournamentHeadline =>
-      pick("Join today's tournament", 'Günün turnuvasına katıl');
+      pick('Join tournament', 'Turnuvaya katıl');
   String get guestTournamentBody => pick(
     'Sign in with Apple or Google to enter the tournament.',
     'Turnuvaya katılmak için Apple veya Google hesabınla oturum aç.',
+  );
+  String get guestWeekInvite => pick(
+    'Sign in to join the tournament and save your progress.',
+    'Turnuvaya katılmak ve ilerlemeni kaydetmek için oturum açabilirsin.',
   );
   String get progressHeadline =>
       pick('Tournament in progress', 'Turnuva sürüyor');
   String get completedHeadline =>
       pick("Today's tournament completed", 'Bugünün turnuvası tamamlandı');
+  String get pastChallengeHeadline =>
+      pick('Past challenge selected', 'Geçmiş mücadele seçildi');
+  String get latePlayExplanation => pick(
+    'Points earned from this challenge count toward your weekly ranking.',
+    'Bu mücadeleden kazandığın puanlar haftalık sıralamana eklenir.',
+  );
+  String weeklyProgressLabel(int completed, int total) => pick(
+    'Weekly progress · $completed/$total completed',
+    'Haftalık ilerleme · $completed/$total tamamlandı',
+  );
+  String playablePastChallenges(int count) {
+    if (count <= 0) return '';
+    if (count == 1) {
+      return pick(
+        '1 past challenge is playable.',
+        '1 geçmiş mücadele oynanabilir.',
+      );
+    }
+    return pick(
+      '$count past challenges are playable.',
+      '$count geçmiş mücadele oynanabilir.',
+    );
+  }
+  String get weekClosed => pick('This week is closed', 'Bu hafta kapandı');
   String get weeklyRankings => pick('Weekly rankings', 'Haftalık sıralama');
   String get practiceLevels =>
       pick('Easy · Medium · Hard', 'Kolay · Orta · Zor');
+
   String get yourRank => pick('YOUR RANK', 'SENİN SIRAN');
   String get rankCaption => pick('Verified rank', 'Doğrulanmış sıra');
   String get settingsTitle => pick('Settings', 'Ayarlar');
