@@ -165,11 +165,17 @@ final class _PracticeFlowState extends State<PracticeFlow> {
     ));
     // Guest-compatible badge ledger (loyalty / practice_master / unstoppable).
     // Does not touch gameplay scoring or tournament On-Time awards.
+    final completedAtMs = DateTime.parse(when).millisecondsSinceEpoch;
     unawaited(
-      widget.controller.localBadgeLedger.recordEligibleCompletion(
-        utcDate: when.substring(0, 10),
-        practiceCompletionId: record.sessionId,
-      ),
+      widget.controller.localBadgeLedger
+          .recordPracticeCompletion(
+            completionId: record.sessionId,
+            completedAtMs: completedAtMs,
+            difficulty: record.difficulty,
+            rulesVersion: record.rulesVersion,
+            generatorVersion: record.generatorVersion,
+          )
+          .then((_) => widget.controller.badgeSync.scheduleSyncIfNeeded()),
     );
     final best = await _store.bestScore(
       profile.wire,

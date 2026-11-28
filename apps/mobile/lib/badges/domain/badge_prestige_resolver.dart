@@ -1,4 +1,5 @@
 import 'package:puzzle_duel_mobile/badges/domain/badge_definition.dart';
+import 'package:puzzle_duel_mobile/badges/domain/badge_milestones.dart';
 import 'package:puzzle_duel_mobile/badges/domain/badge_prestige.dart';
 
 /// Pure prestige math — no Flutter / animation / localization.
@@ -106,16 +107,14 @@ final class BadgePrestigeResolver {
   }
 
   /// Practice Master occurrences from distinct completed practice games.
-  static int practiceMasterOccurrences(int completedPracticeGames) {
-    if (completedPracticeGames < 0) return 0;
-    return completedPracticeGames ~/ 10;
-  }
+  static int practiceMasterOccurrences(int completedPracticeGames) =>
+      BadgeMilestones.practiceMasterOccurrences(completedPracticeGames);
 
-  /// Unstoppable occurrences from a consecutive active-day streak length.
-  /// Seven consecutive days → 1; fourteen → 2; overlapping windows do not
-  /// produce daily duplicates when milestones are stored by evidence key.
-  static int unstoppableOccurrencesFromStreakDays(int consecutiveActiveDays) {
-    if (consecutiveActiveDays < 0) return 0;
-    return consecutiveActiveDays ~/ 7;
-  }
+  /// Lifetime Unstoppable awards from non-overlapping 7-day windows.
+  static int unstoppableOccurrencesFromActiveDates(
+    Iterable<String> distinctActiveUtcDates,
+  ) =>
+      BadgeMilestones.nonOverlappingSevenDayWindows(
+        distinctActiveUtcDates,
+      ).length;
 }

@@ -77,11 +77,26 @@ void main() {
       expect(BadgePrestigeResolver.practiceMasterOccurrences(20), 2);
     });
 
-    test('unstoppable every 7 streak days', () {
-      expect(BadgePrestigeResolver.unstoppableOccurrencesFromStreakDays(6), 0);
-      expect(BadgePrestigeResolver.unstoppableOccurrencesFromStreakDays(7), 1);
-      expect(BadgePrestigeResolver.unstoppableOccurrencesFromStreakDays(14), 2);
-      expect(BadgePrestigeResolver.unstoppableOccurrencesFromStreakDays(21), 3);
+    test('unstoppable from lifetime windows', () {
+      expect(
+        BadgePrestigeResolver.unstoppableOccurrencesFromActiveDates([
+          for (var i = 1; i <= 6; i++) '2026-11-0$i',
+        ]),
+        0,
+      );
+      expect(
+        BadgePrestigeResolver.unstoppableOccurrencesFromActiveDates([
+          for (var i = 1; i <= 7; i++) '2026-11-0$i',
+        ]),
+        1,
+      );
+      expect(
+        BadgePrestigeResolver.unstoppableOccurrencesFromActiveDates([
+          for (var i = 1; i <= 7; i++) '2026-11-${i.toString().padLeft(2, '0')}',
+          for (var i = 9; i <= 15; i++) '2026-11-${i.toString().padLeft(2, '0')}',
+        ]),
+        2,
+      );
     });
   });
 }

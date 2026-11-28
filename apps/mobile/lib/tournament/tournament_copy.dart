@@ -187,8 +187,8 @@ final class TournamentCopy {
     'Resmi sonuçlandıktan sonra haftalık lig grubunda birinci ol.',
   );
   String get championBadgeUnlock => pick(
-    'Verified account required. Win a finalized weekly league group.',
-    'Doğrulanmış hesap gerekir. Sonuçlanmış haftalık lig grubunu kazan.',
+    'Not earnable yet — weekly league groups are not shipped. Verified account will be required.',
+    'Henüz kazanılamaz — haftalık lig grupları yok. Doğrulanmış hesap gerekecek.',
   );
   String get risingStarBadgeName => pick('Rising Star', 'Yükselen Yıldız');
   String get risingStarBadgeDescription => pick(
@@ -196,8 +196,8 @@ final class TournamentCopy {
     'Daha yüksek lige her resmi terfi için verilir.',
   );
   String get risingStarBadgeUnlock => pick(
-    'Verified account required. Earn a finalized league promotion.',
-    'Doğrulanmış hesap gerekir. Resmi bir lig terfisi kazan.',
+    'Not earnable yet — league promotions are not shipped. Verified account will be required.',
+    'Henüz kazanılamaz — lig terfileri yok. Doğrulanmış hesap gerekecek.',
   );
   String get unstoppableBadgeName => pick('Unstoppable', 'Durdurulamaz');
   String get unstoppableBadgeDescription => pick(

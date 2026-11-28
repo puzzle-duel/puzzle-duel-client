@@ -12,6 +12,7 @@ import 'package:puzzle_duel_mobile/application/game_session.dart';
 import 'package:puzzle_duel_mobile/presentation/audio/game_sfx.dart';
 import 'package:puzzle_duel_mobile/presentation/debug/interaction_perf.dart';
 import 'package:puzzle_duel_mobile/presentation/feedback/app_feedback.dart';
+import 'package:puzzle_duel_mobile/badges/local/badge_sync_repository.dart';
 import 'package:puzzle_duel_mobile/badges/local/local_badge_ledger.dart';
 import 'package:puzzle_duel_mobile/tournament/guest_auth.dart';
 import 'package:puzzle_duel_mobile/tournament/local_kv_store.dart';
@@ -201,6 +202,12 @@ final class TournamentController extends ChangeNotifier {
     identity: identity,
   );
 
+  late final BadgeSyncRepository badgeSync = BadgeSyncRepository(
+    api: api,
+    sessionAuth: sessionAuth,
+    ledger: localBadgeLedger,
+  );
+
   TournamentRoute route = const TournamentRoute();
   TournamentDay? day;
   Map<String, Object?> board = const {};
@@ -351,6 +358,7 @@ final class TournamentController extends ChangeNotifier {
     // Fence before kick so in-flight work from the previous account cannot
     // mutate the newly published scope.
     personalRecords.fenceSync();
+    localBadgeLedger.fence();
     unawaited(
       DiagnosticRuntime.logger.log(
         LogEvent(
@@ -502,6 +510,7 @@ final class TournamentController extends ChangeNotifier {
   void _kickPersonalRecordsSync() {
     final generation = personalRecords.accountSyncGeneration;
     unawaited(personalRecords.refreshAndSync(expectedGeneration: generation));
+    unawaited(badgeSync.scheduleSyncIfNeeded(force: true));
   }
 
   bool get tournamentReady => tournamentSync == TournamentSyncState.ready;
