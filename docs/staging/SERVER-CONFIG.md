@@ -1,6 +1,6 @@
 # Puzzle Duel iOS staging — server and local-build runbook
 
-**Updated:** 2026-11-22  
+**Updated:** 2026-11-28  
 **Environment:** staging / `version/0.0.2`  
 **Authoritative infrastructure reference:** [Backend Oracle server config](https://github.com/puzzle-duel/puzzle-duel-backend/blob/version/0.0.2/docs/staging/SERVER-CONFIG.md)
 
@@ -92,15 +92,15 @@ Last confirmed release commit **at initial branch verification**: `58f1d3e`; che
 
 **Do NOT use `flutter run --debug` or terminate an attached debug session and assume its installed app is a standalone release.** The standard local UAT workflow is to compile an iOS **release** app on the Mac, install the already-built app on the physical device, then open it **from the iPhone home screen** with the terminal detached.
 
-Use this only after a trusted public HTTPS staging origin is configured. The Oracle IP is `84.13.66.211`, but no verified public TLS origin exists at the last check. Do not substitute a broken hostname or `http://84.13.66.211:8787` (loopback-only backend, guest auth is HTTPS-only).
+Use the recorded verified transport origin `https://84-13-66-211.sslip.io`; recheck trusted TLS and HTTP 200 before each build. Never substitute the JWT issuer `https://staging.puzzle-duel.app` or the raw IP/loopback port.
 
 ```sh
 cd ~/Desktop/workspace/puzzle-duel-client/apps/mobile
 
-# A real verified HTTPS origin must be supplied by the operator.
-: "${PZD_STAGING_BASE_URL:?Verified public HTTPS staging origin required}"
+# Canonical staging transport origin; do not substitute the JWT issuer.
+export PZD_STAGING_BASE_URL=https://84-13-66-211.sslip.io
 case "$PZD_STAGING_BASE_URL" in https://*) ;; *) echo 'HTTPS staging origin required'; exit 1;; esac
-curl -fsS --connect-timeout 5 --max-time 15 "${PZD_STAGING_BASE_URL%/}/healthz" || exit 1
+test "$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 "${PZD_STAGING_BASE_URL%/}/healthz")" = 200 || exit 1
 
 flutter pub get --enforce-lockfile
 
@@ -149,7 +149,7 @@ tail -n 50 /home/pzd-staging/pzd-staging/http-diagnostics.log
 
 ## Pre-build and release gates
 
-1. The local branch must be exactly `version/0.0.2` with up-to-date commit; don't build if `git switch` or `git pull` failed due to local modifications.
+1. Use the explicitly approved UAT branch and exact commit (normally `version/0.0.2`, or the active feature PR before merge); don't build if checkout or pull failed.
 2. `main.dart` must launch only `TournamentUatApp`. Never revert to the historic offline shell.
 3. A valid HTTPS origin must work from the Mac and iPhone; `/healthz` should return 2xx. Verify guest auth and tournament/leaderboard independently.
 4. Existing Firebase staging configuration and dSYM upload must be verified independently; avoid claiming symbolication complete because a build succeeded.
@@ -158,3 +158,6 @@ tail -n 50 /home/pzd-staging/pzd-staging/http-diagnostics.log
 ## Recording changes
 
 When HTTPS ingress is actually fixed, add the **tested exact HTTPS origin**, certificate/issuer decision, and verification date here and in the backend canonical server config. No password, token or private key may be committed.
+
+## Mandatory operational guard (owner, 2026-11-28)
+Before giving ANY build, login, troubleshooting or deployment instruction, read this runbook and `docs/DEVELOPMENT-HISTORY.md` from the actual target ref. Use the documented release recipe including both Google OAuth client IDs and Firebase flags. The issuer is not the transport endpoint. Do not ask for the known IP again. A failed preflight blocks the build; diagnose via GitHub Actions/Inspector, not direct Oracle SSH (historical commands above are reference only, not authorization). Never treat historical health evidence as a current check.
