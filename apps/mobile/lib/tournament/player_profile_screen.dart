@@ -44,6 +44,12 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   var _badgeLoadGeneration = 0;
   String? _activeBadgeCacheKey;
 
+  /// Verified remote GET in flight after local paint (All/Tournament empty label).
+  var _awaitingVerifiedRemote = false;
+
+  /// True after at least one settled verified remote attempt for this account scope.
+  var _verifiedRemoteSettled = false;
+
   bool get _isVerifiedAccount =>
       widget.controller.sessionAuth?.cachedAccess?.isVerified == true;
 
@@ -96,6 +102,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
   void _clearAccountScopedUi() {
     _stats = const PracticeStats(completedCount: 0, difficultyCounts: {});
     _recordsViewModel = null;
+    _awaitingVerifiedRemote = false;
+    _verifiedRemoteSettled = false;
     _loadingBadges = true;
     _activeBadgeCacheKey = _verifiedPlayerCacheKey;
     final cached = _activeBadgeCacheKey == null
@@ -180,6 +188,9 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     setState(() {
       _stats = localView.practiceStats;
       _recordsViewModel = localView;
+      if (remote && _isVerifiedAccount) {
+        _awaitingVerifiedRemote = true;
+      }
     });
 
     if (!remote || !_isVerifiedAccount) return;
@@ -216,6 +227,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     setState(() {
       _stats = remoteView.practiceStats;
       _recordsViewModel = remoteView;
+      _awaitingVerifiedRemote = false;
+      _verifiedRemoteSettled = true;
     });
     if (!mounted) return;
     final status = remoteView.syncStatus;
@@ -459,14 +472,28 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
     return text.isEmpty ? null : text;
   }
 
-  /// Tournament empty cards must not look like genuine "no record" after 5xx.
+  /// All/Tournament empty cards must not look like genuine "no record" before a
+  /// settled successful remote snapshot (or after server/offline/auth failure).
+  /// Practice segment remains local-first and may show genuine empty.
   String _emptyRecordLabel(TournamentCopy copy) {
     if (!_isVerifiedAccount) return copy.noPersonalBest;
-    if (_effectiveRecordsSegment != PersonalRecordSegment.tournament) {
+    final segment = _effectiveRecordsSegment;
+    if (segment == PersonalRecordSegment.practice) {
       return copy.noPersonalBest;
     }
+
     final status =
         _recordsViewModel?.syncStatus ?? PersonalRecordsSyncStatus.idle;
+    final loading = _awaitingVerifiedRemote ||
+        status == PersonalRecordsSyncStatus.syncing ||
+        (!_verifiedRemoteSettled && status == PersonalRecordsSyncStatus.idle);
+    if (loading) {
+      final text = copy.personalRecordsSyncStatus(
+        PersonalRecordsSyncStatus.syncing,
+      );
+      return text.isEmpty ? copy.personalRecordsLoading : text;
+    }
+
     switch (status) {
       case PersonalRecordsSyncStatus.serverError:
       case PersonalRecordsSyncStatus.offline:
@@ -477,6 +504,8 @@ final class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
       case PersonalRecordsSyncStatus.syncing:
       case PersonalRecordsSyncStatus.pendingUpload:
       case PersonalRecordsSyncStatus.upToDate:
+        // Genuine empty only after a successful remote settle (upToDate /
+        // pendingUpload). Idle/syncing are handled above.
         return copy.noPersonalBest;
     }
   }

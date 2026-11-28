@@ -123,6 +123,10 @@ final class TournamentCopy {
         ),
       };
   String get noPersonalBest => pick('No record yet.', 'Henüz rekorun yok.');
+  String get personalRecordsLoading => pick(
+    'Loading records…',
+    'Rekorlar yükleniyor…',
+  );
   String get unverifiedLocal => pick('Local only', 'Yalnızca yerel');
   String get badgeCollectionTitle =>
       pick('Badge collection', 'Rozet koleksiyonu');

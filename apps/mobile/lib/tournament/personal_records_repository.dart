@@ -202,6 +202,10 @@ final class _ScopedCache {
   Map<String, CachedRemotePersonalRecord> remoteByKey = {};
   bool schemaReady = true;
   PersonalRecordsSyncStatus syncStatus = PersonalRecordsSyncStatus.idle;
+
+  /// Last settled GET /personal-records outcome for this account scope.
+  /// Practice sync must not erase a failed remote snapshot for All/Tournament UX.
+  PersonalRecordsSyncStatus? lastRemoteFetchStatus;
 }
 
 /// Account-scoped practice sync + remote snapshot. PracticeStore remains the
@@ -398,6 +402,13 @@ final class PersonalRecordsRepository {
         cache.syncStatus == PersonalRecordsSyncStatus.serverError) {
       return cache.syncStatus;
     }
+    // Practice upload success must not mask a failed remote snapshot GET.
+    final remote = cache.lastRemoteFetchStatus;
+    if (remote == PersonalRecordsSyncStatus.unauthorized ||
+        remote == PersonalRecordsSyncStatus.offline ||
+        remote == PersonalRecordsSyncStatus.serverError) {
+      return remote!;
+    }
     if (pending.isNotEmpty) return PersonalRecordsSyncStatus.pendingUpload;
     return cache.syncStatus;
   }
@@ -551,6 +562,7 @@ final class PersonalRecordsRepository {
     }
     if (result.status == 0) {
       cache.syncStatus = PersonalRecordsSyncStatus.offline;
+      cache.lastRemoteFetchStatus = PersonalRecordsSyncStatus.offline;
       unawaited(
         DiagnosticRuntime.logger.log(
           LogEvent(
@@ -565,6 +577,7 @@ final class PersonalRecordsRepository {
     }
     if (result.status == 401 || result.status == 403) {
       cache.syncStatus = PersonalRecordsSyncStatus.unauthorized;
+      cache.lastRemoteFetchStatus = PersonalRecordsSyncStatus.unauthorized;
       unawaited(
         DiagnosticRuntime.logger.log(
           LogEvent(
@@ -581,6 +594,7 @@ final class PersonalRecordsRepository {
     if (result.status == 404) {
       // Ingress/config miss — never retry as transport flake; keep local rows.
       cache.syncStatus = PersonalRecordsSyncStatus.serverError;
+      cache.lastRemoteFetchStatus = PersonalRecordsSyncStatus.serverError;
       if (_scopeStillActive(scopeKey, expectedGeneration)) {
         _lastSyncOutcome = PersonalRecordsSyncOutcome.routeNotFound;
         _lastSyncOutcomeKey = scopeKey;
@@ -601,6 +615,7 @@ final class PersonalRecordsRepository {
     }
     if (result.status < 200 || result.status >= 300) {
       cache.syncStatus = PersonalRecordsSyncStatus.serverError;
+      cache.lastRemoteFetchStatus = PersonalRecordsSyncStatus.serverError;
       unawaited(
         DiagnosticRuntime.logger.log(
           LogEvent(
@@ -620,6 +635,7 @@ final class PersonalRecordsRepository {
     // Max-only merge: never allow a stale GET to lower a known remote score.
     cache.remoteByKey = _mergeRemoteMax(cache.remoteByKey, records);
     await _saveRemoteCache(scopeKey, cache.remoteByKey);
+    cache.lastRemoteFetchStatus = PersonalRecordsSyncStatus.upToDate;
     if (!_scopeStillActive(scopeKey, expectedGeneration)) {
       return PersonalRecordsSyncOutcome.aborted;
     }
