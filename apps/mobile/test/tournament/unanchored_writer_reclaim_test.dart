@@ -113,6 +113,74 @@ void main() {
     },
   );
 
+  test('post-recovery board without explicit writerSessionMatches stays locked',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('pzd55-reclaim-null-match-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final identity = PracticeIdentityStore(dir);
+    await identity.load();
+    var boardReads = 0;
+    final api = ScriptedUatApi((method, path, body) async {
+      if (path == '/v1/tournament/session' && method == 'POST') {
+        return const UatHttpResult(201, {
+          'playerId': '11111111-1111-4111-8111-111111111111',
+          'sessionId': '33333333-3333-4333-8333-333333333333',
+          'sessionSecret': 'test-session-secret-012345678901234567',
+        });
+      }
+      if (path == '/v1/tournament/devices/register') {
+        return const UatHttpResult(503, {'error': 'AUTH_UNAVAILABLE'});
+      }
+      if (path == '/v1/tournament/claims/daily') {
+        return const UatHttpResult(200, {
+          'seriesId': '22222222-2222-4222-8222-222222222222',
+          'status': 'ACTIVE',
+          'original': false,
+        });
+      }
+      if (path.endsWith('/reclaim-writer')) {
+        return const UatHttpResult(200, {
+          'seriesId': '22222222-2222-4222-8222-222222222222',
+          'writerGeneration': 2,
+          'boardRevision': 3,
+        });
+      }
+      if (path.endsWith('/board')) {
+        boardReads++;
+        // Omit writerSessionMatches — must not unlock on mere absence.
+        return const UatHttpResult(200, {
+          'ordinal': 2,
+          'ordinalLabel': 'E2',
+          'seriesScore': 1200,
+          'score': 600,
+          'awaitAdvance': true,
+          'boardRevision': 3,
+          'writerGeneration': 2,
+        });
+      }
+      return const UatHttpResult(404, {'error': 'NOT_FOUND'});
+    });
+    final controller = TournamentController(
+      config: const UatConfig(
+        baseUrl: 'http://127.0.0.1',
+        bearer: 'Bearer test',
+        playerLabel: 'Player A',
+      ),
+      api: api,
+      deviceRecovery: const SameDeviceRecovery(isSupportedDevice: _yes),
+      stateDirectory: dir,
+      identity: identity,
+      haptics: const SilentTournamentHaptics(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    await controller.resume();
+    expect(boardReads, greaterThanOrEqualTo(2));
+    expect(controller.rankedWriterLocked, isTrue);
+    expect(controller.tournamentNoticeCode, 'WRITER_NOT_AUTHORIZED');
+    expect(controller.debugSameDeviceRegistered, isFalse);
+  });
+
   test('concurrent active writer reclaim denial preserves board progress', () async {
     final dir = Directory.systemTemp.createTempSync('pzd55-reclaim-active-');
     addTearDown(() => dir.deleteSync(recursive: true));

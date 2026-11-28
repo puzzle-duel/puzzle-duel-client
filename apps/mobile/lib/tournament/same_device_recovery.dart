@@ -29,8 +29,25 @@ final class SameDeviceRecovery {
     required String playerId,
     required String sessionId,
     required String origin,
+  }) async =>
+      (await registerDetailed(
+        api: api,
+        playerId: playerId,
+        sessionId: sessionId,
+        origin: origin,
+      )).succeeded;
+
+  /// Propagates the actual server/platform failure reason — never fabricates
+  /// NOT_FOUND when registration was skipped or signed locally.
+  Future<RecoveryAttempt> registerDetailed({
+    required UatApi api,
+    required String playerId,
+    required String sessionId,
+    required String origin,
   }) async {
-    if (!_isSupported || playerId.isEmpty || sessionId.isEmpty) return false;
+    if (!_isSupported || playerId.isEmpty || sessionId.isEmpty) {
+      return const RecoveryAttempt(false, 'RECOVERY_NOT_ELIGIBLE');
+    }
     try {
       final proof = await _signer.invokeMapMethod<String, String>(
         'registerProof',
@@ -40,20 +57,27 @@ final class SameDeviceRecovery {
           'origin': origin,
         },
       );
-      if (proof == null) return false;
+      if (proof == null) {
+        return const RecoveryAttempt(false, 'RECOVERY_PROOF_INVALID');
+      }
       final spki = proof['spkiBase64Url'];
       final signature = proof['signatureBase64Url'];
-      if (spki == null || signature == null) return false;
+      if (spki == null || signature == null) {
+        return const RecoveryAttempt(false, 'RECOVERY_PROOF_INVALID');
+      }
       final response = await api.post('/v1/tournament/devices/register', {
         'spkiBase64Url': spki,
         'signatureBase64Url': signature,
       });
-      return response.status == 200 &&
-          response.map['deviceCredentialId'] is String;
+      if (response.status == 200 &&
+          response.map['deviceCredentialId'] is String) {
+        return const RecoveryAttempt(true, null);
+      }
+      return RecoveryAttempt(false, response.error);
     } on PlatformException {
-      return false;
+      return const RecoveryAttempt(false, 'RECOVERY_PROOF_INVALID');
     } on MissingPluginException {
-      return false;
+      return const RecoveryAttempt(false, 'RECOVERY_NOT_ELIGIBLE');
     }
   }
 

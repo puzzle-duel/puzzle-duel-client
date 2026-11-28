@@ -281,6 +281,8 @@ final class TournamentController extends ChangeNotifier {
   String? _verifiedSessionId;
   bool _openedFreshSession = false;
   bool _sameDeviceRegistered = false;
+  /// Last device-registration denial code (never fabricated).
+  String? _deviceRegistrationDenial;
   int? _sessionExpiresAtMs;
   bool _renewingWriter = false;
   Timer? _sessionRenewalTimer;
@@ -917,7 +919,7 @@ final class TournamentController extends ChangeNotifier {
         if (!_accepted(verified, const {200}, degradedOnFailure: true)) {
           return;
         }
-        if (verified.map['writerSessionMatches'] == false) {
+        if (verified.map['writerSessionMatches'] != true) {
           recoveryDenial = 'WRITER_NOT_AUTHORIZED';
           _diagRecovery(
             operation: 'writer_recovery_denied',
@@ -1341,13 +1343,42 @@ final class TournamentController extends ChangeNotifier {
   Future<void> revokeTournamentGameplaySession({
     required String reason,
   }) async {
+    final accountEpoch = accountStateEpoch;
+    final tournamentEpoch = _tournamentEpoch;
     final secret = api.sessionSecret;
+    String? revokeError;
+    var revokeAttempted = false;
     if (secret != null && secret.isNotEmpty) {
+      revokeAttempted = true;
       try {
-        await api.delete('/v1/tournament/session');
+        final deleted = await api.delete('/v1/tournament/session');
+        if (deleted.status == 204) {
+          revokeError = null;
+        } else if (deleted.status == 401) {
+          revokeError = 'UNAUTHENTICATED';
+        } else {
+          revokeError =
+              UatApi.diagnosticErrorCode(deleted.error) ?? 'REQUEST_FAILED';
+        }
       } catch (_) {
-        // Local clear still proceeds; reclaim handles expired writers.
+        revokeError = 'OFFLINE';
       }
+    }
+    if (accountEpoch != accountStateEpoch ||
+        tournamentEpoch != _tournamentEpoch) {
+      _diagRecovery(
+        operation: 'tournament_session_revoke_stale',
+        errorCode: 'ACCOUNT_TRANSITION',
+      );
+      return;
+    }
+    if (revokeAttempted) {
+      _diagRecovery(
+        operation: revokeError == null
+            ? 'tournament_session_revoked'
+            : 'tournament_session_revoke_failed',
+        errorCode: revokeError,
+      );
     }
     await invalidateTournamentGameplaySession(reason: reason);
   }
@@ -1416,7 +1447,7 @@ final class TournamentController extends ChangeNotifier {
     } else if (!_sameDeviceRegistered) {
       _diagRecovery(
         operation: 'device_registration_skipped',
-        errorCode: 'NOT_FOUND',
+        errorCode: _deviceRegistrationDenial,
       );
     }
 
@@ -2515,6 +2546,7 @@ final class TournamentController extends ChangeNotifier {
 
     _openedFreshSession = false;
     _sameDeviceRegistered = false;
+    _deviceRegistrationDenial = null;
     _verifiedSessionPlayerId = null;
     _verifiedSessionId = null;
     _sessionExpiresAtMs = null;
@@ -2536,19 +2568,22 @@ final class TournamentController extends ChangeNotifier {
         _verifiedSessionPlayerId = current.map['playerId']?.toString();
         _verifiedSessionId = current.map['sessionId']?.toString();
         if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-          final registered = await _deviceRecovery.register(
+          final attempt = await _deviceRecovery.registerDetailed(
             api: api,
             playerId: _verifiedSessionPlayerId!,
             sessionId: _verifiedSessionId!,
             origin: origin,
           );
           if (!stillOwns()) return false;
-          _sameDeviceRegistered = registered;
+          _sameDeviceRegistered = attempt.succeeded;
+          _deviceRegistrationDenial = attempt.succeeded
+              ? null
+              : UatApi.diagnosticErrorCode(attempt.errorCode);
           _diagRecovery(
-            operation: registered
+            operation: attempt.succeeded
                 ? 'device_registration'
                 : 'device_registration_denied',
-            errorCode: registered ? null : 'NOT_FOUND',
+            errorCode: _deviceRegistrationDenial,
           );
         }
         InteractionPerf.mark('tournament.session.restore.hit');
@@ -2629,19 +2664,22 @@ final class TournamentController extends ChangeNotifier {
     _verifiedSessionId = opened.map['sessionId']?.toString();
     _openedFreshSession = true;
     if (_verifiedSessionPlayerId != null && _verifiedSessionId != null) {
-      final registered = await _deviceRecovery.register(
+      final attempt = await _deviceRecovery.registerDetailed(
         api: api,
         playerId: _verifiedSessionPlayerId!,
         sessionId: _verifiedSessionId!,
         origin: origin,
       );
       if (!stillOwns()) return false;
-      _sameDeviceRegistered = registered;
+      _sameDeviceRegistered = attempt.succeeded;
+      _deviceRegistrationDenial = attempt.succeeded
+          ? null
+          : UatApi.diagnosticErrorCode(attempt.errorCode);
       _diagRecovery(
-        operation: registered
+        operation: attempt.succeeded
             ? 'device_registration'
             : 'device_registration_denied',
-        errorCode: registered ? null : 'NOT_FOUND',
+        errorCode: _deviceRegistrationDenial,
       );
     }
     await _bindPlayerId(opened.map['playerId']?.toString());
